@@ -1,91 +1,142 @@
 <?php
+/**
+ * NetFix ISP SaaS - Dashboard Controller
+ */
+
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
+require_once __DIR__ . '/../lib/AuthMiddleware.php';
 
 class DashboardController {
-    public static function stats(string $tenantId): void {
+    public static function stats(): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $now = date('Y-m-d H:i:s');
-        $threeDays = date('Y-m-d H:i:s', strtotime('+3 days'));
-        $sevenDays = date('Y-m-d H:i:s', strtotime('+7 days'));
-
-        // 1. Subscriber Counts
+        // 1. Customer metrics
         $stmt = $db->prepare("SELECT 
-            COUNT(*) as total,
-            SUM(CASE WHEN status = 'ACTIVE' THEN 1 ELSE 0 END) as active,
-            SUM(CASE WHEN status = 'EXPIRED' THEN 1 ELSE 0 END) as expired,
-            SUM(CASE WHEN status = 'SUSPENDED' THEN 1 ELSE 0 END) as suspended,
-            SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) as pending,
-            SUM(CASE WHEN status = 'ACTIVE' AND expiry_date BETWEEN :now1 AND :three_days THEN 1 ELSE 0 END) as expiring_3_days,
-            SUM(CASE WHEN status = 'ACTIVE' AND expiry_date BETWEEN :now2 AND :seven_days THEN 1 ELSE 0 END) as expiring_7_days
-            FROM subscribers WHERE tenant_id = :tenant_id");
-        
-        $stmt->execute([
-            'tenant_id' => $tenantId,
-            'now1' => $now,
-            'three_days' => $threeDays,
-            'now2' => $now,
-            'seven_days' => $sevenDays,
+            COUNT(*) as total_customers,
+            SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_customers,
+            SUM(CASE WHEN DATE(created_at) = CURDATE() THEN 1 ELSE 0 END) as today_join,
+            SUM(CASE WHEN customer_type = 'individual' THEN 1 ELSE 0 END) as home_customers,
+            SUM(CASE WHEN created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) AND created_at < DATE_FORMAT(NOW(), '%Y-%m-01') THEN 1 ELSE 0 END) as last_month_join,
+            SUM(CASE WHEN created_at >= DATE_FORMAT(NOW(), '%Y-%m-01') THEN 1 ELSE 0 END) as this_month_join,
+            SUM(CASE WHEN billing_status = 'Expired' OR status = 'terminated' THEN 1 ELSE 0 END) as expired_customers,
+            SUM(CASE WHEN status = 'suspended' THEN 1 ELSE 0 END) as suspended_customers,
+            SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as left_customers
+            FROM customers WHERE tenant_id = :tid");
+        $stmt->execute(['tid' => $tenantId]);
+        $c = $stmt->fetch() ?: [];
+
+        // 2. Collection metrics
+        $stmt = $db->prepare("SELECT 
+            SUM(CASE WHEN DATE(created_at) = CURDATE() THEN amount ELSE 0 END) as today_collection,
+            SUM(CASE WHEN created_at >= DATE_FORMAT(NOW(), '%Y-%m-01') THEN amount ELSE 0 END) as this_month_collection,
+            SUM(CASE WHEN created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) AND created_at < DATE_FORMAT(NOW(), '%Y-%m-01') THEN amount ELSE 0 END) as last_month_collection,
+            SUM(CASE WHEN DATE(created_at) = CURDATE() AND method != 'cash' THEN amount ELSE 0 END) as online_today,
+            SUM(CASE WHEN created_at >= DATE_FORMAT(NOW(), '%Y-%m-01') AND method != 'cash' THEN amount ELSE 0 END) as online_this_month,
+            SUM(CASE WHEN created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) AND created_at < DATE_FORMAT(NOW(), '%Y-%m-01') AND method != 'cash' THEN amount ELSE 0 END) as online_last_month
+            FROM transactions WHERE tenant_id = :tid");
+        $stmt->execute(['tid' => $tenantId]);
+        $t = $stmt->fetch() ?: [];
+
+        Response::json([
+            'totalCustomers' => (int)($c['total_customers'] ?? 0),
+            'totalActive' => (int)($c['active_customers'] ?? 0),
+            'todayJoin' => (int)($c['today_join'] ?? 0),
+            'homeCustomers' => (int)($c['home_customers'] ?? 0),
+            'lastMonthJoin' => (int)($c['last_month_join'] ?? 0),
+            'thisMonthJoin' => (int)($c['this_month_join'] ?? 0),
+            'expiredCustomers' => (int)($c['expired_customers'] ?? 0),
+            'suspendedCustomers' => (int)($c['suspended_customers'] ?? 0),
+            'leftCustomers' => (int)($c['left_customers'] ?? 0),
+            'todayCollection' => (float)($t['today_collection'] ?? 0),
+            'thisMonthCollection' => (float)($t['this_month_collection'] ?? 0),
+            'lastMonthCollection' => (float)($t['last_month_collection'] ?? 0),
+            'hotspotTotal' => 0,
+            'hotspotActive' => 0,
+            'hotspotExpired' => 0,
+            'onlinePaymentToday' => (float)($t['online_today'] ?? 0),
+            'onlinePaymentThisMonth' => (float)($t['online_this_month'] ?? 0),
+            'onlinePaymentLastMonth' => (float)($t['online_last_month'] ?? 0),
         ]);
-        $subStats = $stmt->fetch();
+    }
 
-        // 2. Financial Metrics
+    public static function charts(): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        // Online sessions count
         $stmt = $db->prepare("SELECT 
-            COALESCE(SUM(payable_amount), 0) as this_month_revenue,
-            COALESCE(SUM(paid_amount), 0) as this_month_collection,
-            COALESCE(SUM(due_amount), 0) as total_due
-            FROM invoices WHERE tenant_id = :tenant_id");
-        $stmt->execute(['tenant_id' => $tenantId]);
-        $finStats = $stmt->fetch();
+            COUNT(*) as total_accounts,
+            SUM(CASE WHEN is_online = 1 THEN 1 ELSE 0 END) as online_accounts
+            FROM customer_network_accounts WHERE tenant_id = :tid");
+        $stmt->execute(['tid' => $tenantId]);
+        $net = $stmt->fetch() ?: [];
 
-        // Today's Payments
-        $todayStart = date('Y-m-d 00:00:00');
-        $todayEnd = date('Y-m-d 23:59:59');
-        $stmt = $db->prepare("SELECT COALESCE(SUM(amount), 0) as today_collection 
-                               FROM payments 
-                               WHERE tenant_id = :tenant_id AND created_at BETWEEN :start AND :end");
-        $stmt->execute(['tenant_id' => $tenantId, 'start' => $todayStart, 'end' => $todayEnd]);
-        $todayFin = $stmt->fetch();
+        // SMS stats
+        $stmt = $db->prepare("SELECT 
+            SUM(CASE WHEN DATE(created_at) = CURDATE() THEN 1 ELSE 0 END) as sms_today,
+            SUM(CASE WHEN created_at >= DATE_FORMAT(NOW(), '%Y-%m-01') THEN 1 ELSE 0 END) as sms_this_month,
+            SUM(CASE WHEN sms_type = 'alert' THEN 1 ELSE 0 END) as sms_alert,
+            SUM(CASE WHEN sms_type = 'recharge' THEN 1 ELSE 0 END) as sms_recharge,
+            SUM(CASE WHEN sms_type = 'new_customer' THEN 1 ELSE 0 END) as sms_new_customer
+            FROM sms_log WHERE tenant_id = :tid");
+        $stmt->execute(['tid' => $tenantId]);
+        $sms = $stmt->fetch() ?: [];
 
-        // 3. Routers
-        $stmt = $db->prepare("SELECT id, name, ip_address, status, cpu_load, uptime, ros_version 
-                               FROM mikrotik_routers WHERE tenant_id = :tenant_id");
-        $stmt->execute(['tenant_id' => $tenantId]);
-        $routers = $stmt->fetchAll();
+        // Tickets
+        $stmt = $db->prepare("SELECT 
+            SUM(CASE WHEN status IN ('open', 'in_progress') THEN 1 ELSE 0 END) as pending_tickets,
+            SUM(CASE WHEN status IN ('resolved', 'closed') THEN 1 ELSE 0 END) as solved_tickets
+            FROM customer_tickets WHERE tenant_id = :tid");
+        $stmt->execute(['tid' => $tenantId]);
+        $tickets = $stmt->fetch() ?: [];
 
-        // 4. Recent Payments
-        $stmt = $db->prepare("SELECT p.*, s.customer_code, s.name as subscriber_name, s.mobile, s.pppoe_username 
-                               FROM payments p 
-                               JOIN subscribers s ON p.subscriber_id = s.id 
-                               WHERE p.tenant_id = :tenant_id 
-                               ORDER BY p.created_at DESC LIMIT 6");
-        $stmt->execute(['tenant_id' => $tenantId]);
-        $recentPayments = $stmt->fetchAll();
+        Response::json([
+            'activeUsers' => (int)($net['total_accounts'] ?? 0),
+            'onlineUsers' => (int)($net['online_accounts'] ?? 0),
+            'smsSentToday' => (int)($sms['sms_today'] ?? 0),
+            'smsSentThisMonth' => (int)($sms['sms_this_month'] ?? 0),
+            'smsAveragePerDay' => round(((int)($sms['sms_this_month'] ?? 0)) / max(1, (int)date('j')), 1),
+            'smsAlert' => (int)($sms['sms_alert'] ?? 0),
+            'smsRecharge' => (int)($sms['sms_recharge'] ?? 0),
+            'smsNewCustomer' => (int)($sms['sms_new_customer'] ?? 0),
+            'smsOther' => 0,
+            'ticketPending' => (int)($tickets['pending_tickets'] ?? 0),
+            'ticketSolved' => (int)($tickets['solved_tickets'] ?? 0),
+        ]);
+    }
+
+    public static function recentActivity(): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 15;
+        $db = Database::getConnection();
+
+        $stmt = $db->prepare("SELECT 
+            t.transaction_id as logId,
+            COALESCE(t.customer_id, 0) as customerId,
+            t.transaction_type as actionType,
+            CONCAT(t.transaction_type, ' - ৳', t.amount) as actionTitle,
+            t.description as actionDetails,
+            COALESCE(u.first_name, 'System') as performedByName,
+            t.initiator_role as performedByRole,
+            DATE_FORMAT(t.created_at, '%Y-%m-%dT%H:%i:%sZ') as createdAt
+            FROM transactions t
+            LEFT JOIN users u ON u.user_id = t.initiator_user_id
+            WHERE t.tenant_id = :tid
+            ORDER BY t.created_at DESC
+            LIMIT :lim");
+        $stmt->bindValue(':tid', $tenantId, PDO::PARAM_INT);
+        $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+        $items = $stmt->fetchAll();
 
         Response::json([
             'success' => true,
-            'stats' => [
-                'subscribers' => [
-                    'total' => (int)($subStats['total'] ?? 0),
-                    'active' => (int)($subStats['active'] ?? 0),
-                    'expired' => (int)($subStats['expired'] ?? 0),
-                    'suspended' => (int)($subStats['suspended'] ?? 0),
-                    'pending' => (int)($subStats['pending'] ?? 0),
-                    'online' => max(0, (int)($subStats['active'] ?? 0) - 1),
-                    'offline' => min(1, (int)($subStats['active'] ?? 0)),
-                    'expiringIn3Days' => (int)($subStats['expiring_3_days'] ?? 0),
-                    'expiringIn7Days' => (int)($subStats['expiring_7_days'] ?? 0),
-                ],
-                'financials' => [
-                    'thisMonthRevenue' => (float)($finStats['this_month_revenue'] ?? 0),
-                    'thisMonthCollection' => (float)($finStats['this_month_collection'] ?? 0),
-                    'todayCollection' => (float)($todayFin['today_collection'] ?? 0),
-                    'totalDue' => (float)($finStats['total_due'] ?? 0),
-                ],
-                'routers' => $routers,
-                'recentPayments' => $recentPayments,
-            ]
+            'data' => $items ?: [],
         ]);
     }
 }

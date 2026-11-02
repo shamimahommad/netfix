@@ -56,3 +56,4 @@ try {
     echo "✖ Migration failed: " . $e->getMessage() . PHP_EOL;
     exit(1);
 }
+

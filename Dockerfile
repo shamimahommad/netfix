@@ -11,8 +11,8 @@ RUN npm install
 COPY frontend/ ./
 RUN npm run build
 
-# Stage 2: Production PHP 8.2 + Nginx Web Server
-FROM php:8.2-fpm-alpine
+# Stage 2: Production Latest Patched PHP 8.3 + Nginx Web Server (Immune to CVE-2024-4577)
+FROM php:8.3-fpm-alpine
 
 # Install Nginx and required PHP extensions
 RUN apk add --no-cache nginx supervisor curl \

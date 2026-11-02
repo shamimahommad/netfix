@@ -51,3 +51,4 @@ class CoverageController {
         ], 201);
     }
 }
+

@@ -4,7 +4,13 @@
  */
 
 function handleCors(): void {
-    // Allow any origin during development, or specify your Next.js domain
+    // Security Hardening Headers
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: SAMEORIGIN');
+    header('X-XSS-Protection: 1; mode=block');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+
+    // Allow any origin during development, or specify your domain
     if (isset($_SERVER['HTTP_ORIGIN'])) {
         header("Access-Control-Allow-Origin: {$_SERVER['HTTP_ORIGIN']}");
         header('Access-Control-Allow-Credentials: true');

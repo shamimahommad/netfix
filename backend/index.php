@@ -1,7 +1,8 @@
 <?php
 /**
- * Core PHP Unified REST API Router
- * Single Entry Point for ISP Billing SaaS Backend
+ * NetFix ISP Billing & Bandwidth Management SaaS - Core PHP API Engine
+ * Unified Single Entry Point with Clean URL Routing
+ * Full REST API Implementation matching NestJS and React contracts
  */
 
 require_once __DIR__ . '/config/cors.php';
@@ -10,200 +11,403 @@ handleCors();
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/lib/Response.php';
 require_once __DIR__ . '/lib/JWT.php';
+require_once __DIR__ . '/lib/AuthMiddleware.php';
 
 // Controllers
 require_once __DIR__ . '/controllers/AuthController.php';
 require_once __DIR__ . '/controllers/DashboardController.php';
-require_once __DIR__ . '/controllers/SubscriberController.php';
-require_once __DIR__ . '/controllers/RouterController.php';
-require_once __DIR__ . '/controllers/PackageController.php';
+require_once __DIR__ . '/controllers/CustomersController.php';
 require_once __DIR__ . '/controllers/BillingController.php';
-require_once __DIR__ . '/controllers/ResellerController.php';
-require_once __DIR__ . '/controllers/HotspotController.php';
-require_once __DIR__ . '/controllers/TicketController.php';
-require_once __DIR__ . '/controllers/PaymentController.php';
-require_once __DIR__ . '/controllers/CoverageController.php';
-require_once __DIR__ . '/controllers/TenantController.php';
+require_once __DIR__ . '/controllers/PaymentsController.php';
+require_once __DIR__ . '/controllers/ResellersController.php';
+require_once __DIR__ . '/controllers/AccessProfilesController.php';
+require_once __DIR__ . '/controllers/NetworkController.php';
+require_once __DIR__ . '/controllers/ServiceAreaController.php';
+require_once __DIR__ . '/controllers/SmsController.php';
+require_once __DIR__ . '/controllers/TenantsController.php';
+require_once __DIR__ . '/controllers/CustomerPortalController.php';
+require_once __DIR__ . '/controllers/UsersController.php';
+require_once __DIR__ . '/controllers/SearchController.php';
+require_once __DIR__ . '/controllers/TaskLogsController.php';
 
-// Parse Path and Method
-$uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$method = $_SERVER['REQUEST_METHOD'];
+// Parse Request Path and Method
+$rawUri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
-// Strip base prefix if hosted in subfolder or cPanel
-$uri = preg_replace('#^/backend#', '', $uri);
+// Normalize URI (strip /backend, /api/v1, /api prefixes)
+$uri = preg_replace('#^/backend#', '', $rawUri);
+$uri = preg_replace('#^/api/v1#', '', $uri);
+$uri = preg_replace('#^/api#', '', $uri);
 $uri = rtrim($uri, '/');
-
-// Intelligent Multi-Tenant Resolver (Header -> Token -> Domain -> Default)
-function getTenantId(): string {
-    // 1. Check Bearer Token
-    $headers = getallheaders();
-    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
-    if (!empty($authHeader)) {
-        $token = str_replace('Bearer ', '', $authHeader);
-        $payload = JWT::decode($token);
-        if ($payload && !empty($payload['tenant_id'])) {
-            return $payload['tenant_id'];
-        }
-    }
-
-    // 2. Check X-Tenant-Id Header
-    if (!empty($headers['X-Tenant-Id']) || !empty($headers['x-tenant-id'])) {
-        return $headers['X-Tenant-Id'] ?? $headers['x-tenant-id'];
-    }
-
-    // 3. Check Domain / Subdomain (White-label Custom Domain)
-    $host = $_SERVER['HTTP_HOST'] ?? '';
-    if (!empty($host)) {
-        $domain = explode(':', $host)[0];
-        $subdomain = explode('.', $domain)[0];
-
-        try {
-            $db = Database::getConnection();
-            $stmt = $db->prepare("SELECT id FROM tenants WHERE custom_domain = :domain LIMIT 1");
-            $stmt->execute(['domain' => $domain]);
-            $row = $stmt->fetch();
-            if ($row) return $row['id'];
-
-            if ($subdomain !== 'localhost' && $subdomain !== '127' && $subdomain !== 'www') {
-                $stmt = $db->prepare("SELECT id FROM tenants WHERE subdomain = :subdomain LIMIT 1");
-                $stmt->execute(['subdomain' => $subdomain]);
-                $row = $stmt->fetch();
-                if ($row) return $row['id'];
-            }
-        } catch (Throwable $e) {}
-    }
-
-    // Default to seeded demo tenant
-    return 'tenant-cloudnet-001';
+if ($uri === '') {
+    $uri = '/';
 }
 
-$tenantId = getTenantId();
-
-// -------------------------------------------------------------
-// Route Dispatcher
-// -------------------------------------------------------------
-
-// 1. Healthcheck
-if ($uri === '/health' || $uri === '/api/health') {
+// ---------------------------------------------------------------------
+// HEALTH CHECK
+// ---------------------------------------------------------------------
+if ($uri === '/' || $uri === '/health') {
     Response::json([
         'status' => 'healthy',
-        'system' => 'ISP Billing SaaS Core PHP Engine',
+        'service' => 'NetFix ISP SaaS Pure PHP REST API Engine',
         'version' => '1.0.0',
         'php_version' => PHP_VERSION,
+        'database' => 'Connected to MySQL netfix_db',
         'timestamp' => date('c'),
     ]);
 }
 
-// 2. White-Label Tenant Info
-if ($method === 'GET' && ($uri === '/api/tenant/info' || $uri === '/tenant/info')) {
-    TenantController::info();
-}
-if ($method === 'POST' && ($uri === '/api/tenant/settings' || $uri === '/tenant/settings')) {
-    TenantController::updateSettings($tenantId);
-}
-if ($method === 'GET' && ($uri === '/api/tenants' || $uri === '/tenants')) {
-    TenantController::index();
-}
-
-// 3. Auth Routes
-if ($method === 'POST' && ($uri === '/api/auth/login' || $uri === '/auth/login')) {
+// ---------------------------------------------------------------------
+// AUTHENTICATION ROUTES
+// ---------------------------------------------------------------------
+if ($method === 'POST' && $uri === '/auth/login') {
     AuthController::login();
 }
-if ($method === 'GET' && ($uri === '/api/auth/me' || $uri === '/auth/me')) {
+if ($method === 'POST' && $uri === '/auth/customer-login') {
+    AuthController::customerLogin();
+}
+if ($method === 'GET' && $uri === '/auth/me') {
     AuthController::me();
 }
-
-// 4. Dashboard Stats
-if ($method === 'GET' && ($uri === '/api/dashboard/stats' || $uri === '/dashboard/stats')) {
-    DashboardController::stats($tenantId);
+if ($method === 'POST' && $uri === '/auth/change-password') {
+    AuthController::changePassword();
+}
+if ($method === 'GET' && preg_match('#^/auth/impersonate/can/([^/]+)$#', $uri, $m)) {
+    AuthController::canImpersonate($m[1]);
+}
+if ($method === 'GET' && $uri === '/auth/impersonate/can-batch') {
+    AuthController::canImpersonateBatch();
+}
+if ($method === 'POST' && preg_match('#^/auth/impersonate/exit$#', $uri)) {
+    AuthController::exitImpersonate();
+}
+if ($method === 'POST' && preg_match('#^/auth/impersonate/([^/]+)$#', $uri, $m)) {
+    AuthController::impersonate($m[1]);
 }
 
-// 5. Subscriber Routes
-if ($method === 'GET' && ($uri === '/api/subscribers' || $uri === '/subscribers')) {
-    SubscriberController::index($tenantId);
+// ---------------------------------------------------------------------
+// DASHBOARD ROUTES
+// ---------------------------------------------------------------------
+if ($method === 'GET' && $uri === '/dashboard/stats') {
+    DashboardController::stats();
 }
-if ($method === 'POST' && ($uri === '/api/subscribers' || $uri === '/subscribers')) {
-    SubscriberController::create($tenantId);
+if ($method === 'GET' && $uri === '/dashboard/charts') {
+    DashboardController::charts();
 }
-if ($method === 'POST' && preg_match('#^/api/subscribers/([^/]+)/recharge$#', $uri, $matches)) {
-    SubscriberController::recharge($tenantId, $matches[1]);
-}
-if ($method === 'POST' && preg_match('#^/api/subscribers/([^/]+)/kick$#', $uri, $matches)) {
-    SubscriberController::kick($tenantId, $matches[1]);
-}
-if ($method === 'PATCH' && preg_match('#^/api/subscribers/([^/]+)/toggle-status$#', $uri, $matches)) {
-    SubscriberController::toggleStatus($tenantId, $matches[1]);
+if ($method === 'GET' && $uri === '/dashboard/recent-activity') {
+    DashboardController::recentActivity();
 }
 
-// 6. Router Routes
-if ($method === 'GET' && ($uri === '/api/routers' || $uri === '/routers')) {
-    RouterController::index($tenantId);
+// ---------------------------------------------------------------------
+// CUSTOMERS ROUTES
+// ---------------------------------------------------------------------
+if ($method === 'GET' && $uri === '/customers') {
+    CustomersController::index();
 }
-if ($method === 'POST' && preg_match('#^/api/routers/([^/]+)/ping$#', $uri, $matches)) {
-    RouterController::ping($tenantId, $matches[1]);
+if ($method === 'GET' && $uri === '/customers/next-code') {
+    CustomersController::nextCode();
 }
-if ($method === 'GET' && preg_match('#^/api/routers/([^/]+)/active-sessions$#', $uri, $matches)) {
-    RouterController::activeSessions($tenantId, $matches[1]);
+if ($method === 'GET' && $uri === '/customers/reports/reseller-wise') {
+    CustomersController::reportsResellerWise();
 }
-
-// 7. Packages
-if ($method === 'GET' && ($uri === '/api/packages' || $uri === '/packages')) {
-    PackageController::index($tenantId);
+if ($method === 'GET' && $uri === '/customers/reports/area-wise') {
+    CustomersController::reportsAreaWise();
 }
-if ($method === 'POST' && ($uri === '/api/packages' || $uri === '/packages')) {
-    PackageController::create($tenantId);
+if ($method === 'GET' && $uri === '/customers/reports/server-wise') {
+    CustomersController::reportsServerWise();
 }
-
-// 8. Billing & Invoices
-if ($method === 'GET' && ($uri === '/api/billing/invoices' || $uri === '/billing/invoices')) {
-    BillingController::invoices($tenantId);
+if ($method === 'POST' && $uri === '/customers/onboard') {
+    CustomersController::onboard();
 }
-if ($method === 'POST' && preg_match('#^/api/billing/invoices/([^/]+)/collect$#', $uri, $matches)) {
-    BillingController::collectPayment($tenantId, $matches[1]);
+if ($method === 'POST' && $uri === '/customers') {
+    CustomersController::create();
 }
-if ($method === 'POST' && ($uri === '/api/billing/generate-monthly-bills' || $uri === '/billing/generate-monthly-bills')) {
-    BillingController::generateMonthlyBills($tenantId);
+if ($method === 'GET' && preg_match('#^/customers/([^/]+)/services$#', $uri, $m)) {
+    CustomersController::services($m[1]);
 }
-
-// 9. Resellers
-if ($method === 'GET' && ($uri === '/api/resellers' || $uri === '/resellers')) {
-    ResellerController::index($tenantId);
+if ($method === 'GET' && preg_match('#^/customers/([^/]+)/network-accounts$#', $uri, $m)) {
+    CustomersController::networkAccounts($m[1]);
 }
-if ($method === 'POST' && preg_match('#^/api/resellers/([^/]+)/topup$#', $uri, $matches)) {
-    ResellerController::topup($tenantId, $matches[1]);
+if ($method === 'GET' && preg_match('#^/customers/([^/]+)/billing-summary$#', $uri, $m)) {
+    CustomersController::billingSummary($m[1]);
 }
-
-// 10. Hotspot
-if ($method === 'GET' && ($uri === '/api/hotspot' || $uri === '/hotspot')) {
-    HotspotController::index($tenantId);
+if ($method === 'GET' && preg_match('#^/customers/([^/]+)$#', $uri, $m)) {
+    CustomersController::show($m[1]);
 }
-if ($method === 'POST' && ($uri === '/api/hotspot/generate-batch' || $uri === '/hotspot/generate-batch')) {
-    HotspotController::generateBatch($tenantId);
+if ($method === 'PATCH' && preg_match('#^/customers/([^/]+)$#', $uri, $m)) {
+    CustomersController::update($m[1]);
+}
+if ($method === 'DELETE' && preg_match('#^/customers/([^/]+)$#', $uri, $m)) {
+    CustomersController::delete($m[1]);
 }
 
-// 11. Support Tickets
-if ($method === 'GET' && ($uri === '/api/tickets' || $uri === '/tickets')) {
-    TicketController::index($tenantId);
+// ---------------------------------------------------------------------
+// BILLING & INVOICES ROUTES
+// ---------------------------------------------------------------------
+if ($method === 'GET' && preg_match('#^/billing/accounts/([^/]+)$#', $uri, $m)) {
+    BillingController::accounts($m[1]);
 }
-if ($method === 'POST' && ($uri === '/api/tickets' || $uri === '/tickets')) {
-    TicketController::create($tenantId);
+if ($method === 'GET' && $uri === '/billing/accounts') {
+    BillingController::accounts('all');
 }
-if ($method === 'PATCH' && preg_match('#^/api/tickets/([^/]+)/status$#', $uri, $matches)) {
-    TicketController::updateStatus($tenantId, $matches[1]);
+if ($method === 'POST' && $uri === '/billing/renew') {
+    BillingController::renew();
 }
-
-// 12. Optical FTTH & Coverage Boxes
-if ($method === 'GET' && ($uri === '/api/coverage/boxes' || $uri === '/coverage/boxes')) {
-    CoverageController::index($tenantId);
+if ($method === 'POST' && $uri === '/billing/change-package') {
+    BillingController::changePackage();
 }
-if ($method === 'POST' && ($uri === '/api/coverage/boxes' || $uri === '/coverage/boxes')) {
-    CoverageController::create($tenantId);
+if ($method === 'GET' && $uri === '/billing/invoices') {
+    BillingController::invoices();
 }
-
-// 13. Payment Gateways (bKash Instant Reconnect Webhook)
-if ($method === 'POST' && ($uri === '/api/payments/bkash/callback' || $uri === '/payments/bkash/callback')) {
-    PaymentController::bkashCallback();
+if ($method === 'GET' && preg_match('#^/billing/invoices/([^/]+)$#', $uri, $m)) {
+    BillingController::invoiceDetail($m[1]);
 }
 
-// 404 Fallback
-Response::error("Endpoint not found: {$method} {$uri}", 404);
+// ---------------------------------------------------------------------
+// PAYMENTS & ONLINE TRANSACTIONS
+// ---------------------------------------------------------------------
+if ($method === 'POST' && $uri === '/payments') {
+    PaymentsController::create();
+}
+if ($method === 'GET' && $uri === '/payments/online-transactions') {
+    PaymentsController::onlineTransactions();
+}
+if ($method === 'GET' && $uri === '/payments/merchant-payments') {
+    PaymentsController::merchantPayments();
+}
+if ($method === 'GET' && $uri === '/payments/recharge-history') {
+    PaymentsController::rechargeHistory();
+}
+if ($method === 'POST' && $uri === '/payments/bkash/callback') {
+    PaymentsController::bkashCallback();
+}
+
+// ---------------------------------------------------------------------
+// RESELLERS & POP HIERARCHY
+// ---------------------------------------------------------------------
+if ($method === 'GET' && $uri === '/resellers') {
+    ResellersController::index();
+}
+if ($method === 'GET' && $uri === '/resellers/pops') {
+    ResellersController::pops();
+}
+if ($method === 'GET' && $uri === '/resellers/my-packages') {
+    ResellersController::myPackages();
+}
+if ($method === 'POST' && $uri === '/resellers') {
+    ResellersController::create();
+}
+if ($method === 'POST' && $uri === '/resellers/add-balance') {
+    ResellersController::addBalance();
+}
+if ($method === 'POST' && $uri === '/resellers/transfer-balance') {
+    ResellersController::transferBalance();
+}
+if ($method === 'GET' && preg_match('#^/resellers/([^/]+)/plan-permissions$#', $uri, $m)) {
+    ResellersController::getPlanPermissions($m[1]);
+}
+if ($method === 'PUT' && preg_match('#^/resellers/([^/]+)/plan-permissions$#', $uri, $m)) {
+    ResellersController::putPlanPermissions($m[1]);
+}
+if ($method === 'GET' && preg_match('#^/resellers/([^/]+)/ledger$#', $uri, $m)) {
+    ResellersController::ledger($m[1]);
+}
+if ($method === 'GET' && preg_match('#^/resellers/([^/]+)/login-log$#', $uri, $m)) {
+    ResellersController::loginLog($m[1]);
+}
+if ($method === 'POST' && preg_match('#^/resellers/([^/]+)/login-as$#', $uri, $m)) {
+    ResellersController::loginAs($m[1]);
+}
+if ($method === 'PATCH' && preg_match('#^/resellers/([^/]+)/status$#', $uri, $m)) {
+    ResellersController::setStatus($m[1]);
+}
+if ($method === 'GET' && preg_match('#^/resellers/([^/]+)$#', $uri, $m)) {
+    ResellersController::show($m[1]);
+}
+if ($method === 'PATCH' && preg_match('#^/resellers/([^/]+)$#', $uri, $m)) {
+    ResellersController::update($m[1]);
+}
+if ($method === 'DELETE' && preg_match('#^/resellers/([^/]+)$#', $uri, $m)) {
+    ResellersController::delete($m[1]);
+}
+
+// ---------------------------------------------------------------------
+// ACCESS PROFILES & BANDWIDTH PACKAGES
+// ---------------------------------------------------------------------
+if ($method === 'GET' && ($uri === '/access-profiles/dropdown' || $uri === '/network/packages/dropdown')) {
+    AccessProfilesController::dropdown();
+}
+if ($method === 'GET' && ($uri === '/access-profiles' || $uri === '/network/packages')) {
+    AccessProfilesController::index();
+}
+if ($method === 'POST' && ($uri === '/access-profiles' || $uri === '/network/packages')) {
+    AccessProfilesController::create();
+}
+if ($method === 'PUT' && preg_match('#^/(access-profiles|network/packages)/([^/]+)$#', $uri, $m)) {
+    AccessProfilesController::update($m[2]);
+}
+if ($method === 'DELETE' && preg_match('#^/(access-profiles|network/packages)/([^/]+)$#', $uri, $m)) {
+    AccessProfilesController::delete($m[2]);
+}
+
+// ---------------------------------------------------------------------
+// NETWORK & MIKROTIK & OLT
+// ---------------------------------------------------------------------
+if ($method === 'GET' && $uri === '/network/devices') {
+    NetworkController::index();
+}
+if ($method === 'GET' && $uri === '/network/devices/dropdown') {
+    NetworkController::dropdown();
+}
+if ($method === 'GET' && $uri === '/network/devices/ping-status') {
+    NetworkController::pingStatus();
+}
+if ($method === 'POST' && $uri === '/network/devices') {
+    NetworkController::create();
+}
+if ($method === 'POST' && $uri === '/network/devices/olt') {
+    NetworkController::createOlt();
+}
+if ($method === 'POST' && preg_match('#^/network/devices/([^/]+)/ping-now$#', $uri, $m)) {
+    NetworkController::pingNow($m[1]);
+}
+if ($method === 'GET' && preg_match('#^/network/devices/([^/]+)/profiles$#', $uri, $m)) {
+    NetworkController::getProfiles($m[1]);
+}
+if ($method === 'PUT' && preg_match('#^/network/devices/([^/]+)$#', $uri, $m)) {
+    NetworkController::update($m[1]);
+}
+if ($method === 'DELETE' && preg_match('#^/network/devices/([^/]+)$#', $uri, $m)) {
+    NetworkController::delete($m[1]);
+}
+if ($method === 'GET' && $uri === '/network/mikrotik/live-traffic') {
+    NetworkController::liveTraffic();
+}
+
+// ---------------------------------------------------------------------
+// SERVICE AREAS & SUB-AREAS
+// ---------------------------------------------------------------------
+if ($method === 'GET' && $uri === '/service-area/areas') {
+    ServiceAreaController::listAreas();
+}
+if ($method === 'POST' && $uri === '/service-area/areas') {
+    ServiceAreaController::createArea();
+}
+if ($method === 'PUT' && preg_match('#^/service-area/areas/([^/]+)$#', $uri, $m)) {
+    ServiceAreaController::updateArea($m[1]);
+}
+if ($method === 'DELETE' && preg_match('#^/service-area/areas/([^/]+)$#', $uri, $m)) {
+    ServiceAreaController::deleteArea($m[1]);
+}
+if ($method === 'GET' && $uri === '/service-area/sub-areas') {
+    ServiceAreaController::listSubAreas();
+}
+if ($method === 'POST' && $uri === '/service-area/sub-areas') {
+    ServiceAreaController::createSubArea();
+}
+if ($method === 'PUT' && preg_match('#^/service-area/sub-areas/([^/]+)$#', $uri, $m)) {
+    ServiceAreaController::updateSubArea($m[1]);
+}
+if ($method === 'DELETE' && preg_match('#^/service-area/sub-areas/([^/]+)$#', $uri, $m)) {
+    ServiceAreaController::deleteSubArea($m[1]);
+}
+
+// ---------------------------------------------------------------------
+// SMS GATEWAY & TEMPLATES
+// ---------------------------------------------------------------------
+if ($method === 'GET' && $uri === '/sms/templates') {
+    SmsController::getTemplates();
+}
+if ($method === 'POST' && $uri === '/sms/templates') {
+    SmsController::saveTemplates();
+}
+if ($method === 'GET' && $uri === '/sms/log') {
+    SmsController::getLog();
+}
+if ($method === 'POST' && $uri === '/sms/send') {
+    SmsController::send();
+}
+if ($method === 'GET' && $uri === '/sms/balance') {
+    SmsController::getBalance();
+}
+
+// ---------------------------------------------------------------------
+// TENANTS & MULTI-TENANCY
+// ---------------------------------------------------------------------
+if ($method === 'GET' && $uri === '/tenants') {
+    TenantsController::index();
+}
+if ($method === 'GET' && $uri === '/tenants/sms-providers') {
+    TenantsController::smsProviders();
+}
+if ($method === 'GET' && $uri === '/tenants/my/settings') {
+    TenantsController::mySettings();
+}
+if ($method === 'POST' && $uri === '/tenants') {
+    TenantsController::create();
+}
+if ($method === 'GET' && preg_match('#^/tenants/([^/]+)/profile$#', $uri, $m)) {
+    TenantsController::profile($m[1]);
+}
+if ($method === 'PATCH' && preg_match('#^/tenants/([^/]+)/limits$#', $uri, $m)) {
+    TenantsController::updateLimits($m[1]);
+}
+if ($method === 'GET' && preg_match('#^/tenants/([^/]+)$#', $uri, $m)) {
+    TenantsController::show($m[1]);
+}
+if ($method === 'PUT' && preg_match('#^/tenants/([^/]+)$#', $uri, $m)) {
+    TenantsController::update($m[1]);
+}
+if ($method === 'DELETE' && preg_match('#^/tenants/([^/]+)$#', $uri, $m)) {
+    TenantsController::delete($m[1]);
+}
+
+// ---------------------------------------------------------------------
+// CUSTOMER PORTAL
+// ---------------------------------------------------------------------
+if ($method === 'GET' && $uri === '/customer/dashboard') {
+    CustomerPortalController::dashboard();
+}
+if ($method === 'GET' && $uri === '/customer/invoices') {
+    CustomerPortalController::invoices();
+}
+if ($method === 'GET' && $uri === '/customer/payment-history') {
+    CustomerPortalController::paymentHistory();
+}
+if ($method === 'GET' && $uri === '/customer/packages') {
+    CustomerPortalController::packages();
+}
+if ($method === 'GET' && $uri === '/customer/payment-methods') {
+    CustomerPortalController::paymentMethods();
+}
+if ($method === 'GET' && $uri === '/customer/tickets') {
+    CustomerPortalController::tickets();
+}
+if ($method === 'POST' && $uri === '/customer/tickets') {
+    CustomerPortalController::createTicket();
+}
+
+// ---------------------------------------------------------------------
+// USERS & SEARCH & TASK LOGS
+// ---------------------------------------------------------------------
+if ($method === 'GET' && $uri === '/users/received-by-options') {
+    UsersController::receivedByOptions();
+}
+if ($method === 'GET' && $uri === '/search/customers') {
+    SearchController::customers();
+}
+if ($method === 'GET' && preg_match('#^/task-logs/customers/([^/]+)$#', $uri, $m)) {
+    TaskLogsController::getByCustomerId($m[1]);
+}
+if ($method === 'GET' && $uri === '/task-logs/check') {
+    TaskLogsController::check();
+}
+
+// ---------------------------------------------------------------------
+// 404 NOT FOUND FALLBACK
+// ---------------------------------------------------------------------
+Response::json([
+    'success' => false,
+    'statusCode' => 404,
+    'message' => "Endpoint not found: {$method} {$rawUri} (normalized: {$uri})",
+], 404);

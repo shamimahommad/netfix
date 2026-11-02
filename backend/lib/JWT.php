@@ -5,9 +5,11 @@
  */
 
 class JWT {
-    private static string $secret = 'isp_saas_enterprise_pure_php_jwt_secret_2026';
+    private static function getSecret(): string {
+        return getenv('JWT_SECRET') ?: 'your_jwt_secret_key_change_this_in_production';
+    }
 
-    public static function encode(array $payload, int $expirySeconds = 604800): string {
+    public static function encode(array $payload, int $expirySeconds = 86400): string {
         $header = ['typ' => 'JWT', 'alg' => 'HS256'];
         $payload['iat'] = time();
         $payload['exp'] = time() + $expirySeconds;
@@ -15,7 +17,7 @@ class JWT {
         $base64UrlHeader = self::base64UrlEncode(json_encode($header));
         $base64UrlPayload = self::base64UrlEncode(json_encode($payload));
 
-        $signature = hash_hmac('sha256', $base64UrlHeader . "." . $base64UrlPayload, self::$secret, true);
+        $signature = hash_hmac('sha256', $base64UrlHeader . "." . $base64UrlPayload, self::getSecret(), true);
         $base64UrlSignature = self::base64UrlEncode($signature);
 
         return $base64UrlHeader . "." . $base64UrlPayload . "." . $base64UrlSignature;
@@ -29,7 +31,7 @@ class JWT {
 
         [$base64UrlHeader, $base64UrlPayload, $base64UrlSignature] = $parts;
 
-        $signature = hash_hmac('sha256', $base64UrlHeader . "." . $base64UrlPayload, self::$secret, true);
+        $signature = hash_hmac('sha256', $base64UrlHeader . "." . $base64UrlPayload, self::getSecret(), true);
         $expectedSignature = self::base64UrlEncode($signature);
 
         if (!hash_equals($expectedSignature, $base64UrlSignature)) {
