@@ -271,6 +271,12 @@ if ($method === 'POST' && $uri === '/network/devices') {
 if ($method === 'POST' && $uri === '/network/devices/olt') {
     NetworkController::createOlt();
 }
+if ($method === 'GET' && preg_match('#^/network/devices/([^/]+)/olt-status$#', $uri, $m)) {
+    NetworkController::oltStatus($m[1]);
+}
+if ($method === 'GET' && preg_match('#^/network/devices/([^/]+)/onus$#', $uri, $m)) {
+    NetworkController::oltOnus($m[1]);
+}
 if ($method === 'POST' && preg_match('#^/network/devices/([^/]+)/ping-now$#', $uri, $m)) {
     NetworkController::pingNow($m[1]);
 }

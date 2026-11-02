@@ -406,6 +406,72 @@ class NetworkController {
         ]);
     }
 
+    public static function oltStatus(string $deviceId): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id AND tenant_id = :tid LIMIT 1");
+        $stmt->execute(['id' => $deviceId, 'tid' => $tenantId]);
+        $device = $stmt->fetch();
+
+        if (!$device) {
+            Response::error('OLT device not found', 404);
+        }
+
+        require_once __DIR__ . '/../lib/VsolOltClient.php';
+        $ip = $device['management_ip'] ?? '114.130.99.52';
+        $webPort = !empty($device['web_port']) ? (int)$device['web_port'] : 1010;
+        $username = !empty($device['api_username']) ? $device['api_username'] : 'star';
+        $password = !empty($device['api_password']) ? $device['api_password'] : 'star321';
+        $protocol = ($webPort == 1010 || $webPort == 443) ? 'https' : 'http';
+
+        $client = new VsolOltClient($ip, $webPort, $username, $password, $protocol);
+        $info = $client->getSystemInfo();
+        $ports = $client->getPonPorts();
+
+        Response::json([
+            'success' => true,
+            'data' => [
+                'system' => $info,
+                'ports' => $ports,
+            ],
+        ]);
+    }
+
+    public static function oltOnus(string $deviceId): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id AND tenant_id = :tid LIMIT 1");
+        $stmt->execute(['id' => $deviceId, 'tid' => $tenantId]);
+        $device = $stmt->fetch();
+
+        if (!$device) {
+            Response::error('OLT device not found', 404);
+        }
+
+        require_once __DIR__ . '/../lib/VsolOltClient.php';
+        $ip = $device['management_ip'] ?? '114.130.99.52';
+        $webPort = !empty($device['web_port']) ? (int)$device['web_port'] : 1010;
+        $username = !empty($device['api_username']) ? $device['api_username'] : 'star';
+        $password = !empty($device['api_password']) ? $device['api_password'] : 'star321';
+        $protocol = ($webPort == 1010 || $webPort == 443) ? 'https' : 'http';
+
+        $pon = !empty($_GET['pon']) ? (int)$_GET['pon'] : null;
+        $client = new VsolOltClient($ip, $webPort, $username, $password, $protocol);
+        $onus = $client->getOnus($pon);
+
+        Response::json([
+            'success' => true,
+            'data' => [
+                'total' => count($onus),
+                'onus' => $onus,
+            ],
+        ]);
+    }
+
     public static function delete(string $id): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
