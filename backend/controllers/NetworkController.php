@@ -289,7 +289,6 @@ class NetworkController {
                     // Silently fall back to DB / defaults on connection failure
                 }
             }
-        }
 
         // 2. If no live profiles fetched, check access_profiles in DB
         if (empty($profiles)) {

@@ -268,9 +268,9 @@ class CustomersController {
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
-        $fullName = trim($data['fullName'] ?? $data['full_name'] ?? '');
-        $phone = trim($data['phone'] ?? $data['mobile'] ?? '');
-        $address = trim($data['installationAddress'] ?? $data['address'] ?? 'Default Address');
+        $fullName = trim($data['clientName'] ?? $data['fullName'] ?? $data['full_name'] ?? $data['name'] ?? '');
+        $phone = trim($data['mobileNo'] ?? $data['mobile'] ?? $data['phone'] ?? '');
+        $address = trim($data['address'] ?? $data['installationAddress'] ?? $data['installation_address'] ?? 'Dhaka, Bangladesh');
 
         if (empty($fullName) || empty($phone)) {
             Response::error('Full Name and Phone are required', 400);
@@ -280,8 +280,19 @@ class CustomersController {
         $db->beginTransaction();
 
         try {
-            // Atomic sequential customer code generation (system-enforced, cannot be cut or overridden)
-            $customerCode = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'customer', 6);
+            $rawCustCode = preg_replace('/\D/', '', (string)($data['customerCode'] ?? ''));
+            if (!empty($rawCustCode) && strlen($rawCustCode) >= 6) {
+                $checkStmt = $db->prepare("SELECT COUNT(*) FROM customers WHERE customer_code = :code");
+                $checkStmt->execute(['code' => $rawCustCode]);
+                if ((int)$checkStmt->fetchColumn() > 0) {
+                    $db->rollBack();
+                    Response::error("Customer ID {$rawCustCode} is already taken across the platform. Please use a unique ID.", 409);
+                    return;
+                }
+                $customerCode = $rawCustCode;
+            } else {
+                $customerCode = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'customer', 6);
+            }
 
             $stmt = $db->prepare("INSERT INTO customers 
                 (tenant_id, customer_code, customer_type, full_name, email, phone, installation_address, status, billing_status, connection_date, owner_id, owner_role, owner_role_level, created_by)
@@ -306,6 +317,8 @@ class CustomersController {
             Response::json([
                 'success' => true,
                 'message' => 'Customer created successfully',
+                'customerId' => (string)$customerId,
+                'customerCode' => $customerCode,
                 'data' => [
                     'customerId' => (string)$customerId,
                     'customerCode' => $customerCode,
@@ -329,19 +342,33 @@ class CustomersController {
         $db->beginTransaction();
 
         try {
-            $fullName = trim($data['fullName'] ?? $data['full_name'] ?? '');
-            $phone = trim($data['phone'] ?? $data['mobile'] ?? '');
+            $fullName = trim($data['clientName'] ?? $data['fullName'] ?? $data['full_name'] ?? $data['name'] ?? '');
+            $phone = trim($data['mobileNo'] ?? $data['mobile'] ?? $data['phone'] ?? '');
+            $address = trim($data['address'] ?? $data['installationAddress'] ?? $data['installation_address'] ?? 'Dhaka, Bangladesh');
             $username = trim($data['username'] ?? '');
             $password = trim($data['password'] ?? 'pass123');
             $packageId = $data['packageId'] ?? $data['access_profile_id'] ?? 1;
             $deviceId = $data['serverId'] ?? $data['network_device_id'] ?? 1;
 
             if (empty($fullName) || empty($phone) || empty($username)) {
+                $db->rollBack();
                 Response::error('Full name, phone, and PPPoE username are required', 400);
+                return;
             }
 
-            // Atomic sequential customer code generation (system-enforced, cannot be cut or overridden)
-            $customerCode = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'customer', 6);
+            $rawCustCode = preg_replace('/\D/', '', (string)($data['customerCode'] ?? ''));
+            if (!empty($rawCustCode) && strlen($rawCustCode) >= 6) {
+                $checkStmt = $db->prepare("SELECT COUNT(*) FROM customers WHERE customer_code = :code");
+                $checkStmt->execute(['code' => $rawCustCode]);
+                if ((int)$checkStmt->fetchColumn() > 0) {
+                    $db->rollBack();
+                    Response::error("Customer ID {$rawCustCode} is already taken across the platform. Please use a unique ID.", 409);
+                    return;
+                }
+                $customerCode = $rawCustCode;
+            } else {
+                $customerCode = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'customer', 6);
+            }
 
             // 1. Insert Customer
             $stmt = $db->prepare("INSERT INTO customers 
@@ -354,7 +381,7 @@ class CustomersController {
                 'name' => $fullName,
                 'email' => $data['email'] ?? null,
                 'phone' => $phone,
-                'addr' => $data['installationAddress'] ?? 'Dhaka, Bangladesh',
+                'addr' => $address,
                 'oid' => $data['ownerId'] ?? $user['user_id'],
                 'orole' => $user['role'] ?? 'admin',
                 'olevel' => $user['role_level'] ?? 100,
@@ -418,6 +445,8 @@ class CustomersController {
             Response::json([
                 'success' => true,
                 'message' => 'Customer onboarded successfully with active package and credentials',
+                'customerId' => (string)$customerId,
+                'customerCode' => $customerCode,
                 'data' => [
                     'customerId' => (string)$customerId,
                     'customerCode' => $customerCode,

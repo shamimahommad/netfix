@@ -388,11 +388,14 @@ export default function AddClientPage() {
       const payload: CreateClientPayload = {
         ...form,
         clientName: form.clientName.trim(),
+        fullName: form.clientName.trim(),
         mobileNo: normalizePhone(form.mobileNo),
+        phone: normalizePhone(form.mobileNo),
         email: form.email?.trim() ? form.email.trim() : undefined,
         nidNo: form.nidNo?.trim() ? form.nidNo.trim() : undefined,
         dob: form.dob?.trim() ? form.dob.trim() : undefined,
         address: form.address?.trim() ? form.address.trim() : undefined,
+        installationAddress: form.address?.trim() ? form.address.trim() : undefined,
         area: form.area?.trim() ? form.area.trim() : undefined,
         subArea: form.subArea?.trim() ? form.subArea.trim() : undefined,
         district: form.district?.trim() ? form.district.trim() : undefined,
@@ -413,7 +416,18 @@ export default function AddClientPage() {
 
       const res = await customersService.onboardClient(payload);
       toast.success('Customer created and provisioned successfully');
-      navigate(`/dashboard/customers/view/${res.data.customerId}`);
+
+      const cid =
+        (res as any)?.data?.customerId ||
+        (res as any)?.customerId ||
+        (res as any)?.data?.id ||
+        (res as any)?.id;
+
+      if (cid) {
+        navigate(`/dashboard/customers/view/${cid}`);
+      } else {
+        navigate('/dashboard/customers');
+      }
     } catch (err: any) {
       const msg = err.response?.data?.message || err.message || 'Failed to create customer';
       toast.error(msg);
