@@ -120,13 +120,8 @@ class NetworkController {
         $db = Database::getConnection();
 
         // Strictly pure numeric globally unique device ID (Base 300000 -> 300001...)
-        $rawCode = trim($data['deviceCode'] ?? $data['code'] ?? '');
-        $cleanDigits = preg_replace('/[^\d]/', '', $rawCode);
-        if (!empty($cleanDigits) && strlen($cleanDigits) >= 6) {
-            $code = $cleanDigits;
-        } else {
-            $code = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'device', 6);
-        }
+        // System-enforced: cannot be cut, modified, or manually overridden
+        $code = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'device', 6);
 
         try {
             $stmt = $db->prepare("INSERT INTO network_devices 

@@ -8,6 +8,7 @@ import { ActionDropdown } from '@/components/ui/ActionDropdown';
 import { usePingStatus } from '@/hooks/usePingStatus';
 import { usePingStatusStore } from '@/stores/pingStatusStore';
 import { PageHeader } from '@/components/common';
+import { Lock } from 'lucide-react';
 
 const getStatusBadgeClass = (status: NetworkDevice['status']): string => {
   const classes: Record<NetworkDevice['status'], string> = {
@@ -132,10 +133,6 @@ export default function MikroTikPage() {
 
   const validateForm = (isEdit = false): boolean => {
     const errors: Record<string, string> = {};
-
-    if (!isEdit && !formData.deviceCode.trim()) {
-      errors.deviceCode = 'Device code is required';
-    }
 
     if (!formData.deviceName.trim()) {
       errors.deviceName = 'Device name is required';
@@ -622,22 +619,27 @@ export default function MikroTikPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Device Code */}
                   <div>
-                    <label htmlFor="deviceCode" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      Device Code <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      id="deviceCode"
-                      required
-                      value={formData.deviceCode}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, deviceCode: e.target.value.replace(/\D/g, '') }))}
-                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-mono transition-all ${
-                        formErrors.deviceCode ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                      placeholder="e.g., 300001"
-                    />
-                    <p className="mt-1 text-[11px] text-slate-400">Strictly numeric globally unique server ID (e.g. 300001).</p>
-                    {formErrors.deviceCode && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.deviceCode}</p>}
+                    <div className="flex items-center justify-between mb-2">
+                      <label htmlFor="deviceCode" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
+                        Device ID
+                      </label>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                        <Lock className="w-3 h-3" /> System Locked
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        id="deviceCode"
+                        readOnly
+                        tabIndex={-1}
+                        value={formData.deviceCode || ''}
+                        className="w-full pl-10 pr-4 py-3 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none text-slate-800 dark:text-slate-200 font-mono font-bold tracking-wider cursor-not-allowed select-none shadow-inner"
+                        placeholder="Auto-generating (e.g. 300001)..."
+                      />
+                      <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-400">Strictly numeric globally unique server ID (auto-assigned, cannot be edited).</p>
                   </div>
 
                   {/* Device Name */}

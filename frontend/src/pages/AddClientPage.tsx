@@ -609,9 +609,10 @@ export default function AddClientPage() {
                   <input
                     type="text"
                     readOnly
+                    tabIndex={-1}
                     value={form.customerCode || ''}
-                    className="w-full pl-9 pr-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 font-mono text-sm outline-none cursor-not-allowed"
-                    placeholder="Auto-generating..."
+                    className="w-full pl-9 pr-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-mono font-bold text-sm outline-none cursor-not-allowed select-none shadow-inner"
+                    placeholder="Auto-generating (e.g. 100001)..."
                   />
                 </div>
                 <p className="mt-1 text-[11px] text-slate-400">Strictly numeric globally unique serial ID (e.g. 100001).</p>

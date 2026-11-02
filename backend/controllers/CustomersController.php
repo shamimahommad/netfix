@@ -280,13 +280,8 @@ class CustomersController {
         $db->beginTransaction();
 
         try {
-            // Atomic sequential customer code generation per tenant
-            $cleanInputCode = !empty($data['customerCode']) ? preg_replace('/[^\d]/', '', (string)$data['customerCode']) : '';
-            if (!empty($cleanInputCode)) {
-                $customerCode = str_pad($cleanInputCode, 6, '0', STR_PAD_LEFT);
-            } else {
-                $customerCode = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'customer', 6);
-            }
+            // Atomic sequential customer code generation (system-enforced, cannot be cut or overridden)
+            $customerCode = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'customer', 6);
 
             $stmt = $db->prepare("INSERT INTO customers 
                 (tenant_id, customer_code, customer_type, full_name, email, phone, installation_address, status, billing_status, connection_date, owner_id, owner_role, owner_role_level, created_by)
@@ -345,13 +340,8 @@ class CustomersController {
                 Response::error('Full name, phone, and PPPoE username are required', 400);
             }
 
-            // Atomic sequential customer code generation per tenant
-            $cleanInputCode = !empty($data['customerCode']) ? preg_replace('/[^\d]/', '', (string)$data['customerCode']) : '';
-            if (!empty($cleanInputCode)) {
-                $customerCode = str_pad($cleanInputCode, 6, '0', STR_PAD_LEFT);
-            } else {
-                $customerCode = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'customer', 6);
-            }
+            // Atomic sequential customer code generation (system-enforced, cannot be cut or overridden)
+            $customerCode = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'customer', 6);
 
             // 1. Insert Customer
             $stmt = $db->prepare("INSERT INTO customers 
