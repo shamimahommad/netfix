@@ -119,9 +119,21 @@ class NetworkController {
 
         $db = Database::getConnection();
 
-        // Strictly pure numeric globally unique device ID (Base 300000 -> 300001...)
-        // System-enforced: cannot be cut, modified, or manually overridden
-        $code = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'device', 6);
+        // 1. Check if operator supplied their own numeric Device ID (e.g. 3000444)
+        $rawCode = trim($data['deviceCode'] ?? $data['code'] ?? '');
+        $code = preg_replace('/\D/', '', $rawCode);
+
+        if (!empty($code)) {
+            $checkStmt = $db->prepare("SELECT COUNT(*) FROM network_devices WHERE device_code = :code");
+            $checkStmt->execute(['code' => $code]);
+            if ((int)$checkStmt->fetchColumn() > 0) {
+                Response::error("Device ID {$code} is already in use by another router or device. Please provide a unique numeric ID.", 409);
+                return;
+            }
+        } else {
+            // Auto generate sequential unique code (Base 300000 -> 300001...)
+            $code = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'device', 6);
+        }
 
         try {
             $stmt = $db->prepare("INSERT INTO network_devices 
@@ -240,12 +252,19 @@ class NetworkController {
         $profiles = [];
 
         // 1. Try to fetch live from MikroTik router if device exists
+        $device = null;
         if (!empty($deviceId) && $deviceId !== '0') {
             $devStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :did AND tenant_id = :tid LIMIT 1");
             $devStmt->execute(['did' => $deviceId, 'tid' => $tenantId]);
             $device = $devStmt->fetch();
+        } else {
+            // Pick first active router for tenant if not explicitly provided
+            $devStmt = $db->prepare("SELECT * FROM network_devices WHERE tenant_id = :tid AND status = 'active' ORDER BY network_device_id ASC LIMIT 1");
+            $devStmt->execute(['tid' => $tenantId]);
+            $device = $devStmt->fetch();
+        }
 
-            if ($device && !empty($device['management_ip']) && !empty($device['api_username'])) {
+        if ($device && !empty($device['management_ip']) && !empty($device['api_username'])) {
                 try {
                     $api = new RouterosAPI();
                     $api->port = !empty($device['management_port']) ? (int)$device['management_port'] : 8728;

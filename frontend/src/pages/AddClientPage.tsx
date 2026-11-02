@@ -405,7 +405,7 @@ export default function AddClientPage() {
         addLessAmount: (form.addLessAmount ?? 0) !== 0 ? form.addLessAmount : undefined,
         installationCharge: (form.installationCharge ?? 0) > 0 ? form.installationCharge : undefined,
         customerCode:
-          form.customerCode?.replace(/\D/g, '').length >= 6 ? form.customerCode.replace(/\D/g, '') : undefined,
+          (form.customerCode?.replace(/\D/g, '').length ?? 0) >= 6 ? form.customerCode?.replace(/\D/g, '') : undefined,
         latitude: form.latitude != null ? form.latitude : undefined,
         longitude: form.longitude != null ? form.longitude : undefined,
         initialStatus: 'active',

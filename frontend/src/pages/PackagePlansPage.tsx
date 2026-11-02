@@ -125,8 +125,9 @@ export default function PackagePlansPage() {
   };
 
   // Fetch MikroTik profiles when server or protocol changes
-  useEffect(() => {
-    const isProfileProtocol = formData.protocol === 'pppoe' || formData.protocol === 'hotspot';
+  const fetchProfiles = async (targetServerId?: string, targetProtocol?: NetworkProtocol) => {
+    const proto = targetProtocol || formData.protocol;
+    const isProfileProtocol = proto === 'pppoe' || proto === 'hotspot';
     if (!isProfileProtocol) {
       setProfiles([]);
       setProfilesError(null);
@@ -134,44 +135,34 @@ export default function PackagePlansPage() {
       return;
     }
 
-    const targetServerId = formData.serverId || (servers.length > 0 ? servers[0].networkDeviceId : '0');
+    const sid = targetServerId || formData.serverId || (servers.length > 0 ? servers[0].networkDeviceId : '0');
 
-    let cancelled = false;
-    (async () => {
-      setLoadingProfiles(true);
-      setProfilesError(null);
-      try {
-        const res = await networkService.getDeviceProfiles(targetServerId, formData.protocol);
-        if (!cancelled) {
-          const list = res.data || [];
-          setProfiles(list);
-          if (list.length > 0 && !formData.mikrotik_profile_name) {
-            setFormData((prev) => ({
-              ...prev,
-              mikrotik_profile_id: list[0].id,
-              mikrotik_profile_name: list[0].name,
-            }));
-          }
-        }
-      } catch (err: any) {
-        if (!cancelled) {
-          // Provide standard fallback profiles on error
-          setProfiles([
-            { id: 'default', name: 'default' },
-            { id: 'default-encryption', name: 'default-encryption' },
-            { id: 'standard', name: 'standard' },
-          ]);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingProfiles(false);
-        }
+    setLoadingProfiles(true);
+    setProfilesError(null);
+    try {
+      const res = await networkService.getDeviceProfiles(sid, proto);
+      const list = res.data || [];
+      setProfiles(list);
+      if (list.length > 0 && !formData.mikrotik_profile_name) {
+        setFormData((prev) => ({
+          ...prev,
+          mikrotik_profile_id: list[0].id,
+          mikrotik_profile_name: list[0].name,
+        }));
       }
-    })();
+    } catch (err: any) {
+      setProfiles([
+        { id: 'default', name: 'default' },
+        { id: 'default-encryption', name: 'default-encryption' },
+        { id: 'standard', name: 'standard' },
+      ]);
+    } finally {
+      setLoadingProfiles(false);
+    }
+  };
 
-    return () => {
-      cancelled = true;
-    };
+  useEffect(() => {
+    fetchProfiles(formData.serverId, formData.protocol);
   }, [formData.serverId, formData.protocol, servers]);
 
   const loadPackages = async (page = 1) => {
@@ -402,9 +393,33 @@ export default function PackagePlansPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                    MikroTik Profile
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                      MikroTik Profile
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      {loadingProfiles ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] text-blue-500 font-medium">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" />
+                          Syncing...
+                        </span>
+                      ) : profiles.length > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-medium bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          Live ({profiles.length})
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => fetchProfiles()}
+                        disabled={loadingProfiles}
+                        title="Re-fetch live profiles from MikroTik"
+                        className="text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${loadingProfiles ? 'animate-spin text-blue-500' : ''}`} />
+                      </button>
+                    </div>
+                  </div>
                   <div className="relative">
                     {profiles.length > 0 ? (
                       <select
@@ -412,11 +427,26 @@ export default function PackagePlansPage() {
                         onChange={(e) => {
                           const val = e.target.value;
                           const selected = profiles.find((p) => p.name === val);
-                          setFormData((prev) => ({
-                            ...prev,
-                            mikrotik_profile_id: selected?.id || val,
-                            mikrotik_profile_name: val,
-                          }));
+                          setFormData((prev) => {
+                            const next = {
+                              ...prev,
+                              mikrotik_profile_id: selected?.id || val,
+                              mikrotik_profile_name: val,
+                            };
+                            // Auto-suggest speed if profile name contains bandwidth (e.g. 10Mbps, 20Mbps)
+                            const speedMatch = val.match(/(\d+)\s*(?:mbps|m)/i);
+                            if (speedMatch) {
+                              const spd = parseInt(speedMatch[1], 10);
+                              if (spd > 0) {
+                                if (!prev.name || /^\d+\s*mbps$/i.test(prev.name.trim())) {
+                                  next.name = `${spd}Mbps`;
+                                }
+                                next.download_speed = spd;
+                                next.upload_speed = spd;
+                              }
+                            }
+                            return next;
+                          });
                         }}
                         className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
                       >
@@ -438,7 +468,7 @@ export default function PackagePlansPage() {
                             mikrotik_profile_id: e.target.value,
                           }))
                         }
-                        placeholder={loadingProfiles ? 'Loading profiles...' : 'e.g. default or 10M'}
+                        placeholder={loadingProfiles ? 'Loading profiles from router...' : 'e.g. default or 10Mbps'}
                         className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
                       />
                     )}
