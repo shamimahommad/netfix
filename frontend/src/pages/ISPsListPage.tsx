@@ -265,7 +265,7 @@ function AddISPModal({ isOpen, onClose, onSuccess }: AddISPModalProps) {
                 type="button"
                 onClick={handleConfirmSubmit}
                 disabled={isLoading}
-                className="px-6 py-3 text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-lg hover:shadow-xl active:scale-95"
+                className="px-6 py-2.5 text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-sm hover:shadow active:scale-95"
               >
                 {isLoading ? 'Creating...' : 'Confirm & Create'}
               </button>
@@ -549,7 +549,7 @@ function AddISPModal({ isOpen, onClose, onSuccess }: AddISPModalProps) {
             <button
               type="submit"
               disabled={isLoading}
-              className="px-6 py-3 text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-lg hover:shadow-xl active:scale-95"
+              className="px-6 py-2.5 text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-sm hover:shadow active:scale-95"
             >
               {isLoading ? 'Creating...' : 'Create ISP'}
             </button>
@@ -980,7 +980,7 @@ function EditISPModal({ isOpen, tenant, onClose, onSuccess }: EditISPModalProps)
             <button
               type="submit"
               disabled={isLoading}
-              className="px-6 py-3 text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-lg hover:shadow-xl active:scale-95"
+              className="px-6 py-2.5 text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-sm hover:shadow active:scale-95"
             >
               {isLoading ? 'Updating...' : 'Update ISP'}
             </button>
@@ -1128,7 +1128,7 @@ export default function ISPsListPage() {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={() => setIsAddModalOpen(true)}
-            className="flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-semibold shadow-lg shadow-indigo-500/30 hover:shadow-xl hover:shadow-indigo-500/40 transition-all duration-200"
+            className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-sm hover:shadow transition-all active:scale-95"
             type="button"
             aria-label="Add new ISP"
           >

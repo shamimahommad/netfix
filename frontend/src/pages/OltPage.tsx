@@ -445,7 +445,7 @@ export default function OltPage() {
                   <button type="button" onClick={() => { setShowAddModal(false); resetForm(); }} className="px-6 py-3 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-slate-50 dark:hover:bg-slate-600">
                     Cancel
                   </button>
-                  <button type="submit" disabled={isSubmitting} className="px-6 py-3 bg-gradient-to-r from-teal-600 via-cyan-600 to-sky-600 hover:from-teal-700 hover:via-cyan-700 hover:to-sky-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl disabled:opacity-50">
+                  <button type="submit" disabled={isSubmitting} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm hover:shadow active:scale-95 disabled:opacity-50 transition-all">
                     {isSubmitting ? 'Adding...' : 'Add OLT'}
                   </button>
                 </div>
@@ -508,7 +508,7 @@ export default function OltPage() {
                 </div>
                 <div className="flex justify-end gap-4 pt-4 border-t border-slate-200 dark:border-slate-700">
                   <button type="button" onClick={() => { setShowEditModal(false); setEditingDevice(null); resetForm(); }} className="px-6 py-3 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-slate-50 dark:hover:bg-slate-600">Cancel</button>
-                  <button type="submit" disabled={isSubmitting} className="px-6 py-3 bg-gradient-to-r from-teal-600 via-cyan-600 to-sky-600 hover:from-teal-700 hover:via-cyan-700 hover:to-sky-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl disabled:opacity-50">{isSubmitting ? 'Updating...' : 'Update OLT'}</button>
+                  <button type="submit" disabled={isSubmitting} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm hover:shadow active:scale-95 disabled:opacity-50 transition-all">{isSubmitting ? 'Updating...' : 'Update OLT'}</button>
                 </div>
               </form>
             </div>
@@ -627,7 +627,7 @@ export default function OltPage() {
             <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">Add your first OLT device to get started.</p>
             <button
               onClick={() => { resetForm(); setShowAddModal(true); }}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-teal-600 via-cyan-600 to-sky-600 hover:from-teal-700 hover:via-cyan-700 hover:to-sky-700 text-white font-semibold rounded-xl transition-all shadow-lg hover:shadow-xl active:scale-95"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-all shadow-sm hover:shadow active:scale-95"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
               <span>Add OLT</span>

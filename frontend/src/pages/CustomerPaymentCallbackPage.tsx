@@ -116,7 +116,7 @@ export default function CustomerPaymentCallbackPage() {
         {!confirming && (
           <Link
             to={customerPortalUrl}
-            className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-semibold transition-all"
+            className="inline-flex items-center px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-all shadow-sm hover:shadow"
           >
             {(isSuccess && (confirmDone || !paymentID)) ? 'Go to Customer Portal' : 'Try again'}
           </Link>

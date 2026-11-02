@@ -495,7 +495,7 @@ export default function ISPProfilePage() {
               whileTap={{ scale: 0.98 }}
               onClick={handleSaveFeatures}
               disabled={isSavingFeatures}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-semibold shadow-lg shadow-indigo-500/30 hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-sm hover:shadow active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
               {isSavingFeatures ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               {isSavingFeatures ? 'Saving…' : 'Save Features'}
@@ -747,7 +747,7 @@ export default function ISPProfilePage() {
                 <button
                   type="button"
                   onClick={handlePayNowFromAmountModal}
-                  className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-pink-700"
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold shadow-sm hover:shadow transition-all active:scale-95"
                 >
                   Pay Now
                 </button>

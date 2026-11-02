@@ -262,7 +262,7 @@ export default function LiveTrafficPage() {
       <div className="max-w-[1920px] mx-auto space-y-6">
         {/* Header */}
         <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-lg rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-xl p-6">
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 dark:from-blue-400 dark:via-indigo-400 dark:to-purple-400 bg-clip-text text-transparent mb-2">
+          <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">
             Live Traffic Monitor
           </h1>
           <p className="text-sm font-medium text-slate-600 dark:text-slate-300">

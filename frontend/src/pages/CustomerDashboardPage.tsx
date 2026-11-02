@@ -113,7 +113,7 @@ export default function CustomerDashboardPage() {
           <p className="text-red-600 dark:text-red-400 mb-6">{error}</p>
           <button
             onClick={() => navigate('/customer/login', { replace: true })}
-            className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-medium rounded-2xl shadow-lg shadow-blue-500/25 transition-all duration-200 hover:shadow-xl hover:scale-[1.02] active:scale-[0.97]"
+            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl shadow-sm hover:shadow transition-all active:scale-95"
           >
             Back to login
           </button>

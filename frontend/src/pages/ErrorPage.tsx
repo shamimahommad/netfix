@@ -137,7 +137,7 @@ export default function ErrorPage({ status = 404, title, message }: ErrorPagePro
             onClick={handleGoBack}
             className={`px-5 py-2.5 rounded-xl text-white font-medium transition-all duration-200 ${
               is404
-                ? 'bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-600 hover:to-teal-600 shadow-lg shadow-sky-500/25 hover:shadow-sky-500/40'
+                ? 'bg-blue-600 hover:bg-blue-700 shadow-sm hover:shadow active:scale-95'
                 : 'bg-violet-600 hover:bg-violet-700'
             }`}
           >

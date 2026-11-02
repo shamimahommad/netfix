@@ -445,8 +445,8 @@ export default function AddClientPage() {
                 onClick={() => setStep(s.n)}
                 className={`px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
                   step === s.n
-                    ? 'bg-gradient-to-r from-sky-500 to-teal-500 text-white shadow-lg'
-                    : 'bg-sky-50/80 dark:bg-slate-900/40 text-slate-700 dark:text-slate-300 hover:bg-sky-100 dark:hover:bg-slate-900/60 border border-sky-200/60 dark:border-slate-700'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
                 }`}
               >
                 {s.label}

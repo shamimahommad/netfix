@@ -979,7 +979,7 @@ export default function BillingPage() {
 
                 <button
                   onClick={loadCustomers}
-                  className="px-6 py-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 text-white font-semibold rounded-xl transition-all shadow-lg hover:shadow-xl active:scale-95 whitespace-nowrap"
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-all shadow-sm hover:shadow active:scale-95 whitespace-nowrap"
                 >
                   Filter
                 </button>

@@ -336,7 +336,7 @@ export default function PublicTopupPage() {
               )}
               <a
                 href="/topup"
-                className="inline-flex items-center justify-center gap-2 w-full sm:w-auto min-h-[44px] px-6 sm:px-8 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-600 hover:to-teal-600 text-white font-semibold text-sm sm:text-base shadow-lg shadow-sky-500/25 transition-all duration-300 hover:scale-[1.03] active:scale-[0.98]"
+                className="inline-flex items-center justify-center gap-2 w-full sm:w-auto min-h-[44px] px-6 sm:px-8 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm sm:text-base shadow-sm hover:shadow transition-all duration-200 active:scale-[0.98]"
                 style={{ animation: 'fadeInUp 0.4s 0.35s both' }}
               >
                 <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
@@ -444,7 +444,7 @@ export default function PublicTopupPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full min-h-[44px] py-3.5 sm:py-4 rounded-xl sm:rounded-2xl bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-600 hover:to-teal-600 disabled:opacity-50 text-white font-semibold text-sm sm:text-base shadow-lg shadow-sky-500/25 transition-all duration-300 flex items-center justify-center gap-2 hover:scale-[1.02] hover:shadow-xl hover:shadow-sky-500/30 active:scale-[0.99] disabled:hover:scale-100 disabled:hover:shadow-lg"
+                className="w-full min-h-[44px] py-3.5 sm:py-4 rounded-xl sm:rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold text-sm sm:text-base shadow-sm hover:shadow transition-all duration-200 flex items-center justify-center gap-2 active:scale-[0.99] disabled:hover:scale-100"
                 style={{ animation: 'fadeInUp 0.4s 0.35s both' }}
               >
                 {loading ? (

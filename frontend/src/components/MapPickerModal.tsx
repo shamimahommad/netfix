@@ -90,7 +90,7 @@ export default function MapPickerModal({ isOpen, onClose, onSelect, initialLat, 
         <div className="p-6 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 dark:from-blue-400 dark:via-indigo-400 dark:to-purple-400 bg-clip-text text-transparent">
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
                 Pick Location on Map
               </h2>
               <p className="mt-2 text-sm font-medium text-slate-600 dark:text-slate-400">
@@ -170,7 +170,7 @@ export default function MapPickerModal({ isOpen, onClose, onSelect, initialLat, 
               type="button"
               onClick={handleSave}
               disabled={selectedLat === null || selectedLng === null}
-              className="px-6 py-3 text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-lg hover:shadow-xl active:scale-95"
+              className="px-6 py-2.5 text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-sm hover:shadow active:scale-95"
             >
               Save Location
             </button>

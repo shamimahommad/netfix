@@ -107,7 +107,7 @@ export default function CustomerTicketPage() {
             setCreateTitle('');
             setCreateDesc('');
           }}
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-medium rounded-2xl shadow-lg shadow-blue-500/25 transition-all duration-200"
+          className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl shadow-sm hover:shadow transition-all"
         >
           <Plus className="w-5 h-5" />
           Create a New Ticket
@@ -281,7 +281,7 @@ export default function CustomerTicketPage() {
                     whileTap={{ scale: 0.97 }}
                     type="submit"
                     disabled={submitting || createTitle.trim().length < 3}
-                    className="px-5 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-medium rounded-2xl shadow-lg shadow-blue-500/25 disabled:opacity-50 transition-all"
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl shadow-sm hover:shadow disabled:opacity-50 transition-all"
                   >
                     {submitting ? 'Creating…' : 'Create'}
                   </motion.button>

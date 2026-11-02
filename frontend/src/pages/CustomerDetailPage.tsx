@@ -2260,7 +2260,7 @@ export default function CustomerDetailPage() {
                 <button
                   onClick={handleRenew}
                   disabled={isRenewing || !renewForm.plan_id}
-                  className="flex-1 px-3 py-2.5 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl flex items-center justify-center gap-2 text-sm"
+                  className="flex-1 px-3 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow flex items-center justify-center gap-2 text-sm"
                 >
                   {isRenewing ? (
                     <>
@@ -2359,7 +2359,7 @@ export default function CustomerDetailPage() {
                 <button
                   onClick={handleChangePackage}
                   disabled={isChangingPackage || !changePackageForm.plan_id || isLoadingChangePackagePackages}
-                  className="flex-1 px-3 py-2.5 bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 text-white rounded-xl font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="flex-1 px-3 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow flex items-center justify-center gap-2"
                 >
                   {isChangingPackage ? (
                     <>
@@ -2508,7 +2508,7 @@ export default function CustomerDetailPage() {
                     parseFloat(cashReceivedForm.amount) <= 0 ||
                     !cashReceivedForm.receivedByUserId?.trim()
                   }
-                  className="flex-1 px-3 py-2.5 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl flex items-center justify-center gap-2 text-sm"
+                  className="flex-1 px-3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow flex items-center justify-center gap-2 text-sm"
                 >
                   {isSubmittingCashReceived ? (
                     <>

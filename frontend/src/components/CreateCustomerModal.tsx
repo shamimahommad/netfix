@@ -180,7 +180,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess }: Crea
             </p>
             <button
               onClick={onClose}
-              className="px-6 py-3 text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 rounded-xl transition-all font-semibold shadow-lg hover:shadow-xl active:scale-95"
+              className="px-6 py-2.5 text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all font-semibold shadow-sm hover:shadow active:scale-95"
             >
               Close
             </button>
@@ -197,7 +197,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess }: Crea
         <div className="p-6 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 dark:from-blue-400 dark:via-indigo-400 dark:to-purple-400 bg-clip-text text-transparent">
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
                 Create New Customer
               </h2>
               <p className="mt-2 text-sm font-medium text-slate-600 dark:text-slate-400">
@@ -406,7 +406,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess }: Crea
                   type="button"
                   onClick={() => setIsMapModalOpen(true)}
                   disabled={isLoading}
-                  className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg active:scale-95 flex items-center justify-center gap-2"
+                  className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-95 flex items-center justify-center gap-2"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
@@ -448,7 +448,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess }: Crea
             <button
               type="submit"
               disabled={isLoading}
-              className="px-6 py-3 text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-lg hover:shadow-xl active:scale-95 flex items-center gap-2"
+              className="px-6 py-2.5 text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-sm hover:shadow active:scale-95 flex items-center gap-2"
             >
               {isLoading ? (
                 <>
