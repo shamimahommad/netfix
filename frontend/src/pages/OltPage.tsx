@@ -86,15 +86,27 @@ export default function OltPage() {
   const pingMenuRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const { setPingStatus } = usePingStatusStore();
 
-  const [formData, setFormData] = useState<CreateOltDevicePayload & { apiPassword?: string }>({
+  const [formData, setFormData] = useState<CreateOltDevicePayload & {
+    vendor?: string;
+    ponType?: string;
+    totalPonPorts?: number;
+    snmpCommunity?: string;
+    snmpPort?: number;
+    apiPassword?: string;
+  }>({
     deviceCode: '',
     deviceName: '',
+    vendor: 'vsol',
+    ponType: 'gpon',
+    totalPonPorts: 8,
     managementIp: '',
     dnsName: '',
     managementPort: 23,
-    apiUsername: '',
+    snmpCommunity: 'public',
+    snmpPort: 161,
+    apiUsername: 'admin',
     apiPassword: '',
-    isProduction: false,
+    isProduction: true,
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
@@ -143,12 +155,17 @@ export default function OltPage() {
       await networkService.createOltDevice({
         deviceCode: formData.deviceCode.trim(),
         deviceName: formData.deviceName.trim(),
+        vendor: formData.vendor || 'vsol',
+        ponType: formData.ponType || 'gpon',
+        totalPonPorts: formData.totalPonPorts || 8,
         managementIp: formData.managementIp.trim(),
         dnsName: formData.dnsName?.trim() || undefined,
         managementPort: formData.managementPort ?? 23,
+        snmpCommunity: formData.snmpCommunity?.trim() || 'public',
+        snmpPort: formData.snmpPort ?? 161,
         apiUsername: formData.apiUsername?.trim() || undefined,
         apiPassword: formData.apiPassword || undefined,
-        isProduction: formData.isProduction ?? false,
+        isProduction: formData.isProduction ?? true,
       });
       await showSuccess('Success!', 'OLT device added successfully.', { timer: 1500 });
       setShowAddModal(false);
@@ -169,11 +186,14 @@ export default function OltPage() {
     try {
       const payload: UpdateNetworkDevicePayload = {
         deviceName: formData.deviceName.trim(),
+        vendor: formData.vendor || 'vsol',
+        ponType: formData.ponType || 'gpon',
+        totalPonPorts: formData.totalPonPorts || 8,
         managementIp: formData.managementIp.trim(),
         dnsName: formData.dnsName?.trim() || undefined,
         managementPort: formData.managementPort ?? 23,
-        winboxPort: undefined,
-        webPort: undefined,
+        snmpCommunity: formData.snmpCommunity?.trim() || 'public',
+        snmpPort: formData.snmpPort ?? 161,
         apiUsername: formData.apiUsername?.trim() || undefined,
         ...(formData.apiPassword ? { apiPassword: formData.apiPassword } : {}),
         isProduction: formData.isProduction ?? false,
@@ -197,9 +217,14 @@ export default function OltPage() {
     setFormData({
       deviceCode: device.deviceCode,
       deviceName: device.deviceName,
+      vendor: device.vendor || 'vsol',
+      ponType: (device.ponType as any) || 'gpon',
+      totalPonPorts: device.totalPonPorts || 8,
       managementIp: device.managementIp || '',
       dnsName: device.dnsName || '',
       managementPort: device.managementPort ?? 23,
+      snmpCommunity: device.snmpCommunity || 'public',
+      snmpPort: device.snmpPort ?? 161,
       apiUsername: device.apiUsername || '',
       apiPassword: '',
       isProduction: device.isProduction ?? false,
@@ -333,12 +358,17 @@ export default function OltPage() {
     setFormData({
       deviceCode: '',
       deviceName: '',
+      vendor: 'vsol',
+      ponType: 'gpon',
+      totalPonPorts: 8,
       managementIp: '',
       dnsName: '',
       managementPort: 23,
-      apiUsername: '',
+      snmpCommunity: 'public',
+      snmpPort: 161,
+      apiUsername: 'admin',
       apiPassword: '',
-      isProduction: false,
+      isProduction: true,
     });
     setFormErrors({});
     networkService.getNextDeviceCode().then((res) => {
@@ -424,8 +454,48 @@ export default function OltPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Device Name <span className="text-red-500">*</span></label>
-                    <input type="text" required value={formData.deviceName} onChange={(e) => setFormData((p) => ({ ...p, deviceName: e.target.value }))} className={inputClass('deviceName')} placeholder="e.g., Main OLT" />
+                    <input type="text" required value={formData.deviceName} onChange={(e) => setFormData((p) => ({ ...p, deviceName: e.target.value }))} className={inputClass('deviceName')} placeholder="e.g., Main OLT (Dhanmondi POP)" />
                     {formErrors.deviceName && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.deviceName}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">OLT Brand / Vendor <span className="text-red-500">*</span></label>
+                    <select
+                      value={formData.vendor || 'vsol'}
+                      onChange={(e) => setFormData((p) => ({ ...p, vendor: e.target.value }))}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 font-medium"
+                    >
+                      <option value="vsol">VSOL (V1600 Series EPON/GPON)</option>
+                      <option value="bdcom">BDCOM (P3310, GP3600 Series)</option>
+                      <option value="huawei">Huawei (SmartAX MA5608T / MA5800)</option>
+                      <option value="zte">ZTE (C300 / C320)</option>
+                      <option value="cdata">CDATA (FD1104, FD1208 Series)</option>
+                      <option value="syrotech">Syrotech</option>
+                      <option value="other">Generic / Other SNMP OLT</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">PON Architecture</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={formData.ponType || 'gpon'}
+                        onChange={(e) => setFormData((p) => ({ ...p, ponType: e.target.value }))}
+                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 font-medium text-sm"
+                      >
+                        <option value="gpon">GPON (2.5G/1.25G)</option>
+                        <option value="epon">EPON (1.25G/1.25G)</option>
+                        <option value="xgs-pon">XGS-PON (10G)</option>
+                      </select>
+                      <select
+                        value={formData.totalPonPorts || 8}
+                        onChange={(e) => setFormData((p) => ({ ...p, totalPonPorts: parseInt(e.target.value) || 8 }))}
+                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 font-medium text-sm"
+                      >
+                        <option value={4}>4 PON Ports</option>
+                        <option value={8}>8 PON Ports</option>
+                        <option value={16}>16 PON Ports</option>
+                        <option value={32}>32 PON Ports</option>
+                      </select>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Management IP <span className="text-red-500">*</span></label>
@@ -433,22 +503,40 @@ export default function OltPage() {
                     {formErrors.managementIp && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.managementIp}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">DNS Name</label>
-                    <input type="text" value={formData.dnsName || ''} onChange={(e) => setFormData((p) => ({ ...p, dnsName: e.target.value }))} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-teal-500 outline-none text-slate-900 dark:text-slate-100" placeholder="Optional" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Management Port</label>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Telnet / SSH CLI Port</label>
                     <input type="number" min={1} max={65535} value={formData.managementPort ?? 23} onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23 }))} className={inputClass('managementPort')} />
                     {formErrors.managementPort && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.managementPort}</p>}
-                    <p className="mt-1 text-xs text-slate-500">Default: 23 (Telnet/SSH)</p>
+                    <p className="mt-1 text-xs text-slate-500">Default: 23 (Telnet) or 22 (SSH)</p>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">API / CLI Username</label>
-                    <input type="text" value={formData.apiUsername || ''} onChange={(e) => setFormData((p) => ({ ...p, apiUsername: e.target.value }))} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-teal-500 outline-none text-slate-900 dark:text-slate-100" placeholder="Optional" />
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">CLI Username</label>
+                    <input type="text" value={formData.apiUsername || ''} onChange={(e) => setFormData((p) => ({ ...p, apiUsername: e.target.value }))} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100" placeholder="admin" />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">API / CLI Password</label>
-                    <input type="password" value={formData.apiPassword || ''} onChange={(e) => setFormData((p) => ({ ...p, apiPassword: e.target.value }))} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-teal-500 outline-none text-slate-900 dark:text-slate-100" placeholder="Optional" />
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">CLI Password</label>
+                    <input type="password" value={formData.apiPassword || ''} onChange={(e) => setFormData((p) => ({ ...p, apiPassword: e.target.value }))} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100" placeholder="CLI Password" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">SNMP Community & Port</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={formData.snmpCommunity || 'public'}
+                        onChange={(e) => setFormData((p) => ({ ...p, snmpCommunity: e.target.value }))}
+                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 text-sm"
+                        placeholder="public"
+                      />
+                      <input
+                        type="number"
+                        min={1}
+                        max={65535}
+                        value={formData.snmpPort ?? 161}
+                        onChange={(e) => setFormData((p) => ({ ...p, snmpPort: parseInt(e.target.value) || 161 }))}
+                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 text-sm"
+                        placeholder="161"
+                      />
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">For optical power & ONU polling (default: public:161)</p>
                   </div>
                 </div>
                 <div className="flex items-center justify-between p-4 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-xl border border-emerald-100 dark:border-emerald-800">
@@ -496,16 +584,52 @@ export default function OltPage() {
                     {formErrors.deviceName && <p className="mt-1 text-xs text-red-600">{formErrors.deviceName}</p>}
                   </div>
                   <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">OLT Brand / Vendor <span className="text-red-500">*</span></label>
+                    <select
+                      value={formData.vendor || 'vsol'}
+                      onChange={(e) => setFormData((p) => ({ ...p, vendor: e.target.value }))}
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 font-medium"
+                    >
+                      <option value="vsol">VSOL (V1600 Series EPON/GPON)</option>
+                      <option value="bdcom">BDCOM (P3310, GP3600 Series)</option>
+                      <option value="huawei">Huawei (SmartAX MA5608T / MA5800)</option>
+                      <option value="zte">ZTE (C300 / C320)</option>
+                      <option value="cdata">CDATA (FD1104, FD1208 Series)</option>
+                      <option value="syrotech">Syrotech</option>
+                      <option value="other">Generic / Other SNMP OLT</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">PON Architecture</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={formData.ponType || 'gpon'}
+                        onChange={(e) => setFormData((p) => ({ ...p, ponType: e.target.value }))}
+                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 font-medium text-sm"
+                      >
+                        <option value="gpon">GPON (2.5G/1.25G)</option>
+                        <option value="epon">EPON (1.25G/1.25G)</option>
+                        <option value="xgs-pon">XGS-PON (10G)</option>
+                      </select>
+                      <select
+                        value={formData.totalPonPorts || 8}
+                        onChange={(e) => setFormData((p) => ({ ...p, totalPonPorts: parseInt(e.target.value) || 8 }))}
+                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 font-medium text-sm"
+                      >
+                        <option value={4}>4 PON Ports</option>
+                        <option value={8}>8 PON Ports</option>
+                        <option value={16}>16 PON Ports</option>
+                        <option value={32}>32 PON Ports</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Management IP <span className="text-red-500">*</span></label>
                     <input type="text" required value={formData.managementIp} onChange={(e) => setFormData((p) => ({ ...p, managementIp: e.target.value }))} className={inputClass('managementIp')} />
                     {formErrors.managementIp && <p className="mt-1 text-xs text-red-600">{formErrors.managementIp}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">DNS Name</label>
-                    <input type="text" value={formData.dnsName || ''} onChange={(e) => setFormData((p) => ({ ...p, dnsName: e.target.value }))} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-teal-500 outline-none text-slate-900 dark:text-slate-100" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Management Port</label>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Telnet / SSH CLI Port</label>
                     <input type="number" min={1} max={65535} value={formData.managementPort ?? 23} onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23 }))} className={inputClass('managementPort')} />
                   </div>
                   <div>
@@ -515,6 +639,27 @@ export default function OltPage() {
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Password (leave blank to keep)</label>
                     <input type="password" value={formData.apiPassword || ''} onChange={(e) => setFormData((p) => ({ ...p, apiPassword: e.target.value }))} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-teal-500 outline-none text-slate-900 dark:text-slate-100" placeholder="Optional" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">SNMP Community & Port</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={formData.snmpCommunity || 'public'}
+                        onChange={(e) => setFormData((p) => ({ ...p, snmpCommunity: e.target.value }))}
+                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 text-sm"
+                        placeholder="public"
+                      />
+                      <input
+                        type="number"
+                        min={1}
+                        max={65535}
+                        value={formData.snmpPort ?? 161}
+                        onChange={(e) => setFormData((p) => ({ ...p, snmpPort: parseInt(e.target.value) || 161 }))}
+                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 text-sm"
+                        placeholder="161"
+                      />
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center justify-between p-4 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-xl border border-emerald-100 dark:border-emerald-800">
@@ -560,75 +705,86 @@ export default function OltPage() {
               <table className="w-full min-w-[900px]" style={{ tableLayout: 'fixed' }}>
                 <thead className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-700/50 dark:to-slate-800/50 border-b border-slate-200 dark:border-slate-700">
                   <tr>
-                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '8%' }}>Code</th>
-                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '12%' }}>Name</th>
-                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '8%' }}>Status</th>
-                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '10%' }}>Ping</th>
-                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '12%' }}>IP</th>
-                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '10%' }}>DNS</th>
-                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '6%' }}>Port</th>
-                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '10%' }}>Username</th>
-                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '14%' }}>Actions</th>
+                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '9%' }}>Device ID</th>
+                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '15%' }}>Name</th>
+                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '15%' }}>Brand & PON</th>
+                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '9%' }}>Status</th>
+                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '9%' }}>Health</th>
+                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '15%' }}>Management IP</th>
+                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '12%' }}>SNMP</th>
+                    <th className="px-3 py-4 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider" style={{ width: '16%' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
-                  {devices.map((device) => (
-                    <tr key={device.networkDeviceId} className="hover:bg-gradient-to-r hover:from-teal-50/50 hover:to-cyan-50/50 dark:hover:from-teal-900/10 dark:hover:to-cyan-900/10 transition-all duration-200">
-                      <td className="px-3 py-4 text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">{device.deviceCode}</td>
-                      <td className="px-3 py-4 text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{device.deviceName}</td>
-                      <td className="px-3 py-4">
-                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border ${getStatusBadgeClass(device.status)}`}>
-                          {getStatusLabel(device.status)}
-                        </span>
-                      </td>
-                      <td className="px-3 py-4">
-                        <PingStatusIndicator deviceId={device.networkDeviceId} />
-                      </td>
-                      <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400 truncate">{device.managementIp || '—'}</td>
-                      <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400 truncate">{device.dnsName || '—'}</td>
-                      <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400">{device.managementPort}</td>
-                      <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400 truncate">{device.apiUsername || '—'}</td>
-                      <td className="px-3 py-4">
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => handleEdit(device)} className="p-2 text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 rounded-lg transition-colors" title="Edit">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                          </button>
-                          <div className="relative">
-                            <button
-                              ref={(el) => (pingMenuRefs.current[device.networkDeviceId] = el)}
-                              onClick={() => setOpenPingMenuId(openPingMenuId === device.networkDeviceId ? null : device.networkDeviceId)}
-                              className="p-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
-                              title="More"
-                            >
-                              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg>
+                  {devices.map((device) => {
+                    const vendorLabel = (device.vendor || 'olt').toUpperCase();
+                    const ponInfo = `${(device.ponType || 'gpon').toUpperCase()} (${device.totalPonPorts || 8} Ports)`;
+
+                    return (
+                      <tr key={device.networkDeviceId} className="hover:bg-gradient-to-r hover:from-teal-50/50 hover:to-cyan-50/50 dark:hover:from-teal-900/10 dark:hover:to-cyan-900/10 transition-all duration-200">
+                        <td className="px-3 py-4 text-sm font-semibold text-slate-900 dark:text-slate-100 font-mono">{device.deviceCode}</td>
+                        <td className="px-3 py-4 text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{device.deviceName}</td>
+                        <td className="px-3 py-4 text-xs">
+                          <span className="font-semibold text-blue-600 dark:text-blue-400">{vendorLabel}</span>
+                          <span className="text-slate-400 dark:text-slate-500 mx-1">•</span>
+                          <span className="text-slate-600 dark:text-slate-400 font-mono">{ponInfo}</span>
+                        </td>
+                        <td className="px-3 py-4">
+                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border ${getStatusBadgeClass(device.status)}`}>
+                            {getStatusLabel(device.status)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-4">
+                          <PingStatusIndicator deviceId={device.networkDeviceId} />
+                        </td>
+                        <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400 font-mono truncate">
+                          {device.managementIp || '—'}:{device.managementPort || 23}
+                        </td>
+                        <td className="px-3 py-4 text-xs text-slate-600 dark:text-slate-400 font-mono truncate">
+                          {device.snmpCommunity || 'public'}:{device.snmpPort || 161}
+                        </td>
+                        <td className="px-3 py-4">
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => handleEdit(device)} className="p-2 text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 rounded-lg transition-colors" title="Edit">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                             </button>
-                            <ActionDropdown isOpen={openPingMenuId === device.networkDeviceId} onClose={() => setOpenPingMenuId(null)} triggerButton={pingMenuRefs.current[device.networkDeviceId]}>
-                              <div className="px-2 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Ping</div>
-                              <button onClick={() => handlePingNow(device)} className="w-full px-3 py-1.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-green-50 dark:hover:bg-green-900/20 flex items-center gap-2">
-                                <span className="w-2 h-2 rounded-full bg-green-500" /> Ping Now
+                            <div className="relative">
+                              <button
+                                ref={(el) => (pingMenuRefs.current[device.networkDeviceId] = el)}
+                                onClick={() => setOpenPingMenuId(openPingMenuId === device.networkDeviceId ? null : device.networkDeviceId)}
+                                className="p-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg"
+                                title="More"
+                              >
+                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg>
                               </button>
-                              <button onClick={() => handleSetPingInterval(device)} className="w-full px-3 py-1.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center gap-2">
-                                Set Ping Interval {device.customPingInterval && `(${device.customPingInterval}s)`}
-                              </button>
-                              {device.customPingInterval && (
-                                <button onClick={() => handleResetPingInterval(device)} className="w-full px-3 py-1.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-amber-50 dark:hover:bg-amber-900/20">Reset to Default</button>
-                              )}
-                              <div className="border-t border-slate-200 dark:border-slate-700 my-1" />
-                              <div className="px-2 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Status</div>
-                              {(['active', 'inactive', 'maintenance', 'offline', 'decommissioned'] as const).map((s) => (
-                                <button key={s} onClick={() => { setOpenPingMenuId(null); handleStatusChange(device, s); }} className="w-full px-3 py-1.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700" disabled={device.status === s}>
-                                  {getStatusLabel(s)} {device.status === s && '✓'}
+                              <ActionDropdown isOpen={openPingMenuId === device.networkDeviceId} onClose={() => setOpenPingMenuId(null)} triggerButton={pingMenuRefs.current[device.networkDeviceId]}>
+                                <div className="px-2 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Health Check</div>
+                                <button onClick={() => handlePingNow(device)} className="w-full px-3 py-1.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-green-50 dark:hover:bg-green-900/20 flex items-center gap-2">
+                                  <span className="w-2 h-2 rounded-full bg-green-500" /> Ping Now
                                 </button>
-                              ))}
-                              <div className="border-t border-slate-200 dark:border-slate-700 my-1" />
-                              <button onClick={() => handleDisable(device)} disabled={device.status !== 'active'} className="w-full px-3 py-1.5 text-left text-sm text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 disabled:opacity-50">Disable</button>
-                              <button onClick={() => handleDeletePermanent(device)} className="w-full px-3 py-1.5 text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20">Delete</button>
-                            </ActionDropdown>
+                                <button onClick={() => handleSetPingInterval(device)} className="w-full px-3 py-1.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center gap-2">
+                                  Set Ping Interval {device.customPingInterval && `(${device.customPingInterval}s)`}
+                                </button>
+                                {device.customPingInterval && (
+                                  <button onClick={() => handleResetPingInterval(device)} className="w-full px-3 py-1.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-amber-50 dark:hover:bg-amber-900/20">Reset to Default</button>
+                                )}
+                                <div className="border-t border-slate-200 dark:border-slate-700 my-1" />
+                                <div className="px-2 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Status</div>
+                                {(['active', 'inactive', 'maintenance', 'offline', 'decommissioned'] as const).map((s) => (
+                                  <button key={s} onClick={() => { setOpenPingMenuId(null); handleStatusChange(device, s); }} className="w-full px-3 py-1.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700" disabled={device.status === s}>
+                                    {getStatusLabel(s)} {device.status === s && '✓'}
+                                  </button>
+                                ))}
+                                <div className="border-t border-slate-200 dark:border-slate-700 my-1" />
+                                <button onClick={() => handleDisable(device)} disabled={device.status !== 'active'} className="w-full px-3 py-1.5 text-left text-sm text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 disabled:opacity-50">Disable</button>
+                                <button onClick={() => handleDeletePermanent(device)} className="w-full px-3 py-1.5 text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20">Delete</button>
+                              </ActionDropdown>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

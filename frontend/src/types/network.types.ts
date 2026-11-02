@@ -3,7 +3,7 @@ export interface NetworkDevice {
   deviceCode: string;
   deviceName: string;
   deviceType: 'router' | 'switch' | 'olt' | 'access_point' | 'firewall' | 'other';
-  vendor: 'mikrotik' | 'olt' | 'cisco' | 'ubiquiti' | 'huawei' | 'other';
+  vendor: 'mikrotik' | 'olt' | 'vsol' | 'bdcom' | 'huawei' | 'zte' | 'cdata' | 'cisco' | 'ubiquiti' | 'other' | string;
   status: 'active' | 'inactive' | 'maintenance' | 'offline' | 'decommissioned';
   managementIp: string | null;
   dnsName: string | null;
@@ -12,6 +12,10 @@ export interface NetworkDevice {
   webPort: number | null;
   apiUsername: string | null;
   apiPassword: string | null; // Masked as '******' from backend
+  snmpCommunity?: string | null;
+  snmpPort?: number | null;
+  ponType?: 'gpon' | 'epon' | 'xgs-pon' | string | null;
+  totalPonPorts?: number | null;
   isProduction: boolean;
   customPingInterval: number | null;
   pingStatus: 'online' | 'auth_failed' | 'offline' | null;
@@ -41,7 +45,12 @@ export interface CreateOltDevicePayload {
   deviceName: string;
   managementIp: string;
   dnsName?: string;
+  vendor?: string;
+  ponType?: 'gpon' | 'epon' | 'xgs-pon' | string;
+  totalPonPorts?: number;
   managementPort?: number;
+  snmpCommunity?: string;
+  snmpPort?: number;
   apiUsername?: string;
   apiPassword?: string;
   isProduction?: boolean;
@@ -49,11 +58,16 @@ export interface CreateOltDevicePayload {
 
 export interface UpdateNetworkDevicePayload {
   deviceName?: string;
+  vendor?: string;
   managementIp?: string;
   dnsName?: string;
   managementPort?: number;
   winboxPort?: number;
   webPort?: number;
+  snmpCommunity?: string;
+  snmpPort?: number;
+  ponType?: string;
+  totalPonPorts?: number;
   apiUsername?: string;
   apiPassword?: string;
   isProduction?: boolean;

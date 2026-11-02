@@ -22,9 +22,9 @@ class NetworkController {
         if (!empty($_GET['type'])) {
             $type = $_GET['type'];
             if ($type === 'mikrotik') {
-                $where[] = "vendor = 'mikrotik'";
+                $where[] = "(vendor = 'mikrotik' OR device_type = 'router')";
             } elseif ($type === 'olt') {
-                $where[] = "(device_type = 'olt' OR vendor = 'olt')";
+                $where[] = "(device_type = 'olt' OR vendor = 'olt' OR vendor IN ('vsol', 'bdcom', 'huawei', 'zte', 'cdata', 'syrotech'))";
             }
         }
 
@@ -53,6 +53,10 @@ class NetworkController {
                 'apiUsername' => $r['api_username'],
                 'isProduction' => (bool)$r['is_production'],
                 'customPingInterval' => $r['custom_ping_interval'],
+                'snmpCommunity' => $r['snmp_community'] ?? 'public',
+                'snmpPort' => (int)($r['snmp_port'] ?? 161),
+                'ponType' => $r['pon_type'] ?? 'gpon',
+                'totalPonPorts' => (int)($r['total_pon_ports'] ?? 8),
                 'lastSyncAt' => $r['last_sync_at'],
                 'createdAt' => $r['created_at'],
                 // Real-time calculated status
@@ -105,10 +109,10 @@ class NetworkController {
         Response::json(['deviceCode' => $code]);
     }
 
-    public static function create(): void {
+    public static function create(?array $overrideData = null): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
-        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+        $data = $overrideData ?? (json_decode(file_get_contents('php://input'), true) ?: []);
 
         $deviceName = trim($data['deviceName'] ?? $data['name'] ?? '');
         $ip = trim($data['managementIp'] ?? $data['ipAddress'] ?? '192.168.88.1');
@@ -123,21 +127,34 @@ class NetworkController {
         // System-enforced: cannot be cut, modified, or manually overridden
         $code = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'device', 6);
 
+        $deviceType = $data['deviceType'] ?? 'router';
+        $vendor = $data['vendor'] ?? ($deviceType === 'olt' ? 'olt' : 'mikrotik');
+        $port = isset($data['managementPort']) ? (int)$data['managementPort'] : ($deviceType === 'olt' ? 23 : 8728);
+        $winbox = isset($data['winboxPort']) ? (int)$data['winboxPort'] : ($deviceType === 'olt' ? null : 8291);
+        $snmpCommunity = $data['snmpCommunity'] ?? 'public';
+        $snmpPort = isset($data['snmpPort']) ? (int)$data['snmpPort'] : 161;
+        $ponType = $data['ponType'] ?? 'gpon';
+        $totalPonPorts = isset($data['totalPonPorts']) ? (int)$data['totalPonPorts'] : 8;
+
         try {
             $stmt = $db->prepare("INSERT INTO network_devices 
-                (tenant_id, device_code, device_name, device_type, vendor, status, management_ip, management_port, winbox_port, api_username, api_password)
-                VALUES (:tid, :code, :name, :type, :vendor, 'active', :ip, :port, :winbox, :user, :pwd)");
+                (tenant_id, device_code, device_name, device_type, vendor, status, management_ip, management_port, winbox_port, api_username, api_password, snmp_community, snmp_port, pon_type, total_pon_ports)
+                VALUES (:tid, :code, :name, :type, :vendor, 'active', :ip, :port, :winbox, :user, :pwd, :snmp_comm, :snmp_port, :pon_type, :pon_ports)");
             $stmt->execute([
                 'tid' => $tenantId,
                 'code' => $code,
                 'name' => $deviceName,
-                'type' => $data['deviceType'] ?? 'router',
-                'vendor' => $data['vendor'] ?? 'mikrotik',
+                'type' => $deviceType,
+                'vendor' => $vendor,
                 'ip' => $ip,
-                'port' => (int)($data['managementPort'] ?? 8728),
-                'winbox' => (int)($data['winboxPort'] ?? 8291),
+                'port' => $port,
+                'winbox' => $winbox,
                 'user' => $data['apiUsername'] ?? 'admin',
                 'pwd' => $data['apiPassword'] ?? 'admin123',
+                'snmp_comm' => $snmpCommunity,
+                'snmp_port' => $snmpPort,
+                'pon_type' => $ponType,
+                'pon_ports' => $totalPonPorts,
             ]);
 
             $id = $db->lastInsertId();
@@ -160,9 +177,13 @@ class NetworkController {
     }
 
     public static function createOlt(): void {
-        $_POST['deviceType'] = 'olt';
-        $_POST['vendor'] = 'olt';
-        self::create();
+        $raw = file_get_contents('php://input');
+        $data = json_decode($raw, true) ?: [];
+        $data['deviceType'] = 'olt';
+        if (empty($data['vendor']) || $data['vendor'] === 'mikrotik') {
+            $data['vendor'] = 'vsol';
+        }
+        self::create($data);
     }
 
     public static function update(string $id): void {
@@ -178,9 +199,17 @@ class NetworkController {
             $fields[] = "device_name = :name";
             $params['name'] = $data['deviceName'];
         }
+        if (isset($data['vendor'])) {
+            $fields[] = "vendor = :vendor";
+            $params['vendor'] = $data['vendor'];
+        }
         if (isset($data['managementIp'])) {
             $fields[] = "management_ip = :ip";
             $params['ip'] = $data['managementIp'];
+        }
+        if (isset($data['managementPort'])) {
+            $fields[] = "management_port = :port";
+            $params['port'] = (int)$data['managementPort'];
         }
         if (isset($data['apiUsername'])) {
             $fields[] = "api_username = :user";
@@ -189,6 +218,22 @@ class NetworkController {
         if (isset($data['apiPassword'])) {
             $fields[] = "api_password = :pwd";
             $params['pwd'] = $data['apiPassword'];
+        }
+        if (isset($data['snmpCommunity'])) {
+            $fields[] = "snmp_community = :snmp_comm";
+            $params['snmp_comm'] = $data['snmpCommunity'];
+        }
+        if (isset($data['snmpPort'])) {
+            $fields[] = "snmp_port = :snmp_port";
+            $params['snmp_port'] = (int)$data['snmpPort'];
+        }
+        if (isset($data['ponType'])) {
+            $fields[] = "pon_type = :pon_type";
+            $params['pon_type'] = $data['ponType'];
+        }
+        if (isset($data['totalPonPorts'])) {
+            $fields[] = "total_pon_ports = :pon_ports";
+            $params['pon_ports'] = (int)$data['totalPonPorts'];
         }
 
         if (!empty($fields)) {
