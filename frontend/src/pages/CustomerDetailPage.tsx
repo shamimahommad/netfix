@@ -1143,7 +1143,11 @@ export default function CustomerDetailPage() {
     );
   }
 
-  const { customer, service, network, billing, onu } = customerData;
+  const customer = customerData?.customer || ({} as any);
+  const service = customerData?.service || ({} as any);
+  const network = customerData?.network || ({} as any);
+  const billing = customerData?.billing || ({} as any);
+  const onu = customerData?.onu || ({} as any);
   const displayId = formatCustomerIdDisplay(customer?.customerCode ?? '');
 
   return (
@@ -1579,12 +1583,12 @@ export default function CustomerDetailPage() {
             ONU Information
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <InfoRow label="OLT" value={onu.olt || '—'} />
-            <InfoRow label="Update" value={onu.lastUpdate ? formatDate(onu.lastUpdate) : '—'} />
-            <InfoRow label="Mac" value={onu.onuMac || '—'} />
-            <InfoRow label="Power" value={onu.power || '—'} />
-            <InfoRow label="PON ID/Vlan" value={onu.ponId ? `${onu.ponId}, V-${onu.vlan || ''}` : '-, V-'} />
-            <InfoRow label="Distance" value={onu.distance || '—'} />
+            <InfoRow label="OLT" value={onu?.olt || '—'} />
+            <InfoRow label="Update" value={onu?.lastUpdate ? formatDate(onu.lastUpdate) : '—'} />
+            <InfoRow label="Mac" value={onu?.onuMac || '—'} />
+            <InfoRow label="Power" value={onu?.power || '—'} />
+            <InfoRow label="PON ID/Vlan" value={onu?.ponId ? `${onu.ponId}, V-${onu?.vlan || ''}` : '-, V-'} />
+            <InfoRow label="Distance" value={onu?.distance || '—'} />
           </div>
         </div>
       </div>
