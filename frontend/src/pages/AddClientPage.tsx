@@ -1,26 +1,62 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  UserPlus,
+  User,
+  Phone,
+  Mail,
+  CreditCard,
+  Calendar,
+  MapPin,
+  Building,
+  Navigation,
+  Map as MapIcon,
+  Server,
+  Package as PackageIcon,
+  Search,
+  Lock,
+  Eye,
+  EyeOff,
+  Check,
+  CheckCircle2,
+  ArrowRight,
+  ArrowLeft,
+  X,
+  AlertTriangle,
+  Star,
+  Gift,
+  Clock,
+  Layers,
+} from 'lucide-react';
 import { useToastContext } from '@/contexts/ToastContext';
 import { useAuthStore } from '@/stores/authStore';
 import { customersService } from '@/services/customers.service';
 import { networkService } from '@/services/network.service';
 import { networkPackagesService } from '@/services/network-packages.service';
 import { serviceAreaService } from '@/services/service-area.service';
-import { resellerService } from '@/services/reseller.service';
-import { Reseller } from '@/services/reseller.service';
+import { resellerService, Reseller } from '@/services/reseller.service';
 import { NetworkDevice, NetworkPackage, NetworkProtocol } from '@/types/network.types';
 import { ServiceArea, SubArea } from '@/types/service-area.types';
 import { CreateClientPayload } from '@/types/client-onboarding.types';
 import { BD_DISTRICTS, getThanaNamesForDistrict } from '@/data/bd-districts-thanas';
 import MapPickerModal from '@/components/MapPickerModal';
+import { PageHeader } from '@/components/common';
 
 type Step = 1 | 2 | 3 | 4 | 5;
 
+const STEPS = [
+  { n: 1 as Step, label: 'Customer Info', icon: User, desc: 'Personal details' },
+  { n: 2 as Step, label: 'Location & Area', icon: MapPin, desc: 'Address & coordinates' },
+  { n: 3 as Step, label: 'Network & Plan', icon: Server, desc: 'Router, profile & credentials' },
+  { n: 4 as Step, label: 'Billing & Status', icon: CreditCard, desc: 'Owner, cycle & charges' },
+  { n: 5 as Step, label: 'Review & Confirm', icon: CheckCircle2, desc: 'Verify & activate' },
+];
+
 const PROTOCOLS: Array<{ label: string; value: NetworkProtocol }> = [
-  { label: 'PPPoE', value: 'pppoe' },
-  { label: 'Hotspot', value: 'hotspot' },
-  { label: 'Static', value: 'static' },
-  { label: 'OVPN', value: 'ovpn' },
+  { label: 'PPPoE (Broadband)', value: 'pppoe' },
+  { label: 'Hotspot (Card / Voucher)', value: 'hotspot' },
+  { label: 'Static IP', value: 'static' },
+  { label: 'OpenVPN', value: 'ovpn' },
   { label: 'PPTP', value: 'pptp' },
 ];
 
@@ -29,22 +65,6 @@ function randomString(length: number) {
   let out = '';
   for (let i = 0; i < length; i++) out += chars[Math.floor(Math.random() * chars.length)];
   return out;
-}
-
-function VIPIcon({ className = 'w-4 h-4' }: { className?: string }) {
-  return (
-    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
-      <path d="M12 2l2.4 7.4h7.6l-6 4.6 2.3 7-6.3-4.6-6.3 4.6 2.3-7-6-4.6h7.6L12 2z" />
-    </svg>
-  );
-}
-
-function FreeIcon({ className = 'w-4 h-4' }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />
-    </svg>
-  );
 }
 
 function normalizePhone(phone: string) {
@@ -98,7 +118,7 @@ export default function AddClientPage() {
     billingCycle: 'monthly',
 
     ownerId: '',
-    clientCategory: '',
+    clientCategory: 'prepaid',
     addLessAmount: 0,
     installationCharge: 0,
   });
@@ -111,7 +131,6 @@ export default function AddClientPage() {
   const [documentFile, setDocumentFile] = useState<File | null>(null);
 
   const [passwordRevealed, setPasswordRevealed] = useState(false);
-
   const [isMapModalOpen, setIsMapModalOpen] = useState(false);
   const [locationInput, setLocationInput] = useState('');
 
@@ -128,7 +147,7 @@ export default function AddClientPage() {
   const canSelectOwner = isAdminOrManager || roleCode === 'reseller' || roleCode === 'sub_reseller';
   const isAgent = roleCode === 'agent';
 
-  // Reseller dropdown options: Admin/Manager = all; Reseller/Sub Reseller = self + downline
+  // Reseller dropdown options
   const ownerOptions = useMemo(() => {
     if (!canSelectOwner) return [];
     const self = userId ? [{ userId, name: resellerLabel, role: roleCode }] : [];
@@ -144,26 +163,27 @@ export default function AddClientPage() {
     if (s === 1) {
       if (!form.clientName.trim()) nextErrors.clientName = 'Customer name is required';
       const mobileDigits = normalizePhone(form.mobileNo);
-      if (!form.mobileNo.trim()) nextErrors.mobileNo = 'Mobile no is required';
-      else if (mobileDigits.length !== 11) nextErrors.mobileNo = 'Mobile number must be 11 digits';
-      if (form.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) nextErrors.email = 'Invalid email';
-      if (form.customerCode?.trim() && !/^\d{6}$/.test(form.customerCode.replace(/\D/g, ''))) nextErrors.customerCode = 'Customer ID must be exactly 6 digits';
+      if (!form.mobileNo.trim()) nextErrors.mobileNo = 'Mobile number is required';
+      else if (mobileDigits.length !== 11) nextErrors.mobileNo = 'Mobile number must be 11 digits (e.g. 017XXXXXXXX)';
+      if (form.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) nextErrors.email = 'Invalid email address';
+      if (form.customerCode?.trim() && !/^\d{6}$/.test(form.customerCode.replace(/\D/g, ''))) {
+        nextErrors.customerCode = 'Customer ID must be exactly 6 digits';
+      }
     }
 
-    // Step 2 (Data And Location) – Address and Thana required
     if (s === 2) {
-      if (!form.address?.trim()) nextErrors.address = 'Address is required';
+      if (!form.address?.trim()) nextErrors.address = 'Installation address is required';
       if (!form.thana?.trim()) nextErrors.thana = 'Thana is required';
     }
 
     if (s === 3) {
-      if (!form.serverId) nextErrors.serverId = 'Server is required';
+      if (!form.serverId) nextErrors.serverId = 'Server / Router is required';
       if (!form.protocol) nextErrors.protocol = 'Protocol is required';
-      if (!form.packageId) nextErrors.packageId = 'Package is required';
+      if (!form.packageId) nextErrors.packageId = 'Please select a package plan';
       if (!form.username.trim()) nextErrors.username = 'Username is required';
       if (!form.password.trim()) nextErrors.password = 'Password is required';
 
-      if (isProfileRequired && selectedPackage && !selectedPackage.mikrotikProfileId) {
+      if (isProfileRequired && selectedPackage && !selectedPackage.mikrotikProfileId && !(selectedPackage as any).mikrotikProfile) {
         nextErrors.packageId = 'Selected package missing MikroTik profile mapping';
       }
     }
@@ -172,28 +192,30 @@ export default function AddClientPage() {
       if (!form.billingCycle) nextErrors.billingCycle = 'Billing cycle is required';
     }
 
-    // Step 5 (Preview) has no form validation
-    if (s === 5) {
-      // no errors
-    }
-
     return nextErrors;
   };
 
   const isStepValid = (s: Step) => Object.keys(getStepErrors(s)).length === 0;
-  const canSubmit = isStepValid(1) && isStepValid(2) && isStepValid(3) && isStepValid(4) && (form.serverId && form.protocol ? (packages.length > 0 && form.packageId) : true);
+  const canSubmit =
+    isStepValid(1) &&
+    isStepValid(2) &&
+    isStepValid(3) &&
+    isStepValid(4) &&
+    (form.serverId && form.protocol ? packages.length > 0 && form.packageId : true);
 
-  // Prepaid/Postpaid/VIP: expiry = created date until Recharge/Renew/Topup; Free: Lifetime
+  // Expiry preview calculation
   const expiryPreview = useMemo(() => {
-    if (form.clientCategory === 'free') return null; // shown as "Lifetime" in UI
+    if (form.clientCategory === 'free') return null;
     if (form.clientCategory === 'prepaid' || form.clientCategory === 'postpaid' || form.clientCategory === 'vip') {
-      return new Date(); // created date = expiry until recharge
+      return new Date();
     }
     if (!selectedPackage) return null;
     const base = new Date();
     const expiry = new Date(base);
-    expiry.setDate(expiry.getDate() + (selectedPackage.validity?.days || 0));
-    expiry.setHours(expiry.getHours() + (selectedPackage.validity?.hours || 0));
+    const days = selectedPackage.validity?.days ?? (selectedPackage as any).validityDays ?? 30;
+    const hours = selectedPackage.validity?.hours ?? (selectedPackage as any).validityHours ?? 0;
+    expiry.setDate(expiry.getDate() + days);
+    expiry.setHours(expiry.getHours() + hours);
     return expiry;
   }, [selectedPackage, form.clientCategory]);
 
@@ -207,7 +229,7 @@ export default function AddClientPage() {
     [form.protocol],
   );
 
-  // Auto-generate username/password when mobile changes (only if empty)
+  // Auto-generate username/password when mobile changes (if empty)
   useEffect(() => {
     const digits = normalizePhone(form.mobileNo);
     if (!digits) return;
@@ -227,8 +249,11 @@ export default function AddClientPage() {
         deviceName: d.name,
       })) as NetworkDevice[];
       setServers(list);
+      if (list.length > 0 && !form.serverId) {
+        setForm((prev) => ({ ...prev, serverId: list[0].networkDeviceId }));
+      }
     } catch (err: any) {
-      toast.error(err.response?.data?.message || err.message || 'Failed to load servers');
+      console.warn('Failed to load servers:', err);
     }
   };
 
@@ -237,8 +262,7 @@ export default function AddClientPage() {
       const res = await serviceAreaService.listAreas();
       setAreas(res.data || []);
     } catch (err: any) {
-      console.error('Failed to load areas:', err);
-      // Don't show toast for areas - it's optional
+      console.warn('Failed to load areas:', err);
     }
   };
 
@@ -251,8 +275,7 @@ export default function AddClientPage() {
       const res = await serviceAreaService.listSubAreas(areaId);
       setSubAreas(res.data || []);
     } catch (err: any) {
-      console.error('Failed to load sub areas:', err);
-      // Don't show toast for sub areas - it's optional
+      console.warn('Failed to load sub areas:', err);
     }
   };
 
@@ -269,20 +292,21 @@ export default function AddClientPage() {
       const res = await networkPackagesService.list({
         serverId: form.serverId,
         protocol: form.protocol,
-        search: packageSearch || undefined,
+        search: packageSearch.trim() || undefined,
         page,
-        limit: 10,
+        limit: 8,
       });
-      setPackages(res.data || []);
+      const list = res.data || [];
+      setPackages(list);
       setPackagesMeta({
-        page: res.meta.page,
-        totalPages: res.meta.totalPages,
-        total: res.meta.total,
+        page: res.meta?.page ?? page,
+        totalPages: res.meta?.totalPages ?? 1,
+        total: res.meta?.total ?? list.length,
       });
     } catch (err: any) {
       const msg = err.response?.data?.message || err.message || 'Failed to load packages';
       setPackagesError(msg);
-      toast.error(msg);
+      setPackages([]);
     } finally {
       setPackagesLoading(false);
     }
@@ -293,17 +317,18 @@ export default function AddClientPage() {
     loadAreas();
   }, []);
 
-  // Auto-fill Customer ID from backend (next available 6-digit from MySQL)
+  // Auto-fill Customer ID from backend sequence (strictly numeric 6-digit serial)
   useEffect(() => {
     customersService
       .getNextCustomerCode()
       .then((res) => {
         if (res?.customerCode) {
-          setForm((p) => ({ ...p, customerCode: res.customerCode }));
+          const cleanCode = String(res.customerCode).replace(/\D/g, '').padStart(6, '0');
+          setForm((p) => ({ ...p, customerCode: cleanCode }));
         }
       })
       .catch(() => {
-        // Ignore – user can leave blank or enter manually
+        // Fallback or leave manual
       });
   }, []);
 
@@ -315,7 +340,7 @@ export default function AddClientPage() {
       .then((res) => setResellersList(res.data ?? []))
       .catch(() => setResellersList([]))
       .finally(() => setResellersLoading(false));
-  }, [step === 4, canSelectOwner]);
+  }, [step, canSelectOwner]);
 
   // Load sub areas when area is selected
   useEffect(() => {
@@ -333,7 +358,6 @@ export default function AddClientPage() {
   // Reload packages when server/protocol changes
   useEffect(() => {
     loadPackages(1);
-    // reset package selection
     setSelectedPackage(null);
     setForm((p) => ({ ...p, packageId: '' }));
     setErrors((prev) => {
@@ -350,24 +374,30 @@ export default function AddClientPage() {
   };
 
   const handleNext = () => {
-    if (!validateStep(step)) return;
+    if (!validateStep(step)) {
+      toast.error('Please fill in the required fields before continuing');
+      return;
+    }
     setStep((prev) => (prev === 5 ? 5 : ((prev + 1) as Step)));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleBack = () => setStep((prev) => (prev === 1 ? 1 : ((prev - 1) as Step)));
+  const handleBack = () => {
+    setStep((prev) => (prev === 1 ? 1 : ((prev - 1) as Step)));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const handleSubmit = async () => {
     if (!validateStep(1) || !validateStep(2) || !validateStep(3) || !validateStep(4)) {
-      toast.error('Please fix the highlighted errors');
+      toast.error('Please fix the highlighted errors in previous steps');
       return;
     }
     if (!selectedPackage) {
-      toast.error('Please select a package');
+      toast.error('Please select a package plan in Step 3');
       return;
     }
 
-    // Enforce profile rules
-    if (isProfileRequired && !selectedPackage.mikrotikProfileId) {
+    if (isProfileRequired && !selectedPackage.mikrotikProfileId && !(selectedPackage as any).mikrotikProfile) {
       toast.error('Selected package is missing MikroTik profile mapping');
       return;
     }
@@ -389,11 +419,12 @@ export default function AddClientPage() {
         username: form.username.trim(),
         password: form.password.trim(),
         remoteAddress: form.remoteAddress?.trim() ? form.remoteAddress.trim() : undefined,
-        ownerId: isAgent ? undefined : (form.ownerId?.trim() || userId || undefined),
+        ownerId: isAgent ? undefined : form.ownerId?.trim() || userId || undefined,
         clientCategory: form.clientCategory?.trim() ? form.clientCategory : undefined,
         addLessAmount: (form.addLessAmount ?? 0) !== 0 ? form.addLessAmount : undefined,
         installationCharge: (form.installationCharge ?? 0) > 0 ? form.installationCharge : undefined,
-        customerCode: form.customerCode?.replace(/\D/g, '').length === 6 ? form.customerCode.replace(/\D/g, '') : undefined,
+        customerCode:
+          form.customerCode?.replace(/\D/g, '').length === 6 ? form.customerCode.replace(/\D/g, '') : undefined,
         latitude: form.latitude != null ? form.latitude : undefined,
         longitude: form.longitude != null ? form.longitude : undefined,
         initialStatus: 'active',
@@ -411,234 +442,339 @@ export default function AddClientPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-sky-50 via-teal-50/30 to-sky-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 p-6">
-      <div className="max-w-5xl mx-auto space-y-6">
-        <div className="bg-white/90 dark:bg-slate-800/90 backdrop-blur-lg p-6 rounded-2xl border border-sky-200/60 dark:border-slate-600 shadow-xl flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-sky-600 via-teal-600 to-sky-600 dark:from-sky-400 dark:via-teal-400 dark:to-sky-400 bg-clip-text text-transparent">
-              Add New Customer
-            </h1>
-            <p className="mt-2 text-sm font-medium text-slate-600 dark:text-slate-300">
-              Create a new customer account and provision network access
-            </p>
-          </div>
+    <div className="w-full min-w-0 space-y-6">
+      {/* Page Header */}
+      <PageHeader
+        icon={<UserPlus className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
+        title="Add New Customer"
+        subtitle="Step-by-step customer onboarding, network provisioning, and billing activation"
+        actions={
           <button
+            type="button"
             onClick={() => navigate('/dashboard/customers/all')}
-            className="px-6 py-3 bg-white dark:bg-slate-700 border border-sky-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-sky-50 dark:hover:bg-slate-600 transition-all shadow-sm hover:shadow-md"
+            className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm shadow-2xs"
           >
             Cancel
           </button>
-        </div>
+        }
+      />
 
-        {/* Stepper */}
-        <div className="bg-white/90 dark:bg-slate-800/90 backdrop-blur-lg p-4 rounded-2xl border border-sky-200/60 dark:border-slate-600 shadow-xl">
-          <div className="grid grid-cols-5 gap-2">
-            {[
-              { n: 1 as const, label: 'Customer Info' },
-              { n: 2 as const, label: 'Data And Location' },
-              { n: 3 as const, label: 'Server' },
-              { n: 4 as const, label: 'Billing' },
-              { n: 5 as const, label: 'Preview' },
-            ].map((s) => (
+      {/* Modern Stepper Progress Bar */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 sm:p-4 shadow-sm">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3">
+          {STEPS.map((s) => {
+            const Icon = s.icon;
+            const isActive = step === s.n;
+            const isCompleted = step > s.n;
+
+            return (
               <button
                 key={s.n}
-                onClick={() => setStep(s.n)}
-                className={`px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
-                  step === s.n
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
+                type="button"
+                onClick={() => {
+                  if (s.n < step || isStepValid(step)) {
+                    setStep(s.n);
+                  }
+                }}
+                className={`flex items-center gap-2.5 p-2.5 rounded-lg text-left transition-all ${
+                  isActive
+                    ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-600/20'
+                    : isCompleted
+                    ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100/60'
+                    : 'bg-slate-50 text-slate-600 dark:bg-slate-800/60 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
               >
-                {s.label}
+                <div
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-xs font-bold ${
+                    isActive
+                      ? 'bg-white/20 text-white'
+                      : isCompleted
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  {isCompleted ? <Check className="w-3.5 h-3.5" /> : <Icon className="w-3.5 h-3.5" />}
+                </div>
+                <div className="min-w-0 truncate">
+                  <p className="text-xs font-semibold truncate leading-tight">{s.label}</p>
+                  <p className={`text-[10px] truncate ${isActive ? 'text-blue-100' : 'text-slate-400'}`}>
+                    {s.desc}
+                  </p>
+                </div>
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
+      </div>
 
-        {/* Step Content */}
-        <div className="bg-white/90 dark:bg-slate-800/90 backdrop-blur-lg p-6 rounded-2xl border border-sky-200/60 dark:border-slate-600 shadow-xl">
-          {/* Validation Messages */}
-          {step === 2 && areas.length === 0 && (
-            <div className="mb-6 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-amber-800 dark:text-amber-300 px-4 py-3 rounded-xl">
-              <p className="text-sm font-semibold">Please create Service Area first</p>
-              <p className="text-xs mt-1">You need to create at least one Service Area before adding customers.</p>
+      {/* Main Form Content Card */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden">
+        {/* Warning Banners */}
+        {step === 2 && areas.length === 0 && (
+          <div className="m-5 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 shrink-0 text-amber-600 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-semibold">No Service Area created yet</p>
+              <p className="text-xs mt-0.5 text-amber-700 dark:text-amber-400">
+                You can still proceed by entering your Thana and address, or create areas under Network &gt; Service Areas.
+              </p>
             </div>
-          )}
+          </div>
+        )}
 
-          {step === 3 && form.serverId && form.protocol && !packagesLoading && packages.length === 0 && (
-            <div className="mb-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 text-red-800 dark:text-red-300 px-4 py-3 rounded-xl">
-              <p className="text-sm font-semibold">No package found</p>
-              <p className="text-xs mt-1">Please create a package first for the selected server and protocol.</p>
+        {step === 3 && packagesError && (
+          <div className="m-5 p-4 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-300 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 shrink-0 text-red-600 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-semibold">Error Loading Packages</p>
+              <p className="text-xs mt-0.5 text-red-700 dark:text-red-400">{packagesError}</p>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Step section labels - sky/teal accent */}
-          {step === 1 && (
-            <div className="mb-4 pb-2 border-b border-sky-200/60 dark:border-slate-600">
-              <h2 className="text-lg font-bold text-sky-700 dark:text-sky-300">Customer information</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Basic details</p>
+        {step === 3 && form.serverId && form.protocol && !packagesLoading && !packagesError && packages.length === 0 && (
+          <div className="m-5 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 shrink-0 text-amber-600 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-semibold">No package plans found for this server/protocol</p>
+              <p className="text-xs mt-0.5 text-amber-700 dark:text-amber-400">
+                Please create a package in Network &gt; Package Plans or choose another server/protocol.
+              </p>
             </div>
-          )}
+          </div>
+        )}
 
-          {step === 1 && (
-            <div className="space-y-5">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                    Customer Name <span className="text-red-500">*</span>
-                  </label>
+        {/* ================= STEP 1: CUSTOMER INFO ================= */}
+        {step === 1 && (
+          <div className="p-6 sm:p-8 space-y-6">
+            <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
+              <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <User className="w-4 h-4 text-blue-600" />
+                Customer Identity & Contact Information
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Primary subscriber credentials and contact details
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Customer Name */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Customer Name <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
+                    type="text"
                     value={form.clientName}
                     onChange={(e) => setForm((p) => ({ ...p, clientName: e.target.value }))}
-                    className={`w-full px-4 py-3 rounded-xl border bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 ${
-                      errors.clientName ? 'border-red-400' : 'border-sky-200 dark:border-slate-600'
+                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all ${
+                      errors.clientName ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
                     }`}
-                    placeholder="Customer name"
+                    placeholder="e.g. Tanvir Ahmed"
                   />
-                  {errors.clientName && <p className="mt-1 text-xs text-red-500">{errors.clientName}</p>}
                 </div>
+                {errors.clientName && <p className="mt-1 text-xs text-rose-500 font-medium">{errors.clientName}</p>}
+              </div>
 
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                    Mobile No <span className="text-red-500">*</span>
-                  </label>
+              {/* Mobile No */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Mobile No (11 Digits) <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
+                    type="text"
                     value={form.mobileNo}
                     onChange={(e) => setForm((p) => ({ ...p, mobileNo: e.target.value }))}
-                    className={`w-full px-4 py-3 rounded-xl border bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 ${
-                      errors.mobileNo ? 'border-red-400' : 'border-sky-200 dark:border-slate-600'
+                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all ${
+                      errors.mobileNo ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
                     }`}
-                    placeholder="01XXXXXXXXX (11 digits)"
+                    placeholder="017XXXXXXXX"
                   />
-                  {errors.mobileNo && <p className="mt-1 text-xs text-red-500">{errors.mobileNo}</p>}
                 </div>
+                <p className="mt-1 text-[11px] text-slate-400">Used for SMS billing alerts & auto-generates PPPoE login.</p>
+                {errors.mobileNo && <p className="mt-1 text-xs text-rose-500 font-medium">{errors.mobileNo}</p>}
+              </div>
 
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Customer ID</label>
+              {/* Customer ID */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Customer ID (System Code)
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
                     readOnly
                     value={form.customerCode || ''}
-                    className={`w-full px-4 py-3 rounded-xl border bg-sky-50/80 dark:bg-slate-900/60 text-slate-700 dark:text-slate-300 outline-none cursor-not-allowed ${
-                      errors.customerCode ? 'border-red-400' : 'border-sky-200 dark:border-slate-600'
-                    }`}
-                    placeholder="Loading…"
+                    className="w-full pl-9 pr-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 font-mono text-sm outline-none cursor-not-allowed"
+                    placeholder="Auto-generating..."
                   />
-                  <p className="mt-1 text-xs text-slate-500">Auto-assigned from system. Cannot be changed.</p>
-                  {errors.customerCode && <p className="mt-1 text-xs text-red-500">{errors.customerCode}</p>}
                 </div>
+                <p className="mt-1 text-[11px] text-slate-400">Strictly numeric serial number (e.g. 000001).</p>
+                {errors.customerCode && <p className="mt-1 text-xs text-rose-500 font-medium">{errors.customerCode}</p>}
+              </div>
 
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Email</label>
+              {/* Email */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Email Address <span className="text-slate-400 font-normal lowercase">(optional)</span>
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
+                    type="email"
                     value={form.email || ''}
                     onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-                    className={`w-full px-4 py-3 rounded-xl border bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 ${
-                      errors.email ? 'border-red-400' : 'border-sky-200 dark:border-slate-600'
+                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all ${
+                      errors.email ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
                     }`}
-                    placeholder="email@domain.com"
+                    placeholder="customer@domain.com"
                   />
-                  {errors.email && <p className="mt-1 text-xs text-red-500">{errors.email}</p>}
                 </div>
+                {errors.email && <p className="mt-1 text-xs text-rose-500 font-medium">{errors.email}</p>}
+              </div>
 
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">NID No</label>
+              {/* NID No */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  National ID (NID) <span className="text-slate-400 font-normal lowercase">(optional)</span>
+                </label>
+                <div className="relative">
+                  <CreditCard className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
+                    type="text"
                     value={form.nidNo || ''}
                     onChange={(e) => setForm((p) => ({ ...p, nidNo: e.target.value }))}
-                    className="w-full px-4 py-3 rounded-xl border border-sky-200 dark:border-slate-600 bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
-                    placeholder="Optional"
+                    className="w-full pl-9 pr-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                    placeholder="Smart Card or Old NID number"
                   />
                 </div>
+              </div>
 
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Date of Birth</label>
+              {/* Date of Birth */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Date of Birth <span className="text-slate-400 font-normal lowercase">(optional)</span>
+                </label>
+                <div className="relative">
+                  <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="date"
                     value={form.dob || ''}
                     onChange={(e) => setForm((p) => ({ ...p, dob: e.target.value }))}
-                    className="w-full px-4 py-3 rounded-xl border border-sky-200 dark:border-slate-600 bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
+                    className="w-full pl-9 pr-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
                   />
                 </div>
               </div>
+            </div>
 
-              {/* Upload Documents */}
-              <div className="pt-4 border-t border-sky-200/60 dark:border-slate-600">
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={uploadDocuments}
-                    onChange={(e) => {
-                      setUploadDocuments(e.target.checked);
-                      if (!e.target.checked) {
-                        setDocumentType('');
-                        setDocumentFile(null);
+            {/* Document Upload Section */}
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+              <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors w-fit">
+                <input
+                  type="checkbox"
+                  checked={uploadDocuments}
+                  onChange={(e) => {
+                    setUploadDocuments(e.target.checked);
+                    if (!e.target.checked) {
+                      setDocumentType('');
+                      setDocumentFile(null);
+                    }
+                  }}
+                  className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  Attach KYC Verification Document?
+                </span>
+              </label>
+
+              {uploadDocuments && (
+                <div className="mt-4 p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in duration-150">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                      Document Type
+                    </label>
+                    <select
+                      value={documentType}
+                      onChange={(e) =>
+                        setDocumentType(e.target.value as 'driving_license' | 'nid' | 'passport' | '')
                       }
-                    }}
-                    className="w-5 h-5 rounded border-sky-300 text-sky-600 focus:ring-sky-500 focus:ring-2"
-                  />
-                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Upload Documents?</span>
-                </label>
-                {uploadDocuments && (
-                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Document Type</label>
-                      <select
-                        value={documentType}
-                        onChange={(e) => setDocumentType(e.target.value as 'driving_license' | 'nid' | 'passport' | '')}
-                        className="w-full px-4 py-3 rounded-xl border border-sky-200 dark:border-slate-600 bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
-                      >
-                        <option value="">Select type</option>
-                        <option value="driving_license">Driving License</option>
-                        <option value="nid">NID</option>
-                        <option value="passport">Passport</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Browse</label>
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="file"
-                          accept=".pdf,.jpg,.jpeg,.png"
-                          onChange={(e) => setDocumentFile(e.target.files?.[0] ?? null)}
-                          className="block w-full text-sm text-slate-600 dark:text-slate-400 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:bg-sky-100 file:text-sky-700 dark:file:bg-sky-900/50 dark:file:text-sky-300 file:font-semibold file:cursor-pointer hover:file:bg-sky-200 dark:hover:file:bg-sky-800/50"
-                        />
-                        {documentFile && (
-                          <span className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-[180px]" title={documentFile.name}>
-                            {documentFile.name}
-                          </span>
-                        )}
-                      </div>
+                      className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    >
+                      <option value="">Select document type</option>
+                      <option value="nid">National ID Card (NID)</option>
+                      <option value="driving_license">Driving License</option>
+                      <option value="passport">Passport</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                      Upload File (.pdf, .jpg, .png)
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        onChange={(e) => setDocumentFile(e.target.files?.[0] ?? null)}
+                        className="block w-full text-xs text-slate-600 dark:text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 dark:file:bg-blue-900/40 dark:file:text-blue-300 file:font-semibold file:cursor-pointer hover:file:bg-blue-100"
+                      />
+                      {documentFile && (
+                        <span className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate max-w-[150px]">
+                          {documentFile.name}
+                        </span>
+                      )}
                     </div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
-          )}
+          </div>
+        )}
 
-          {step === 2 && (
-            <div className="space-y-5">
-              <div className="mb-4 pb-2 border-b border-sky-200/60 dark:border-slate-600">
-                <h2 className="text-lg font-bold text-sky-700 dark:text-sky-300">Data And Location</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Address and service area</p>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="md:col-span-3">
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Address <span className="text-red-500">*</span></label>
+        {/* ================= STEP 2: LOCATION & AREA ================= */}
+        {step === 2 && (
+          <div className="p-6 sm:p-8 space-y-6">
+            <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
+              <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-blue-600" />
+                Physical Installation Address & Service Area
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Define geographic location, zone coverage, and GPS coordinates
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              {/* Installation Address */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Installation Address <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <Building className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
                   <textarea
                     rows={2}
                     value={form.address || ''}
                     onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))}
-                    className={`w-full px-4 py-3 rounded-xl border bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 resize-none ${
-                      errors.address ? 'border-red-400' : 'border-sky-200 dark:border-slate-600'
+                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all resize-none ${
+                      errors.address ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
                     }`}
-                    placeholder="Enter address"
+                    placeholder="House / Holding, Road no, Floor/Flat, Block/Sector..."
                   />
-                  {errors.address && <p className="mt-1 text-xs text-red-500">{errors.address}</p>}
                 </div>
+                {errors.address && <p className="mt-1 text-xs text-rose-500 font-medium">{errors.address}</p>}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                {/* District */}
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                    District <span className="text-slate-400 font-normal">(Optional)</span>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                    District <span className="text-slate-400 font-normal lowercase">(optional)</span>
                   </label>
                   <select
                     value={form.district || ''}
@@ -646,7 +782,7 @@ export default function AddClientPage() {
                       const district = e.target.value;
                       setForm((p) => ({ ...p, district, thana: '' }));
                     }}
-                    className="w-full px-4 py-3 rounded-xl border border-sky-200 dark:border-slate-600 bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
+                    className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                   >
                     <option value="">Select District</option>
                     {BD_DISTRICTS.map((d) => (
@@ -656,19 +792,21 @@ export default function AddClientPage() {
                     ))}
                   </select>
                 </div>
+
+                {/* Thana */}
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                    Thana <span className="text-red-500">*</span>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                    Thana / Upazila <span className="text-rose-500">*</span>
                   </label>
                   <select
                     value={form.thana || ''}
                     onChange={(e) => setForm((p) => ({ ...p, thana: e.target.value }))}
                     disabled={!form.district}
-                    className={`w-full px-4 py-3 rounded-xl border bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 disabled:opacity-50 disabled:cursor-not-allowed ${
-                      errors.thana ? 'border-red-400' : 'border-sky-200 dark:border-slate-600'
+                    className={`w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed ${
+                      errors.thana ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
                     }`}
                   >
-                    <option value="">Select Thana</option>
+                    <option value="">{form.district ? 'Select Thana' : 'Select District first'}</option>
                     {form.district &&
                       getThanaNamesForDistrict(form.district).map((name) => (
                         <option key={name} value={name}>
@@ -676,11 +814,13 @@ export default function AddClientPage() {
                         </option>
                       ))}
                   </select>
-                  {errors.thana && <p className="mt-1 text-xs text-red-500">{errors.thana}</p>}
+                  {errors.thana && <p className="mt-1 text-xs text-rose-500 font-medium">{errors.thana}</p>}
                 </div>
+
+                {/* Area */}
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                    Area <span className="text-slate-400 font-normal">(Optional)</span>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                    Service Area <span className="text-slate-400 font-normal lowercase">(optional)</span>
                   </label>
                   <select
                     value={selectedAreaId}
@@ -690,22 +830,21 @@ export default function AddClientPage() {
                       const areaName = areas.find((a) => a.serviceAreaId === id)?.name ?? '';
                       setForm((p) => ({ ...p, area: areaName }));
                     }}
-                    className={`w-full px-4 py-3 rounded-xl border bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 ${
-                      errors.area ? 'border-red-400' : 'border-sky-200 dark:border-slate-600'
-                    }`}
+                    className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                   >
-                    <option value="">Select Area</option>
+                    <option value="">Select Service Area</option>
                     {areas.map((area) => (
                       <option key={area.serviceAreaId} value={area.serviceAreaId}>
                         {area.name}
                       </option>
                     ))}
                   </select>
-                  {errors.area && <p className="mt-1 text-xs text-red-500">{errors.area}</p>}
                 </div>
+
+                {/* Sub Area */}
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                    Sub Area <span className="text-slate-400 font-normal">(Optional)</span>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                    Sub Area <span className="text-slate-400 font-normal lowercase">(optional)</span>
                   </label>
                   <select
                     value={form.subArea || ''}
@@ -714,205 +853,220 @@ export default function AddClientPage() {
                       setForm((p) => ({ ...p, subArea: subAreaName }));
                     }}
                     disabled={!selectedAreaId}
-                    className={`w-full px-4 py-3 rounded-xl border bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 disabled:opacity-50 disabled:cursor-not-allowed ${
-                      errors.subArea ? 'border-red-400' : 'border-sky-200 dark:border-slate-600'
-                    }`}
+                    className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <option value="">Select Sub Area</option>
+                    <option value="">{selectedAreaId ? 'Select Sub Area' : 'Select Area first'}</option>
                     {subAreas.map((subArea) => (
                       <option key={subArea.subAreaId} value={subArea.name}>
                         {subArea.name}
                       </option>
                     ))}
                   </select>
-                  {errors.subArea && <p className="mt-1 text-xs text-red-500">{errors.subArea}</p>}
                 </div>
               </div>
 
-              {/* Location */}
-              <div className="pt-4 border-t border-sky-200/60 dark:border-slate-600">
-                <h3 className="text-sm font-bold text-sky-700 dark:text-sky-300 mb-3">Location</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Enter Latitude, Longitude</label>
-                    <input
-                      type="text"
-                      value={
-                        locationInput !== ''
-                          ? locationInput
-                          : form.latitude != null && form.longitude != null
-                            ? `${form.latitude}, ${form.longitude}`
-                            : ''
-                      }
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setLocationInput(v);
-                        if (!v.trim()) {
-                          setForm((p) => ({ ...p, latitude: undefined, longitude: undefined }));
-                          return;
-                        }
-                        const parts = v.split(/[\s,]+/).filter(Boolean);
-                        const lat = parts[0] ? parseFloat(parts[0]) : NaN;
-                        const lng = parts[1] ? parseFloat(parts[1]) : NaN;
-                        if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
-                          setForm((p) => ({ ...p, latitude: lat, longitude: lng }));
+              {/* Geographic Coordinates & Map */}
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                  <div>
+                    <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                      GPS Coordinates (Latitude, Longitude)
+                    </h3>
+                    <p className="text-[11px] text-slate-400">
+                      Pin subscriber on coverage map for technicians and maintenance
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (navigator.geolocation) {
+                          try {
+                            const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+                              navigator.geolocation.getCurrentPosition(resolve, reject, {
+                                enableHighAccuracy: true,
+                                timeout: 10000,
+                                maximumAge: 0,
+                              });
+                            });
+                            setLocationInput('');
+                            setForm((p) => ({
+                              ...p,
+                              latitude: position.coords.latitude,
+                              longitude: position.coords.longitude,
+                            }));
+                            toast.success('Current location detected successfully');
+                          } catch {
+                            toast.error('Unable to retrieve location. Please use "Select On Map".');
+                          }
+                        } else {
+                          toast.error('Geolocation is not supported by your browser.');
                         }
                       }}
-                      onBlur={() => setLocationInput('')}
-                      placeholder="Enter Latitude, Longitude"
-                      className="w-full px-4 py-3 rounded-xl border border-sky-200 dark:border-slate-600 bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
-                    />
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (navigator.geolocation) {
-                        try {
-                          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-                            navigator.geolocation.getCurrentPosition(resolve, reject, {
-                              enableHighAccuracy: true,
-                              timeout: 10000,
-                              maximumAge: 0,
-                            });
-                          });
-                          setLocationInput('');
-                          setForm((p) => ({
-                            ...p,
-                            latitude: position.coords.latitude,
-                            longitude: position.coords.longitude,
-                          }));
-                          toast.success('Location retrieved successfully');
-                        } catch {
-                          toast.error('Failed to get current location. Try Select On Map.');
-                        }
-                      } else {
-                        toast.error('Geolocation is not supported by your browser.');
-                      }
-                    }}
-                    className="px-4 py-2.5 rounded-xl border border-sky-300 dark:border-slate-600 bg-sky-50 dark:bg-slate-800 text-sky-700 dark:text-sky-300 font-semibold text-sm hover:bg-sky-100 dark:hover:bg-slate-700 transition-all flex items-center gap-2"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                    Get Current Location
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsMapModalOpen(true)}
-                    className="px-4 py-2.5 rounded-xl border border-sky-300 dark:border-slate-600 bg-sky-50 dark:bg-slate-800 text-sky-700 dark:text-sky-300 font-semibold text-sm hover:bg-sky-100 dark:hover:bg-slate-700 transition-all flex items-center gap-2"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                    </svg>
-                    Select On Map
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {step === 3 && (
-            <div className="space-y-5">
-              <div className="mb-4 pb-2 border-b border-sky-200/60 dark:border-slate-600">
-                <h2 className="text-lg font-bold text-sky-700 dark:text-sky-300">Server & package</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Select server, protocol and package</p>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                    Server Name <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={form.serverId}
-                    onChange={(e) => setForm((p) => ({ ...p, serverId: e.target.value }))}
-                    className={`w-full px-4 py-3 rounded-xl border bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 ${
-                      errors.serverId ? 'border-red-400' : 'border-sky-200 dark:border-slate-600'
-                    }`}
-                  >
-                    <option value="">Select server</option>
-                    {servers.map((s) => (
-                      <option key={s.networkDeviceId} value={s.networkDeviceId}>
-                        {s.deviceName}
-                      </option>
-                    ))}
-                  </select>
-                  {errors.serverId && <p className="mt-1 text-xs text-red-500">{errors.serverId}</p>}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                    Protocol <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={form.protocol}
-                    onChange={(e) => setForm((p) => ({ ...p, protocol: e.target.value as NetworkProtocol }))}
-                    className={`w-full px-4 py-3 rounded-xl border bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 ${
-                      errors.protocol ? 'border-red-400' : 'border-sky-200 dark:border-slate-600'
-                    }`}
-                  >
-                    {PROTOCOLS.map((p) => (
-                      <option key={p.value} value={p.value}>
-                        {p.label}
-                      </option>
-                    ))}
-                  </select>
-                  {errors.protocol && <p className="mt-1 text-xs text-red-500">{errors.protocol}</p>}
-                </div>
-              </div>
-
-              {/* Package */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
-                    Package <span className="text-red-500">*</span>
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      value={packageSearch}
-                      onChange={(e) => setPackageSearch(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && form.serverId && form.protocol && loadPackages(1)}
-                      disabled={!form.serverId || !form.protocol}
-                      className="px-3 py-2 rounded-xl border border-sky-200 dark:border-slate-600 bg-white dark:bg-slate-900/40 text-sm text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
-                      placeholder={form.serverId && form.protocol ? 'Search package' : 'Select server and protocol first'}
-                    />
-                    <button
-                      onClick={() => loadPackages(1)}
-                      disabled={!form.serverId || !form.protocol}
-                      className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 dark:bg-teal-600 dark:hover:bg-teal-500 text-white text-sm font-semibold shadow-lg hover:shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                      type="button"
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium text-xs hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center gap-1.5"
                     >
-                      Search
+                      <Navigation className="w-3.5 h-3.5 text-blue-500" /> Current GPS
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsMapModalOpen(true)}
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium text-xs hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center gap-1.5"
+                    >
+                      <MapIcon className="w-3.5 h-3.5 text-emerald-500" /> Select On Map
                     </button>
                   </div>
                 </div>
 
-                <div className={`rounded-2xl border ${errors.packageId ? 'border-red-400' : 'border-sky-200 dark:border-slate-600'} overflow-hidden ${!form.serverId || !form.protocol ? 'opacity-50' : ''}`}>
-                  <div className="bg-sky-50/80 dark:bg-slate-900/40 px-4 py-3 text-sm font-semibold text-slate-700 dark:text-slate-300 border-b border-sky-200/60 dark:border-slate-600">
-                    {!form.serverId || !form.protocol
-                      ? 'Select server and protocol first'
-                      : packagesLoading
-                      ? 'Loading packages…'
-                      : `${packagesMeta.total} packages`}
+                <input
+                  type="text"
+                  value={
+                    locationInput !== ''
+                      ? locationInput
+                      : form.latitude != null && form.longitude != null
+                      ? `${form.latitude}, ${form.longitude}`
+                      : ''
+                  }
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setLocationInput(v);
+                    if (!v.trim()) {
+                      setForm((p) => ({ ...p, latitude: undefined, longitude: undefined }));
+                      return;
+                    }
+                    const parts = v.split(/[\s,]+/).filter(Boolean);
+                    const lat = parts[0] ? parseFloat(parts[0]) : NaN;
+                    const lng = parts[1] ? parseFloat(parts[1]) : NaN;
+                    if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+                      setForm((p) => ({ ...p, latitude: lat, longitude: lng }));
+                    }
+                  }}
+                  onBlur={() => setLocationInput('')}
+                  placeholder="e.g. 23.8103, 90.4125"
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-mono text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= STEP 3: NETWORK & PLAN ================= */}
+        {step === 3 && (
+          <div className="p-6 sm:p-8 space-y-6">
+            <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
+              <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <Server className="w-4 h-4 text-blue-600" />
+                Network Router, Bandwidth Plan & Credentials
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Select target MikroTik gateway, assign bandwidth package, and configure login credentials
+              </p>
+            </div>
+
+            {/* Gateway & Protocol */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Target Server / Router <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={form.serverId}
+                  onChange={(e) => setForm((p) => ({ ...p, serverId: e.target.value }))}
+                  className={`w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${
+                    errors.serverId ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  <option value="">Select Router</option>
+                  {servers.length === 0 && <option value="0">Default Gateway / Standalone</option>}
+                  {servers.map((s) => (
+                    <option key={s.networkDeviceId} value={s.networkDeviceId}>
+                      {s.deviceName}
+                    </option>
+                  ))}
+                </select>
+                {errors.serverId && <p className="mt-1 text-xs text-rose-500 font-medium">{errors.serverId}</p>}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Access Protocol <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={form.protocol}
+                  onChange={(e) => setForm((p) => ({ ...p, protocol: e.target.value as NetworkProtocol }))}
+                  className={`w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${
+                    errors.protocol ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  {PROTOCOLS.map((p) => (
+                    <option key={p.value} value={p.value}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+                {errors.protocol && <p className="mt-1 text-xs text-rose-500 font-medium">{errors.protocol}</p>}
+              </div>
+            </div>
+
+            {/* Package Selection Cards */}
+            <div className="space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  Select Bandwidth Package <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={packageSearch}
+                    onChange={(e) => setPackageSearch(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && loadPackages(1)}
+                    placeholder="Search package..."
+                    className="w-full pl-8 pr-7 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500"
+                  />
+                  {packageSearch && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPackageSearch('');
+                        loadPackages(1);
+                      }}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Package Grid Container */}
+              <div
+                className={`rounded-xl border ${
+                  errors.packageId ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
+                } overflow-hidden bg-slate-50/50 dark:bg-slate-800/20`}
+              >
+                {packagesLoading ? (
+                  <div className="p-8 text-center text-slate-500 text-xs flex items-center justify-center gap-2">
+                    <Clock className="w-4 h-4 animate-spin text-blue-600" /> Loading package plans...
                   </div>
-                  {packagesError && (
-                    <div className="px-4 py-3 text-sm text-red-600 dark:text-red-400">{packagesError}</div>
-                  )}
-                  {!packagesLoading && !packagesError && packages.length === 0 && form.serverId && form.protocol && (
-                    <div className="px-4 py-3 text-sm text-red-600 dark:text-red-400 font-semibold">
-                      No packages found for this server/protocol. Please create a package first.
-                    </div>
-                  )}
-                  {(!form.serverId || !form.protocol) && (
-                    <div className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
-                      Please select a server and protocol to load packages.
-                    </div>
-                  )}
-                  <div className={`max-h-72 overflow-y-auto divide-y divide-sky-100 dark:divide-slate-700 bg-white dark:bg-slate-800 ${!form.serverId || !form.protocol ? 'pointer-events-none' : ''}`}>
+                ) : packages.length === 0 ? (
+                  <div className="p-8 text-center space-y-1">
+                    <PackageIcon className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto" />
+                    <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+                      No packages found for {form.protocol.toUpperCase()} on this router.
+                    </p>
+                    <p className="text-[11px] text-slate-400">
+                      Create packages in Network &gt; Package Plans first.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 max-h-72 overflow-y-auto">
                     {packages.map((p) => {
-                      const isActive = form.packageId === p.id;
+                      const isSelected = form.packageId === p.id;
+                      const color = p.color || (p as any).colorHex || '#2563EB';
+                      const validityDays = p.validity?.days ?? (p as any).validityDays ?? 30;
+                      const volType = p.volume?.type ?? (p as any).volumeType ?? (p as any).dataVolumeType ?? 'unlimited';
+                      const volGb = p.volume?.gb ?? (p as any).volumeGb ?? (p as any).dataVolumeGb;
+
                       return (
                         <button
                           key={p.id}
@@ -920,345 +1074,525 @@ export default function AddClientPage() {
                           onClick={() => {
                             setForm((prev) => ({ ...prev, packageId: p.id }));
                             setSelectedPackage(p);
+                            setErrors((prev) => {
+                              const next = { ...prev };
+                              delete next.packageId;
+                              return next;
+                            });
                           }}
-                          disabled={!form.serverId || !form.protocol}
-                          className={`w-full text-left px-4 py-3 hover:bg-sky-50 dark:hover:bg-sky-900/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                            isActive ? 'bg-sky-100 dark:bg-sky-900/20 border-l-2 border-sky-500' : ''
+                          className={`p-3.5 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-blue-50/80 dark:bg-blue-900/30 border-blue-500 ring-2 ring-blue-500/20 shadow-xs'
+                              : 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
                           }`}
                         >
-                          <div className="flex items-center justify-between">
-                            <div className="font-semibold text-slate-900 dark:text-slate-100">{p.name}</div>
-                            <div className="text-sm font-bold text-slate-700 dark:text-slate-300">৳{Number(p.price).toLocaleString('en-BD', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
+                          <div>
+                            <div className="flex items-start justify-between gap-1 mb-1.5">
+                              <span
+                                className="w-2.5 h-2.5 rounded-full shrink-0 mt-1"
+                                style={{ backgroundColor: color }}
+                              />
+                              <span className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                                ৳{Number(p.price).toLocaleString()}
+                              </span>
+                            </div>
+                            <p className="font-semibold text-slate-800 dark:text-slate-200 text-xs truncate">
+                              {p.name}
+                            </p>
                           </div>
-                          <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                            Validity: {p.validity.days}d {p.validity.hours}h • Volume:{' '}
-                            {p.volume.type === 'unlimited' ? 'Unlimited' : `${p.volume.gb ?? 0}GB`}
+
+                          <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                            <span>{validityDays} Days</span>
+                            <span>{volType === 'unlimited' ? 'Unlimited' : `${volGb ?? 0}GB`}</span>
                           </div>
-                          {isProfileRequired && (
-                            <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                              MikroTik Profile: <span className="font-semibold">{p.mikrotikProfileName || '—'}</span>
+
+                          {isSelected && (
+                            <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center">
+                              <Check className="w-2.5 h-2.5" />
                             </div>
                           )}
                         </button>
                       );
                     })}
                   </div>
-                  <div className="flex items-center justify-between px-4 py-3 bg-sky-50/80 dark:bg-slate-900/40 border-t border-sky-200/60 dark:border-slate-600">
+                )}
+
+                {/* Pagination footer */}
+                {packagesMeta.totalPages > 1 && (
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-slate-100/60 dark:bg-slate-800/60 border-t border-slate-200 dark:border-slate-700 text-xs">
                     <button
                       type="button"
-                      disabled={packagesMeta.page <= 1 || !form.serverId || !form.protocol}
+                      disabled={packagesMeta.page <= 1}
                       onClick={() => loadPackages(packagesMeta.page - 1)}
-                      className="px-4 py-2 rounded-xl border border-sky-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-sky-50 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      className="px-2.5 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-40"
                     >
                       Prev
                     </button>
-                    <div className="text-xs text-slate-600 dark:text-slate-400">
-                      {form.serverId && form.protocol ? `Page ${packagesMeta.page} / ${packagesMeta.totalPages}` : '—'}
-                    </div>
+                    <span className="text-slate-500 font-medium">
+                      Page {packagesMeta.page} of {packagesMeta.totalPages}
+                    </span>
                     <button
                       type="button"
-                      disabled={packagesMeta.page >= packagesMeta.totalPages || !form.serverId || !form.protocol}
+                      disabled={packagesMeta.page >= packagesMeta.totalPages}
                       onClick={() => loadPackages(packagesMeta.page + 1)}
-                      className="px-4 py-2 rounded-xl border border-sky-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-sky-50 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      className="px-2.5 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-40"
                     >
                       Next
                     </button>
                   </div>
-                </div>
-                {errors.packageId && <p className="mt-1 text-xs text-red-500">{errors.packageId}</p>}
+                )}
               </div>
+              {errors.packageId && <p className="text-xs text-rose-500 font-medium">{errors.packageId}</p>}
+            </div>
 
-              {/* Credentials */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                    Username <span className="text-red-500">*</span>
-                  </label>
+            {/* PPPoE / Radius Credentials */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  PPPoE Username <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
+                    type="text"
                     value={form.username}
                     onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
-                    className={`w-full px-4 py-3 rounded-xl border bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 ${
-                      errors.username ? 'border-red-400' : 'border-sky-200 dark:border-slate-600'
+                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-mono focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${
+                      errors.username ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
                     }`}
                   />
-                  {errors.username && <p className="mt-1 text-xs text-red-500">{errors.username}</p>}
                 </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                    Password <span className="text-red-500">*</span>
-                  </label>
-                  <div
-                    onMouseEnter={() => setPasswordRevealed(true)}
-                    onMouseLeave={() => setPasswordRevealed(false)}
-                    className="relative"
-                  >
-                    <input
-                      type={passwordRevealed ? 'text' : 'password'}
-                      value={form.password}
-                      onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
-                      className={`w-full px-4 py-3 rounded-xl border bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 ${
-                        errors.password ? 'border-red-400' : 'border-sky-200 dark:border-slate-600'
-                      }`}
-                    />
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Hover over field to view password</p>
-                  </div>
-                  {errors.password && <p className="mt-1 text-xs text-red-500">{errors.password}</p>}
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Remote Address (Static IP)</label>
+                {errors.username && <p className="mt-1 text-xs text-rose-500 font-medium">{errors.username}</p>}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  PPPoE Password <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
-                    value={form.remoteAddress || ''}
-                    onChange={(e) => setForm((p) => ({ ...p, remoteAddress: e.target.value }))}
-                    className="w-full px-4 py-3 rounded-xl border border-sky-200 dark:border-slate-600 bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
-                    placeholder="Optional"
-                  />
-                </div>
-              </div>
-
-              {/* Price and Expiry preview */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="rounded-2xl border border-sky-200 dark:border-slate-600 bg-sky-50/80 dark:bg-slate-900/40 p-4">
-                  <div className="text-sm font-semibold text-sky-700 dark:text-sky-300">Price</div>
-                  <div className="mt-1 text-lg font-bold text-slate-900 dark:text-slate-100">
-                    {selectedPackage ? `৳${Number(selectedPackage.price).toLocaleString('en-BD', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—'}
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">Auto-filled from package</p>
-                </div>
-                <div className="rounded-2xl border border-sky-200 dark:border-slate-600 bg-sky-50/80 dark:bg-slate-900/40 p-4">
-                  <div className="text-sm font-semibold text-sky-700 dark:text-sky-300">Billing / Exp Date</div>
-                  <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-                    {form.clientCategory === 'free' ? 'Lifetime' : (form.clientCategory === 'prepaid' || form.clientCategory === 'postpaid' || form.clientCategory === 'vip') ? 'Today Date' : expiryPreview ? expiryPreview.toLocaleString() : 'Select a package to calculate expiry'}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {step === 4 && (
-            <div className="space-y-5">
-              <div className="mb-4 pb-2 border-b border-sky-200/60 dark:border-slate-600">
-                <h2 className="text-lg font-bold text-sky-700 dark:text-sky-300">Billing & status</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Reseller, cycle and initial status</p>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                    {isAgent ? 'Reseller' : 'Assign to'}
-                  </label>
-                  {isAgent ? (
-                    <>
-                      <input
-                        value={resellerLabel}
-                        readOnly
-                        className="w-full px-4 py-3 rounded-xl border border-sky-200 dark:border-slate-600 bg-sky-50/80 dark:bg-slate-900/40 text-slate-700 dark:text-slate-300 outline-none"
-                      />
-                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">Agent = logged-in user</p>
-                    </>
-                  ) : (
-                    <>
-                      <select
-                        value={form.ownerId || userId}
-                        onChange={(e) => setForm((p) => ({ ...p, ownerId: e.target.value }))}
-                        disabled={resellersLoading}
-                        className="w-full px-4 py-3 rounded-xl border border-sky-200 dark:border-slate-600 bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 disabled:opacity-50"
-                      >
-                        {resellersLoading ? (
-                          <option value={userId}>Loading…</option>
-                        ) : (
-                          ownerOptions.map((r) => (
-                            <option key={r.userId} value={r.userId}>
-                              {r.name} ({r.role})
-                            </option>
-                          ))
-                        )}
-                      </select>
-                    </>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                    Billing Cycle <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={form.billingCycle}
-                    onChange={(e) => setForm((p) => ({ ...p, billingCycle: e.target.value as any }))}
-                    className={`w-full px-4 py-3 rounded-xl border bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 ${
-                      errors.billingCycle ? 'border-red-400' : 'border-sky-200 dark:border-slate-600'
+                    type={passwordRevealed ? 'text' : 'password'}
+                    value={form.password}
+                    onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
+                    className={`w-full pl-9 pr-9 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-mono focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${
+                      errors.password ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
                     }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setPasswordRevealed(!passwordRevealed)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                   >
-                    <option value="monthly">Monthly</option>
-                    <option value="custom">Custom</option>
-                  </select>
-                  {errors.billingCycle && <p className="mt-1 text-xs text-red-500">{errors.billingCycle}</p>}
+                    {passwordRevealed ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
                 </div>
+                {errors.password && <p className="mt-1 text-xs text-rose-500 font-medium">{errors.password}</p>}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Customer Category</label>
-                  <select
-                    value={form.clientCategory || ''}
-                    onChange={(e) => setForm((p) => ({ ...p, clientCategory: (e.target.value || undefined) as CreateClientPayload['clientCategory'] }))}
-                    className="w-full px-4 py-3 rounded-xl border border-sky-200 dark:border-slate-600 bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
-                  >
-                    <option value="">Select category</option>
-                    <option value="prepaid">Prepaid</option>
-                    <option value="postpaid">Postpaid</option>
-                    <option value="vip">VIP</option>
-                    <option value="free">Free</option>
-                  </select>
-                  {form.clientCategory === 'vip' && (
-                    <div className="mt-1.5 flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
-                      <VIPIcon className="w-4 h-4" /> VIP
-                    </div>
-                  )}
-                  {form.clientCategory === 'free' && (
-                    <div className="mt-1.5 flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-                      <FreeIcon className="w-4 h-4" /> Free
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Discount (৳)</label>
-                  <input
-                    type="number"
-                    value={form.addLessAmount ?? 0}
-                    onChange={(e) => setForm((p) => ({ ...p, addLessAmount: Number(e.target.value) || 0 }))}
-                    className="w-full px-4 py-3 rounded-xl border border-sky-200 dark:border-slate-600 bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
-                    min={-999999}
-                    max={999999}
-                    step={50}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Installation Charge / OTC (৳)</label>
-                  <input
-                    type="number"
-                    value={form.installationCharge ?? 0}
-                    onChange={(e) => setForm((p) => ({ ...p, installationCharge: Math.max(0, Number(e.target.value) || 0) }))}
-                    className="w-full px-4 py-3 rounded-xl border border-sky-200 dark:border-slate-600 bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
-                    min={0}
-                    max={999999}
-                    step={50}
-                  />
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-500">One-time installation / OTC charge</p>
-                </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Remote IP (Static IP) <span className="text-slate-400 font-normal lowercase">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.remoteAddress || ''}
+                  onChange={(e) => setForm((p) => ({ ...p, remoteAddress: e.target.value }))}
+                  placeholder="e.g. 192.168.10.50"
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-mono focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                />
               </div>
             </div>
-          )}
 
-          {step === 5 && (
-            <div className="space-y-5">
-              <div className="mb-4 pb-2 border-b border-sky-200/60 dark:border-slate-600">
-                <h2 className="text-lg font-bold text-sky-700 dark:text-sky-300">Preview</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Review all details before creating the customer</p>
+            {/* Price and Expiry Summary Banner */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  Plan Rate (Monthly)
+                </p>
+                <p className="text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5">
+                  {selectedPackage ? `৳${Number(selectedPackage.price).toLocaleString()}` : '—'}
+                </p>
+                <p className="text-[11px] text-slate-400 mt-1">Auto-assigned from selected package</p>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="rounded-2xl border border-sky-200 dark:border-slate-600 border-l-4 border-l-sky-500 bg-sky-50/80 dark:bg-slate-900/40 p-4 space-y-3 shadow-[-4px_0_10px_rgba(0,0,0,0.06)] dark:shadow-[-4px_0_12px_rgba(0,0,0,0.2)]">
-                  <h3 className="text-sm font-bold text-sky-700 dark:text-sky-300">Customer info</h3>
-                  <div className="text-sm text-slate-700 dark:text-slate-300 space-y-1">
-                    <p><span className="font-medium">Customer ID:</span> {form.customerCode ? form.customerCode : 'Auto-assigned on save'}</p>
-                    <p><span className="font-medium">Name:</span> {form.clientName || '—'}</p>
-                    <p><span className="font-medium">Mobile:</span> {form.mobileNo || '—'}</p>
-                    <p><span className="font-medium">Email:</span> {form.email || '—'}</p>
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-sky-200 dark:border-slate-600 border-l-4 border-l-sky-500 bg-sky-50/80 dark:bg-slate-900/40 p-4 space-y-3 shadow-[-4px_0_10px_rgba(0,0,0,0.06)] dark:shadow-[-4px_0_12px_rgba(0,0,0,0.2)]">
-                  <h3 className="text-sm font-bold text-sky-700 dark:text-sky-300">Data And Location</h3>
-                  <div className="text-sm text-slate-700 dark:text-slate-300 space-y-1">
-                    {(form.address || form.district || form.thana || form.area || form.subArea || (form.latitude != null && form.longitude != null)) ? (
-                      <>
-                        {form.address && <p><span className="font-medium">Address:</span> {form.address}</p>}
-                        {form.district && <p><span className="font-medium">District:</span> {form.district}</p>}
-                        {form.thana && <p><span className="font-medium">Thana:</span> {form.thana}</p>}
-                        {form.area && <p><span className="font-medium">Area:</span> {form.area}</p>}
-                        {form.subArea && <p><span className="font-medium">Sub Area:</span> {form.subArea}</p>}
-                        {form.latitude != null && form.longitude != null && (
-                          <p><span className="font-medium">Location:</span> {form.latitude.toFixed(6)}, {form.longitude.toFixed(6)}</p>
-                        )}
-                      </>
+
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  Initial Expiry Date
+                </p>
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-200 mt-1">
+                  {form.clientCategory === 'free'
+                    ? 'Lifetime Free'
+                    : form.clientCategory === 'prepaid' ||
+                      form.clientCategory === 'postpaid' ||
+                      form.clientCategory === 'vip'
+                    ? 'Today (Awaiting First Payment / Recharge)'
+                    : expiryPreview
+                    ? expiryPreview.toLocaleDateString('en-GB')
+                    : 'Select a package plan'}
+                </p>
+                <p className="text-[11px] text-slate-400 mt-1">Updates on billing cycle renewal or recharge</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= STEP 4: BILLING & STATUS ================= */}
+        {step === 4 && (
+          <div className="p-6 sm:p-8 space-y-6">
+            <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
+              <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <CreditCard className="w-4 h-4 text-blue-600" />
+                Reseller Ownership, Category & Billing Adjustments
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Configure owner assignment, billing cycle, subscriber privileges, and OTC installation fees
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Owner Assignment */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  {isAgent ? 'Reseller (Agent Parent)' : 'Assign Subscriber To'}
+                </label>
+                {isAgent ? (
+                  <input
+                    value={resellerLabel}
+                    readOnly
+                    className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 text-sm outline-none cursor-not-allowed"
+                  />
+                ) : (
+                  <select
+                    value={form.ownerId || userId}
+                    onChange={(e) => setForm((p) => ({ ...p, ownerId: e.target.value }))}
+                    disabled={resellersLoading}
+                    className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:opacity-50"
+                  >
+                    {resellersLoading ? (
+                      <option value={userId}>Loading resellers...</option>
                     ) : (
-                      <p className="text-slate-500">—</p>
+                      ownerOptions.map((r) => (
+                        <option key={r.userId} value={r.userId}>
+                          {r.name} ({r.role})
+                        </option>
+                      ))
                     )}
+                  </select>
+                )}
+                <p className="mt-1 text-[11px] text-slate-400">Account billing and commissions will accrue to this owner.</p>
+              </div>
+
+              {/* Billing Cycle */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Billing Cycle <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={form.billingCycle}
+                  onChange={(e) => setForm((p) => ({ ...p, billingCycle: e.target.value as any }))}
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                >
+                  <option value="monthly">Monthly (Calendar Month)</option>
+                  <option value="custom">Custom (Validity Based)</option>
+                </select>
+              </div>
+
+              {/* Customer Category */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Subscriber Category
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { val: 'prepaid', label: 'Prepaid', icon: Clock },
+                    { val: 'postpaid', label: 'Postpaid', icon: Layers },
+                    { val: 'vip', label: 'VIP', icon: Star, color: 'text-amber-500' },
+                    { val: 'free', label: 'Free', icon: Gift, color: 'text-emerald-500' },
+                  ].map((cat) => {
+                    const isChecked = form.clientCategory === cat.val;
+                    const CatIcon = cat.icon;
+                    return (
+                      <button
+                        key={cat.val}
+                        type="button"
+                        onClick={() =>
+                          setForm((p) => ({
+                            ...p,
+                            clientCategory: cat.val as CreateClientPayload['clientCategory'],
+                          }))
+                        }
+                        className={`p-2.5 rounded-lg border text-center transition-all flex flex-col items-center justify-center gap-1 ${
+                          isChecked
+                            ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-500 text-blue-700 dark:text-blue-300 font-semibold ring-1 ring-blue-500/20'
+                            : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50'
+                        }`}
+                      >
+                        <CatIcon className={`w-4 h-4 ${cat.color || ''}`} />
+                        <span className="text-xs">{cat.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Discount / Adjustment */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Monthly Discount (৳)
+                </label>
+                <input
+                  type="number"
+                  value={form.addLessAmount ?? 0}
+                  onChange={(e) => setForm((p) => ({ ...p, addLessAmount: Number(e.target.value) || 0 }))}
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
+                  min={-999999}
+                  max={999999}
+                  step={50}
+                />
+                <p className="mt-1 text-[11px] text-slate-400">Regular recurring discount deducted from bill.</p>
+              </div>
+
+              {/* Installation Charge / OTC */}
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Installation Charge / OTC (৳)
+                </label>
+                <input
+                  type="number"
+                  value={form.installationCharge ?? 0}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, installationCharge: Math.max(0, Number(e.target.value) || 0) }))
+                  }
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
+                  min={0}
+                  max={999999}
+                  step={50}
+                />
+                <p className="mt-1 text-[11px] text-slate-400">One-time installation or optical ONU setup fee.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= STEP 5: REVIEW & CONFIRM ================= */}
+        {step === 5 && (
+          <div className="p-6 sm:p-8 space-y-6">
+            <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
+              <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                Review & Confirm Customer Registration
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Verify all information before creating the subscriber and activating network access
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Card 1: Customer Identity */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 space-y-3">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                  <User className="w-3.5 h-3.5" /> 1. Customer Identity
+                </div>
+                <div className="text-xs space-y-1.5 text-slate-700 dark:text-slate-300">
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Customer ID:</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
+                      {form.customerCode || 'Auto-generated on save'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Name:</span>
+                    <span className="font-semibold text-slate-900 dark:text-slate-100">{form.clientName || '—'}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Mobile No:</span>
+                    <span className="font-mono font-medium">{form.mobileNo || '—'}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Email:</span>
+                    <span>{form.email || '—'}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">NID / Smart Card:</span>
+                    <span className="font-mono">{form.nidNo || '—'}</span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-slate-500">KYC Document:</span>
+                    <span>{uploadDocuments && documentFile ? `${documentType.toUpperCase()} (${documentFile.name})` : 'None'}</span>
                   </div>
                 </div>
-                <div className="rounded-2xl border border-sky-200 dark:border-slate-600 border-l-4 border-l-sky-500 bg-sky-50/80 dark:bg-slate-900/40 p-4 space-y-3 shadow-[-4px_0_10px_rgba(0,0,0,0.06)] dark:shadow-[-4px_0_12px_rgba(0,0,0,0.2)]">
-                  <h3 className="text-sm font-bold text-sky-700 dark:text-sky-300">Server & package</h3>
-                  <div className="text-sm text-slate-700 dark:text-slate-300 space-y-1">
-                    <p><span className="font-medium">Server:</span> {servers.find(s => s.networkDeviceId === form.serverId)?.deviceName ?? '—'}</p>
-                    <p><span className="font-medium">Protocol:</span> {protocolLabel}</p>
-                    <p><span className="font-medium">Package:</span> {previewPackage?.name ?? '—'} {previewPackage ? `(৳${Number(previewPackage.price).toLocaleString('en-BD', { minimumFractionDigits: 0, maximumFractionDigits: 0 })})` : ''}</p>
-                    <p><span className="font-medium">Username:</span> {form.username || '—'}</p>
-                    <p><span className="font-medium">Password:</span> ••••••••</p>
-                    <p><span className="font-medium">Created Date:</span> {new Date().toLocaleString()}</p>
-                    <p><span className="font-medium">Expiry:</span> {form.clientCategory === 'free' ? 'Lifetime' : expiryPreview ? expiryPreview.toLocaleString() : '—'}</p>
+              </div>
+
+              {/* Card 2: Coverage & Location */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 space-y-3">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400">
+                  <MapPin className="w-3.5 h-3.5" /> 2. Address & Coverage
+                </div>
+                <div className="text-xs space-y-1.5 text-slate-700 dark:text-slate-300">
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Address:</span>
+                    <span className="font-medium text-right max-w-[200px] truncate">{form.address || '—'}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Thana / Upazila:</span>
+                    <span className="font-medium">{form.thana || '—'}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">District:</span>
+                    <span className="font-medium">{form.district || '—'}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Service Area:</span>
+                    <span className="font-medium">{form.area || '—'}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Sub Area:</span>
+                    <span className="font-medium">{form.subArea || '—'}</span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-slate-500">GPS Coordinates:</span>
+                    <span className="font-mono text-[11px]">
+                      {form.latitude != null && form.longitude != null
+                        ? `${form.latitude.toFixed(5)}, ${form.longitude.toFixed(5)}`
+                        : '—'}
+                    </span>
                   </div>
                 </div>
-                <div className="rounded-2xl border border-sky-200 dark:border-slate-600 border-l-4 border-l-sky-500 bg-sky-50/80 dark:bg-slate-900/40 p-4 space-y-3 shadow-[-4px_0_10px_rgba(0,0,0,0.06)] dark:shadow-[-4px_0_12px_rgba(0,0,0,0.2)]">
-                  <h3 className="text-sm font-bold text-sky-700 dark:text-sky-300">Billing & status</h3>
-                  <div className="text-sm text-slate-700 dark:text-slate-300 space-y-2">
-                    <p><span className="font-medium">Owner:</span> {(form.ownerId && ownerOptions.length) ? (ownerOptions.find((r) => r.userId === (form.ownerId || userId))?.name ?? resellerLabel) : resellerLabel}</p>
-                    <p><span className="font-medium">Billing cycle:</span> {form.billingCycle ?? '—'}</p>
-                    <p><span className="font-medium">Customer category:</span>{' '}
-                      {form.clientCategory === 'vip' && <span className="inline-flex items-center gap-1"><VIPIcon className="w-4 h-4 text-amber-600 dark:text-amber-400" /> VIP</span>}
-                      {form.clientCategory === 'free' && <span className="inline-flex items-center gap-1"><FreeIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Free</span>}
-                      {form.clientCategory && form.clientCategory !== 'vip' && form.clientCategory !== 'free' && String(form.clientCategory).charAt(0).toUpperCase() + String(form.clientCategory).slice(1)}
-                      {!form.clientCategory && '—'}
-                    </p>
-                    <p><span className="font-medium">Discount:</span> {(form.addLessAmount ?? 0) !== 0 ? `৳${(form.addLessAmount ?? 0).toLocaleString('en-BD')}` : '—'}</p>
-                    <p><span className="font-medium">Installation charge / OTC:</span> {(form.installationCharge ?? 0) > 0 ? `৳${(form.installationCharge ?? 0).toLocaleString('en-BD')}` : '—'}</p>
+              </div>
+
+              {/* Card 3: Network & Gateway */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 space-y-3">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-violet-600 dark:text-violet-400">
+                  <Server className="w-3.5 h-3.5" /> 3. Router & Service Plan
+                </div>
+                <div className="text-xs space-y-1.5 text-slate-700 dark:text-slate-300">
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Server / Router:</span>
+                    <span className="font-semibold">{servers.find((s) => s.networkDeviceId === form.serverId)?.deviceName ?? 'Default Gateway'}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Protocol:</span>
+                    <span className="uppercase font-mono font-semibold">{protocolLabel}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Package Plan:</span>
+                    <span className="font-bold text-slate-900 dark:text-slate-100">
+                      {previewPackage?.name ?? '—'}{' '}
+                      {previewPackage ? `(৳${Number(previewPackage.price).toLocaleString()})` : ''}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Username:</span>
+                    <span className="font-mono font-bold text-blue-600 dark:text-blue-400">{form.username || '—'}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Password:</span>
+                    <span className="font-mono">••••••••</span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-slate-500">Remote Static IP:</span>
+                    <span className="font-mono">{form.remoteAddress || 'Dynamic Pool'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 4: Commercials & Billing */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/40 space-y-3">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  <CreditCard className="w-3.5 h-3.5" /> 4. Billing & Category
+                </div>
+                <div className="text-xs space-y-1.5 text-slate-700 dark:text-slate-300">
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Assigned Owner:</span>
+                    <span className="font-medium">
+                      {form.ownerId && ownerOptions.length
+                        ? ownerOptions.find((r) => r.userId === (form.ownerId || userId))?.name ?? resellerLabel
+                        : resellerLabel}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Billing Cycle:</span>
+                    <span className="capitalize font-medium">{form.billingCycle}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Category:</span>
+                    <span className="capitalize font-semibold">
+                      {form.clientCategory === 'vip' ? '⭐ VIP' : form.clientCategory === 'free' ? '🎁 Free' : form.clientCategory}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Monthly Discount:</span>
+                    <span className="font-semibold text-rose-600">
+                      {(form.addLessAmount ?? 0) !== 0 ? `৳${Number(form.addLessAmount).toLocaleString()}` : 'None'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
+                    <span className="text-slate-500">Installation OTC:</span>
+                    <span className="font-semibold">
+                      {(form.installationCharge ?? 0) > 0 ? `৳${Number(form.installationCharge).toLocaleString()}` : 'None'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-slate-500">Initial Expiry:</span>
+                    <span className="font-medium">
+                      {form.clientCategory === 'free'
+                        ? 'Lifetime'
+                        : expiryPreview
+                        ? expiryPreview.toLocaleDateString('en-GB')
+                        : '—'}
+                    </span>
                   </div>
                 </div>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Footer actions */}
-          <div className="mt-8 flex items-center justify-between pt-6 border-t border-sky-200/60 dark:border-slate-600">
+        {/* ================= FOOTER ACTIONS ================= */}
+        <div className="px-6 py-4 bg-slate-50/75 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={handleBack}
+            disabled={step === 1 || isSaving}
+            className="px-5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium text-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs flex items-center gap-1.5"
+          >
+            <ArrowLeft className="w-4 h-4" /> Back
+          </button>
+
+          {step < 5 ? (
             <button
               type="button"
-              onClick={handleBack}
-              disabled={step === 1 || isSaving}
-              className="px-6 py-3 bg-white dark:bg-slate-700 border border-sky-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-sky-50 dark:hover:bg-slate-600 transition-all shadow-sm hover:shadow-md disabled:opacity-50"
+              onClick={handleNext}
+              disabled={isSaving}
+              className="px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition-all shadow-sm active:scale-95 flex items-center gap-1.5"
             >
-              Back
+              Next Step <ArrowRight className="w-4 h-4" />
             </button>
-
-            {step < 5 ? (
-              <button
-                type="button"
-                onClick={handleNext}
-                disabled={isSaving || !isStepValid(step)}
-                className="px-6 py-3 bg-sky-500 hover:bg-sky-600 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all active:scale-95 disabled:opacity-50"
-              >
-                Next
-              </button>
-            ) : (
-              /* Step 5: Preview - Create Customer */
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={isSaving || !canSubmit}
-                className="px-6 py-3 bg-sky-500 hover:bg-sky-600 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2"
-              >
-                {isSaving ? (
-                  <>
-                    <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Customer Creating…
-                  </>
-                ) : (
-                  'Create Customer'
-                )}
-              </button>
-            )}
-          </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={isSaving || !canSubmit}
+              className="px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition-all shadow-sm active:scale-95 disabled:opacity-50 flex items-center gap-2"
+            >
+              {isSaving ? (
+                <>
+                  <Clock className="w-4 h-4 animate-spin" />
+                  Creating Customer...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  Create Customer
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
+      {/* Map Picker Modal */}
       <MapPickerModal
         isOpen={isMapModalOpen}
         onClose={() => setIsMapModalOpen(false)}
@@ -1266,6 +1600,7 @@ export default function AddClientPage() {
           setLocationInput('');
           setForm((p) => ({ ...p, latitude: lat, longitude: lng }));
           setIsMapModalOpen(false);
+          toast.success(`Coordinates selected: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
         }}
         initialLat={form.latitude ?? undefined}
         initialLng={form.longitude ?? undefined}
@@ -1273,4 +1608,3 @@ export default function AddClientPage() {
     </div>
   );
 }
-

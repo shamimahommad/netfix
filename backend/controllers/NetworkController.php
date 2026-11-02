@@ -213,16 +213,74 @@ class NetworkController {
     public static function getProfiles(string $deviceId): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
+        $protocol = strtolower(trim($_GET['protocol'] ?? 'pppoe'));
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT access_profile_id as id, profile_name as name 
-            FROM access_profiles WHERE network_device_id = :did AND tenant_id = :tid");
-        $stmt->execute(['did' => $deviceId, 'tid' => $tenantId]);
-        $rows = $stmt->fetchAll();
+        $profiles = [];
+
+        // 1. Try to fetch live from MikroTik router if device exists
+        if (!empty($deviceId) && $deviceId !== '0') {
+            $devStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :did AND tenant_id = :tid LIMIT 1");
+            $devStmt->execute(['did' => $deviceId, 'tid' => $tenantId]);
+            $device = $devStmt->fetch();
+
+            if ($device && !empty($device['management_ip']) && !empty($device['api_username'])) {
+                try {
+                    $api = new RouterosAPI();
+                    $api->port = !empty($device['management_port']) ? (int)$device['management_port'] : 8728;
+                    $api->timeout = 3;
+                    if ($api->connect($device['management_ip'], $device['api_username'], $device['api_password'] ?? '')) {
+                        $cmd = ($protocol === 'hotspot') ? '/ip/hotspot/user/profile/print' : '/ppp/profile/print';
+                        $results = $api->comm($cmd);
+                        $api->disconnect();
+
+                        if (is_array($results) && count($results) > 0) {
+                            foreach ($results as $item) {
+                                if (!empty($item['name'])) {
+                                    $profiles[] = [
+                                        'id' => (string)($item['.id'] ?? $item['name']),
+                                        'name' => (string)$item['name'],
+                                    ];
+                                }
+                            }
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    // Silently fall back to DB / defaults on connection failure
+                }
+            }
+        }
+
+        // 2. If no live profiles fetched, check access_profiles in DB
+        if (empty($profiles)) {
+            $stmt = $db->prepare("SELECT DISTINCT mikrotik_profile_name as name, mikrotik_profile_id as id 
+                FROM access_profiles 
+                WHERE tenant_id = :tid AND mikrotik_profile_name IS NOT NULL AND mikrotik_profile_name != ''");
+            $stmt->execute(['tid' => $tenantId]);
+            $dbProfiles = $stmt->fetchAll();
+
+            foreach ($dbProfiles as $p) {
+                if (!empty($p['name'])) {
+                    $profiles[] = [
+                        'id' => (string)($p['id'] ?: $p['name']),
+                        'name' => (string)$p['name'],
+                    ];
+                }
+            }
+        }
+
+        // 3. Fallback to standard MikroTik defaults
+        if (empty($profiles)) {
+            $profiles = [
+                ['id' => 'default', 'name' => 'default'],
+                ['id' => 'default-encryption', 'name' => 'default-encryption'],
+                ['id' => 'standard', 'name' => 'standard'],
+            ];
+        }
 
         Response::json([
             'success' => true,
-            'data' => $rows ?: [],
+            'data' => $profiles,
         ]);
     }
 

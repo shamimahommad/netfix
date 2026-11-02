@@ -23,7 +23,7 @@ frontend/.env
 *.db
 backend/database/*.sqlite
 backend/database/*.sqlite3
-backend/database/netfix_db_backup_pre_cleanup.sql
+backend/database/netfix_db_backup_*.sql
 
 # Logs & Debug
 logs/

@@ -127,6 +127,10 @@ export interface NetworkPackage {
   mikrotikProfileId?: string | null;
   mikrotikProfileName?: string | null;
   price: number;
+  downloadSpeedKbps?: number;
+  uploadSpeedKbps?: number;
+  download_speed?: number;
+  upload_speed?: number;
   validity: {
     days: number;
     hours: number;
@@ -160,6 +164,10 @@ export interface CreateNetworkPackagePayload {
   code?: string;
   color?: string;
   price: number;
+  download_speed?: number;
+  upload_speed?: number;
+  downloadSpeedKbps?: number;
+  uploadSpeedKbps?: number;
   validityDays: number;
   validityHours?: number;
   volumeType: 'unlimited' | 'gb';

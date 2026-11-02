@@ -6,6 +6,7 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
 require_once __DIR__ . '/../lib/AuthMiddleware.php';
+require_once __DIR__ . '/../lib/TenantSequenceService.php';
 
 class CustomersController {
     public static function index(): void {
@@ -257,11 +258,7 @@ class CustomersController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT MAX(customer_id) as last_id FROM customers WHERE tenant_id = :tid");
-        $stmt->execute(['tid' => $tenantId]);
-        $row = $stmt->fetch();
-        $nextId = (int)($row['last_id'] ?? 0) + 1;
-        $code = 'CUST' . str_pad((string)$nextId, 6, '0', STR_PAD_LEFT);
+        $code = TenantSequenceService::peekNextCode($db, (string)$tenantId, 'customer', 6);
 
         Response::json(['customerCode' => $code]);
     }
@@ -280,40 +277,52 @@ class CustomersController {
         }
 
         $db = Database::getConnection();
+        $db->beginTransaction();
 
-        // Generate customer code
-        $stmt = $db->prepare("SELECT MAX(customer_id) as last_id FROM customers WHERE tenant_id = :tid");
-        $stmt->execute(['tid' => $tenantId]);
-        $lastId = (int)$stmt->fetchColumn();
-        $customerCode = $data['customerCode'] ?? ('CUST' . str_pad((string)($lastId + 1), 6, '0', STR_PAD_LEFT));
+        try {
+            // Atomic sequential customer code generation per tenant
+            $cleanInputCode = !empty($data['customerCode']) ? preg_replace('/[^\d]/', '', (string)$data['customerCode']) : '';
+            if (!empty($cleanInputCode)) {
+                $customerCode = str_pad($cleanInputCode, 6, '0', STR_PAD_LEFT);
+            } else {
+                $customerCode = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'customer', 6);
+            }
 
-        $stmt = $db->prepare("INSERT INTO customers 
-            (tenant_id, customer_code, customer_type, full_name, email, phone, installation_address, status, billing_status, connection_date, owner_id, owner_role, owner_role_level, created_by)
-            VALUES (:tid, :code, :type, :name, :email, :phone, :addr, 'active', 'Paid', CURDATE(), :oid, :orole, :olevel, :created_by)");
-        $stmt->execute([
-            'tid' => $tenantId,
-            'code' => $customerCode,
-            'type' => $data['customerType'] ?? 'individual',
-            'name' => $fullName,
-            'email' => $data['email'] ?? null,
-            'phone' => $phone,
-            'addr' => $address,
-            'oid' => $data['ownerId'] ?? $user['user_id'],
-            'orole' => $user['role'] ?? 'admin',
-            'olevel' => $user['role_level'] ?? 100,
-            'created_by' => $user['user_id'],
-        ]);
+            $stmt = $db->prepare("INSERT INTO customers 
+                (tenant_id, customer_code, customer_type, full_name, email, phone, installation_address, status, billing_status, connection_date, owner_id, owner_role, owner_role_level, created_by)
+                VALUES (:tid, :code, :type, :name, :email, :phone, :addr, 'active', 'Paid', CURDATE(), :oid, :orole, :olevel, :created_by)");
+            $stmt->execute([
+                'tid' => $tenantId,
+                'code' => $customerCode,
+                'type' => $data['customerType'] ?? 'individual',
+                'name' => $fullName,
+                'email' => $data['email'] ?? null,
+                'phone' => $phone,
+                'addr' => $address,
+                'oid' => $data['ownerId'] ?? $user['user_id'],
+                'orole' => $user['role'] ?? 'admin',
+                'olevel' => $user['role_level'] ?? 100,
+                'created_by' => $user['user_id'],
+            ]);
 
-        $customerId = $db->lastInsertId();
+            $customerId = $db->lastInsertId();
+            $db->commit();
 
-        Response::json([
-            'success' => true,
-            'message' => 'Customer created successfully',
-            'data' => [
-                'customerId' => (string)$customerId,
-                'customerCode' => $customerCode,
-            ],
-        ], 201);
+            Response::json([
+                'success' => true,
+                'message' => 'Customer created successfully',
+                'data' => [
+                    'customerId' => (string)$customerId,
+                    'customerCode' => $customerCode,
+                ],
+            ], 201);
+        } catch (Throwable $e) {
+            $db->rollBack();
+            if ($e instanceof PDOException && (int)($e->errorInfo[1] ?? 0) === 1062) {
+                Response::error('Duplicate customer serial number detected for this tenant. Please try again.', 409);
+            }
+            Response::error('Failed to create customer: ' . $e->getMessage(), 500);
+        }
     }
 
     public static function onboard(): void {
@@ -336,11 +345,13 @@ class CustomersController {
                 Response::error('Full name, phone, and PPPoE username are required', 400);
             }
 
-            // Customer Code
-            $stmt = $db->prepare("SELECT MAX(customer_id) as last_id FROM customers WHERE tenant_id = :tid");
-            $stmt->execute(['tid' => $tenantId]);
-            $lastId = (int)$stmt->fetchColumn();
-            $customerCode = 'CUST' . str_pad((string)($lastId + 1), 6, '0', STR_PAD_LEFT);
+            // Atomic sequential customer code generation per tenant
+            $cleanInputCode = !empty($data['customerCode']) ? preg_replace('/[^\d]/', '', (string)$data['customerCode']) : '';
+            if (!empty($cleanInputCode)) {
+                $customerCode = str_pad($cleanInputCode, 6, '0', STR_PAD_LEFT);
+            } else {
+                $customerCode = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'customer', 6);
+            }
 
             // 1. Insert Customer
             $stmt = $db->prepare("INSERT INTO customers 
