@@ -119,21 +119,9 @@ class NetworkController {
 
         $db = Database::getConnection();
 
-        // 1. Check if operator supplied their own numeric Device ID (e.g. 3000444)
-        $rawCode = trim($data['deviceCode'] ?? $data['code'] ?? '');
-        $code = preg_replace('/\D/', '', $rawCode);
-
-        if (!empty($code)) {
-            $checkStmt = $db->prepare("SELECT COUNT(*) FROM network_devices WHERE device_code = :code");
-            $checkStmt->execute(['code' => $code]);
-            if ((int)$checkStmt->fetchColumn() > 0) {
-                Response::error("Device ID {$code} is already in use by another router or device. Please provide a unique numeric ID.", 409);
-                return;
-            }
-        } else {
-            // Auto generate sequential unique code (Base 300000 -> 300001...)
-            $code = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'device', 6);
-        }
+        // Strictly pure numeric globally unique device ID (Base 300000 -> 300001...)
+        // System-enforced: cannot be cut, modified, or manually overridden
+        $code = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'device', 6);
 
         try {
             $stmt = $db->prepare("INSERT INTO network_devices 

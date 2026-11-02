@@ -621,21 +621,25 @@ export default function MikroTikPage() {
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <label htmlFor="deviceCode" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
-                        Device ID / Code
+                        Device ID
                       </label>
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
-                        Numeric
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                        <Lock className="w-3 h-3" /> System Locked (Unique)
                       </span>
                     </div>
-                    <input
-                      type="text"
-                      id="deviceCode"
-                      value={formData.deviceCode || ''}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, deviceCode: e.target.value.replace(/\D/g, '') }))}
-                      className="w-full px-4 py-3 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl outline-none text-slate-800 dark:text-slate-200 font-mono font-semibold tracking-wider focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                      placeholder="e.g. 300001 (or enter custom numeric ID)"
-                    />
-                    <p className="mt-1 text-[11px] text-slate-400">Strictly numeric ID (enter your own ID e.g. 3000444, or leave auto).</p>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        id="deviceCode"
+                        readOnly
+                        tabIndex={-1}
+                        value={formData.deviceCode || ''}
+                        className="w-full pl-10 pr-4 py-3 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none text-slate-800 dark:text-slate-200 font-mono font-bold tracking-wider cursor-not-allowed select-none shadow-inner"
+                        placeholder="Auto-generating (e.g. 300001)..."
+                      />
+                      <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-400">Strictly numeric globally unique server ID (auto-assigned, cannot be edited).</p>
                   </div>
 
                   {/* Device Name */}
