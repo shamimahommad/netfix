@@ -166,8 +166,8 @@ export default function AddClientPage() {
       if (!form.mobileNo.trim()) nextErrors.mobileNo = 'Mobile number is required';
       else if (mobileDigits.length !== 11) nextErrors.mobileNo = 'Mobile number must be 11 digits (e.g. 017XXXXXXXX)';
       if (form.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) nextErrors.email = 'Invalid email address';
-      if (form.customerCode?.trim() && !/^\d{6}$/.test(form.customerCode.replace(/\D/g, ''))) {
-        nextErrors.customerCode = 'Customer ID must be exactly 6 digits';
+      if (form.customerCode?.trim() && !/^\d{6,}$/.test(form.customerCode.replace(/\D/g, ''))) {
+        nextErrors.customerCode = 'Customer ID must be a numeric serial (at least 6 digits)';
       }
     }
 
@@ -424,7 +424,7 @@ export default function AddClientPage() {
         addLessAmount: (form.addLessAmount ?? 0) !== 0 ? form.addLessAmount : undefined,
         installationCharge: (form.installationCharge ?? 0) > 0 ? form.installationCharge : undefined,
         customerCode:
-          form.customerCode?.replace(/\D/g, '').length === 6 ? form.customerCode.replace(/\D/g, '') : undefined,
+          form.customerCode?.replace(/\D/g, '').length >= 6 ? form.customerCode.replace(/\D/g, '') : undefined,
         latitude: form.latitude != null ? form.latitude : undefined,
         longitude: form.longitude != null ? form.longitude : undefined,
         initialStatus: 'active',
@@ -614,7 +614,7 @@ export default function AddClientPage() {
                     placeholder="Auto-generating..."
                   />
                 </div>
-                <p className="mt-1 text-[11px] text-slate-400">Strictly numeric serial number (e.g. 000001).</p>
+                <p className="mt-1 text-[11px] text-slate-400">Strictly numeric globally unique serial ID (e.g. 100001).</p>
                 {errors.customerCode && <p className="mt-1 text-xs text-rose-500 font-medium">{errors.customerCode}</p>}
               </div>
 

@@ -99,7 +99,7 @@ export default function CustomerLoginPage() {
                 required
                 value={login}
                 onChange={(e) => setLogin(e.target.value)}
-                placeholder="you@example.com or 000001"
+                placeholder="you@example.com or 100001"
                 className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 dark:text-slate-100 transition-all disabled:opacity-50"
                 disabled={isLoading}
               />

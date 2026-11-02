@@ -319,7 +319,7 @@ class CustomersController {
         } catch (Throwable $e) {
             $db->rollBack();
             if ($e instanceof PDOException && (int)($e->errorInfo[1] ?? 0) === 1062) {
-                Response::error('Duplicate customer serial number detected for this tenant. Please try again.', 409);
+                Response::error('Duplicate customer ID detected. Customer ID must be globally unique across the system.', 409);
             }
             Response::error('Failed to create customer: ' . $e->getMessage(), 500);
         }
@@ -436,6 +436,9 @@ class CustomersController {
             ], 201);
         } catch (Throwable $e) {
             $db->rollBack();
+            if ($e instanceof PDOException && (int)($e->errorInfo[1] ?? 0) === 1062) {
+                Response::error('Duplicate customer ID or PPPoE username detected. Must be unique across the platform.', 409);
+            }
             Response::error('Failed to onboard customer: ' . $e->getMessage(), 500);
         }
     }
