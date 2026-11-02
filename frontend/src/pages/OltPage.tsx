@@ -751,6 +751,8 @@ export default function OltPage() {
                   {devices.map((device) => {
                     const vendorLabel = (device.vendor || 'olt').toUpperCase();
                     const ponInfo = `${(device.ponType || 'gpon').toUpperCase()} (${device.totalPonPorts || 8} Ports)`;
+                    const isHttps = device.webPort === 1010 || device.webPort === 443;
+                    const webUrl = `${isHttps ? 'https' : 'http'}://${device.managementIp}:${device.webPort || 80}/action/login.html`;
 
                     return (
                       <tr key={device.networkDeviceId} className="hover:bg-gradient-to-r hover:from-teal-50/50 hover:to-cyan-50/50 dark:hover:from-teal-900/10 dark:hover:to-cyan-900/10 transition-all duration-200">
@@ -774,7 +776,7 @@ export default function OltPage() {
                             <span className="text-slate-900 dark:text-slate-100 font-semibold">{device.managementIp || '—'}</span>
                             {device.managementIp && (
                               <a
-                                href={`http://${device.managementIp}:${device.webPort || 80}`}
+                                href={webUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-md bg-teal-50 hover:bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:hover:bg-teal-900/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800 transition-colors shadow-2xs"
@@ -810,7 +812,7 @@ export default function OltPage() {
                                 {device.managementIp && (
                                   <>
                                     <a
-                                      href={`http://${device.managementIp}:${device.webPort || 80}`}
+                                      href={webUrl}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       className="w-full px-3 py-1.5 text-left text-sm text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 flex items-center gap-2 font-medium"
