@@ -341,6 +341,11 @@ export default function OltPage() {
       isProduction: false,
     });
     setFormErrors({});
+    networkService.getNextDeviceCode().then((res) => {
+      if (res?.deviceCode) {
+        setFormData((prev) => ({ ...prev, deviceCode: res.deviceCode }));
+      }
+    }).catch(() => {});
   };
 
   const inputClass = (field: string) =>
@@ -399,7 +404,8 @@ export default function OltPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Device Code <span className="text-red-500">*</span></label>
-                    <input type="text" required value={formData.deviceCode} onChange={(e) => setFormData((p) => ({ ...p, deviceCode: e.target.value }))} className={inputClass('deviceCode')} placeholder="e.g., OLT-001" />
+                    <input type="text" required value={formData.deviceCode} onChange={(e) => setFormData((p) => ({ ...p, deviceCode: e.target.value.replace(/\D/g, '') }))} className={inputClass('deviceCode')} placeholder="e.g., 300001" />
+                    <p className="mt-1 text-[11px] text-slate-400">Strictly numeric globally unique device ID (e.g. 300001).</p>
                     {formErrors.deviceCode && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.deviceCode}</p>}
                   </div>
                   <div>

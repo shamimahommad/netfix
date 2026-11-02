@@ -6,6 +6,7 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
 require_once __DIR__ . '/../lib/AuthMiddleware.php';
+require_once __DIR__ . '/../lib/TenantSequenceService.php';
 
 class BillingController {
     public static function accounts(string $filterType = 'all'): void {
@@ -171,8 +172,8 @@ class BillingController {
             $stmtCust = $db->prepare("UPDATE customers SET status = 'active', billing_status = 'Paid' WHERE customer_id = :cid");
             $stmtCust->execute(['cid' => $customerId]);
 
-            // Create paid invoice
-            $invNumber = 'INV-' . date('Ymd') . '-' . str_pad((string)$customerId, 4, '0', STR_PAD_LEFT);
+            // Create paid invoice with pure numeric globally unique sequence
+            $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 6);
             $stmtInv = $db->prepare("INSERT INTO invoices 
                 (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, collected_by, renew_mode, created_by)
                 VALUES (:tid, :cid, :sid, :inv_num, CURDATE(), CURDATE(), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :coll, 'RENEW', :uid)");

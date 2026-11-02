@@ -560,6 +560,11 @@ export default function MikroTikPage() {
       isProduction: false,
     });
     setFormErrors({});
+    networkService.getNextDeviceCode().then((res) => {
+      if (res?.deviceCode) {
+        setFormData((prev) => ({ ...prev, deviceCode: res.deviceCode }));
+      }
+    }).catch(() => {});
   };
 
   return (
@@ -625,12 +630,13 @@ export default function MikroTikPage() {
                       id="deviceCode"
                       required
                       value={formData.deviceCode}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, deviceCode: e.target.value }))}
-                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all ${
+                      onChange={(e) => setFormData((prev) => ({ ...prev, deviceCode: e.target.value.replace(/\D/g, '') }))}
+                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-mono transition-all ${
                         formErrors.deviceCode ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
                       }`}
-                      placeholder="e.g., MIKRO-001"
+                      placeholder="e.g., 300001"
                     />
+                    <p className="mt-1 text-[11px] text-slate-400">Strictly numeric globally unique server ID (e.g. 300001).</p>
                     {formErrors.deviceCode && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.deviceCode}</p>}
                   </div>
 

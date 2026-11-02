@@ -256,6 +256,9 @@ if ($method === 'DELETE' && preg_match('#^/(access-profiles|network/packages)/([
 if ($method === 'GET' && $uri === '/network/devices') {
     NetworkController::index();
 }
+if ($method === 'GET' && $uri === '/network/devices/next-code') {
+    NetworkController::nextCode();
+}
 if ($method === 'GET' && $uri === '/network/devices/dropdown') {
     NetworkController::dropdown();
 }

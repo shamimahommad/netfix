@@ -80,4 +80,9 @@ export const networkService = {
     const response = await api.get('/network/devices/dropdown');
     return response.data;
   },
+
+  async getNextDeviceCode(): Promise<{ deviceCode: string }> {
+    const response = await api.get<{ deviceCode: string }>('/network/devices/next-code');
+    return response.data;
+  },
 };

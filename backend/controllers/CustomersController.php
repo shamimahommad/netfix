@@ -406,7 +406,7 @@ class CustomersController {
             $stmtPkg->execute(['pid' => $packageId]);
             $price = (float)($stmtPkg->fetchColumn() ?: 500.00);
 
-            $invNumber = 'INV-' . date('Ymd') . '-' . str_pad((string)$customerId, 4, '0', STR_PAD_LEFT);
+            $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 6);
             $stmtInv = $db->prepare("INSERT INTO invoices 
                 (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, created_by)
                 VALUES (:tid, :cid, :sid, :inv_num, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 10 DAY), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :uid)");

@@ -8,6 +8,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
 require_once __DIR__ . '/../lib/AuthMiddleware.php';
 require_once __DIR__ . '/../lib/RouterosAPI.php';
+require_once __DIR__ . '/../lib/TenantSequenceService.php';
 
 class NetworkController {
     public static function index(): void {
@@ -95,6 +96,15 @@ class NetworkController {
         ]);
     }
 
+    public static function nextCode(): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $code = TenantSequenceService::peekNextCode($db, (string)$tenantId, 'device', 6);
+        Response::json(['deviceCode' => $code]);
+    }
+
     public static function create(): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
@@ -107,35 +117,51 @@ class NetworkController {
             Response::error('Device name is required', 400);
         }
 
-        $code = 'DEV-' . strtoupper(substr(preg_replace('/[^a-zA-Z0-9]/', '', $deviceName), 0, 4)) . rand(10, 99);
-
         $db = Database::getConnection();
-        $stmt = $db->prepare("INSERT INTO network_devices 
-            (tenant_id, device_code, device_name, device_type, vendor, status, management_ip, management_port, winbox_port, api_username, api_password)
-            VALUES (:tid, :code, :name, :type, :vendor, 'active', :ip, :port, :winbox, :user, :pwd)");
-        $stmt->execute([
-            'tid' => $tenantId,
-            'code' => $code,
-            'name' => $deviceName,
-            'type' => $data['deviceType'] ?? 'router',
-            'vendor' => $data['vendor'] ?? 'mikrotik',
-            'ip' => $ip,
-            'port' => (int)($data['managementPort'] ?? 8728),
-            'winbox' => (int)($data['winboxPort'] ?? 8291),
-            'user' => $data['apiUsername'] ?? 'admin',
-            'pwd' => $data['apiPassword'] ?? 'admin123',
-        ]);
 
-        $id = $db->lastInsertId();
+        // Strictly pure numeric globally unique device ID (Base 300000 -> 300001...)
+        $rawCode = trim($data['deviceCode'] ?? $data['code'] ?? '');
+        $cleanDigits = preg_replace('/[^\d]/', '', $rawCode);
+        if (!empty($cleanDigits) && strlen($cleanDigits) >= 6) {
+            $code = $cleanDigits;
+        } else {
+            $code = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'device', 6);
+        }
 
-        Response::json([
-            'success' => true,
-            'message' => 'Network device added successfully',
-            'data' => [
-                'deviceId' => (string)$id,
-                'deviceName' => $deviceName,
-            ],
-        ], 201);
+        try {
+            $stmt = $db->prepare("INSERT INTO network_devices 
+                (tenant_id, device_code, device_name, device_type, vendor, status, management_ip, management_port, winbox_port, api_username, api_password)
+                VALUES (:tid, :code, :name, :type, :vendor, 'active', :ip, :port, :winbox, :user, :pwd)");
+            $stmt->execute([
+                'tid' => $tenantId,
+                'code' => $code,
+                'name' => $deviceName,
+                'type' => $data['deviceType'] ?? 'router',
+                'vendor' => $data['vendor'] ?? 'mikrotik',
+                'ip' => $ip,
+                'port' => (int)($data['managementPort'] ?? 8728),
+                'winbox' => (int)($data['winboxPort'] ?? 8291),
+                'user' => $data['apiUsername'] ?? 'admin',
+                'pwd' => $data['apiPassword'] ?? 'admin123',
+            ]);
+
+            $id = $db->lastInsertId();
+
+            Response::json([
+                'success' => true,
+                'message' => 'Network device added successfully',
+                'data' => [
+                    'deviceId' => (string)$id,
+                    'deviceCode' => $code,
+                    'deviceName' => $deviceName,
+                ],
+            ], 201);
+        } catch (Throwable $e) {
+            if ($e instanceof PDOException && (int)($e->errorInfo[1] ?? 0) === 1062) {
+                Response::error('Duplicate device ID detected. Device code must be globally unique across all networks.', 409);
+            }
+            Response::error('Failed to create network device: ' . $e->getMessage(), 500);
+        }
     }
 
     public static function createOlt(): void {
