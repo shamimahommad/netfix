@@ -131,6 +131,7 @@ class NetworkController {
         $vendor = $data['vendor'] ?? ($deviceType === 'olt' ? 'olt' : 'mikrotik');
         $port = isset($data['managementPort']) ? (int)$data['managementPort'] : ($deviceType === 'olt' ? 23 : 8728);
         $winbox = isset($data['winboxPort']) ? (int)$data['winboxPort'] : ($deviceType === 'olt' ? null : 8291);
+        $webPort = isset($data['webPort']) ? (int)$data['webPort'] : 80;
         $snmpCommunity = $data['snmpCommunity'] ?? 'public';
         $snmpPort = isset($data['snmpPort']) ? (int)$data['snmpPort'] : 161;
         $ponType = $data['ponType'] ?? 'gpon';
@@ -138,8 +139,8 @@ class NetworkController {
 
         try {
             $stmt = $db->prepare("INSERT INTO network_devices 
-                (tenant_id, device_code, device_name, device_type, vendor, status, management_ip, management_port, winbox_port, api_username, api_password, snmp_community, snmp_port, pon_type, total_pon_ports)
-                VALUES (:tid, :code, :name, :type, :vendor, 'active', :ip, :port, :winbox, :user, :pwd, :snmp_comm, :snmp_port, :pon_type, :pon_ports)");
+                (tenant_id, device_code, device_name, device_type, vendor, status, management_ip, management_port, winbox_port, web_port, api_username, api_password, snmp_community, snmp_port, pon_type, total_pon_ports)
+                VALUES (:tid, :code, :name, :type, :vendor, 'active', :ip, :port, :winbox, :web, :user, :pwd, :snmp_comm, :snmp_port, :pon_type, :pon_ports)");
             $stmt->execute([
                 'tid' => $tenantId,
                 'code' => $code,
@@ -149,6 +150,7 @@ class NetworkController {
                 'ip' => $ip,
                 'port' => $port,
                 'winbox' => $winbox,
+                'web' => $webPort,
                 'user' => $data['apiUsername'] ?? 'admin',
                 'pwd' => $data['apiPassword'] ?? 'admin123',
                 'snmp_comm' => $snmpCommunity,
@@ -210,6 +212,10 @@ class NetworkController {
         if (isset($data['managementPort'])) {
             $fields[] = "management_port = :port";
             $params['port'] = (int)$data['managementPort'];
+        }
+        if (isset($data['webPort'])) {
+            $fields[] = "web_port = :web";
+            $params['web'] = (int)$data['webPort'];
         }
         if (isset($data['apiUsername'])) {
             $fields[] = "api_username = :user";

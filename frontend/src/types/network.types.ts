@@ -49,6 +49,7 @@ export interface CreateOltDevicePayload {
   ponType?: 'gpon' | 'epon' | 'xgs-pon' | string;
   totalPonPorts?: number;
   managementPort?: number;
+  webPort?: number;
   snmpCommunity?: string;
   snmpPort?: number;
   apiUsername?: string;

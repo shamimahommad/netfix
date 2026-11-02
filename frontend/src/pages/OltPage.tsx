@@ -11,7 +11,7 @@ import { ActionDropdown } from '@/components/ui/ActionDropdown';
 import { usePingStatus } from '@/hooks/usePingStatus';
 import { usePingStatusStore } from '@/stores/pingStatusStore';
 import { PageHeader } from '@/components/common';
-import { Lock } from 'lucide-react';
+import { Lock, ExternalLink, Globe } from 'lucide-react';
 
 const getStatusBadgeClass = (status: NetworkDevice['status']): string => {
   const classes: Record<NetworkDevice['status'], string> = {
@@ -90,6 +90,8 @@ export default function OltPage() {
     vendor?: string;
     ponType?: string;
     totalPonPorts?: number;
+    managementPort?: number;
+    webPort?: number;
     snmpCommunity?: string;
     snmpPort?: number;
     apiPassword?: string;
@@ -102,6 +104,7 @@ export default function OltPage() {
     managementIp: '',
     dnsName: '',
     managementPort: 23,
+    webPort: 80,
     snmpCommunity: 'public',
     snmpPort: 161,
     apiUsername: 'admin',
@@ -161,6 +164,7 @@ export default function OltPage() {
         managementIp: formData.managementIp.trim(),
         dnsName: formData.dnsName?.trim() || undefined,
         managementPort: formData.managementPort ?? 23,
+        webPort: formData.webPort ?? 80,
         snmpCommunity: formData.snmpCommunity?.trim() || 'public',
         snmpPort: formData.snmpPort ?? 161,
         apiUsername: formData.apiUsername?.trim() || undefined,
@@ -192,6 +196,7 @@ export default function OltPage() {
         managementIp: formData.managementIp.trim(),
         dnsName: formData.dnsName?.trim() || undefined,
         managementPort: formData.managementPort ?? 23,
+        webPort: formData.webPort ?? 80,
         snmpCommunity: formData.snmpCommunity?.trim() || 'public',
         snmpPort: formData.snmpPort ?? 161,
         apiUsername: formData.apiUsername?.trim() || undefined,
@@ -223,6 +228,7 @@ export default function OltPage() {
       managementIp: device.managementIp || '',
       dnsName: device.dnsName || '',
       managementPort: device.managementPort ?? 23,
+      webPort: device.webPort ?? 80,
       snmpCommunity: device.snmpCommunity || 'public',
       snmpPort: device.snmpPort ?? 161,
       apiUsername: device.apiUsername || '',
@@ -364,6 +370,7 @@ export default function OltPage() {
       managementIp: '',
       dnsName: '',
       managementPort: 23,
+      webPort: 80,
       snmpCommunity: 'public',
       snmpPort: 161,
       apiUsername: 'admin',
@@ -503,6 +510,19 @@ export default function OltPage() {
                     {formErrors.managementIp && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.managementIp}</p>}
                   </div>
                   <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Web GUI Port</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={formData.webPort ?? 80}
+                      onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || 80 }))}
+                      className={inputClass('webPort')}
+                      placeholder="80"
+                    />
+                    <p className="mt-1 text-xs text-slate-500">Default: 80 (or 8080 / 443 for HTTPS)</p>
+                  </div>
+                  <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Telnet / SSH CLI Port</label>
                     <input type="number" min={1} max={65535} value={formData.managementPort ?? 23} onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23 }))} className={inputClass('managementPort')} />
                     {formErrors.managementPort && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.managementPort}</p>}
@@ -629,6 +649,18 @@ export default function OltPage() {
                     {formErrors.managementIp && <p className="mt-1 text-xs text-red-600">{formErrors.managementIp}</p>}
                   </div>
                   <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Web GUI Port</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={formData.webPort ?? 80}
+                      onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || 80 }))}
+                      className={inputClass('webPort')}
+                      placeholder="80"
+                    />
+                  </div>
+                  <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Telnet / SSH CLI Port</label>
                     <input type="number" min={1} max={65535} value={formData.managementPort ?? 23} onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23 }))} className={inputClass('managementPort')} />
                   </div>
@@ -737,8 +769,25 @@ export default function OltPage() {
                         <td className="px-3 py-4">
                           <PingStatusIndicator deviceId={device.networkDeviceId} />
                         </td>
-                        <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400 font-mono truncate">
-                          {device.managementIp || '—'}:{device.managementPort || 23}
+                        <td className="px-3 py-4 text-sm font-mono">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-slate-900 dark:text-slate-100 font-semibold">{device.managementIp || '—'}</span>
+                            {device.managementIp && (
+                              <a
+                                href={`http://${device.managementIp}:${device.webPort || 80}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-md bg-teal-50 hover:bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:hover:bg-teal-900/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800 transition-colors shadow-2xs"
+                                title="Open VSOL Web GUI in new tab"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                GUI:{device.webPort || 80}
+                              </a>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-0.5">
+                            CLI: {device.managementPort || 23}
+                          </div>
                         </td>
                         <td className="px-3 py-4 text-xs text-slate-600 dark:text-slate-400 font-mono truncate">
                           {device.snmpCommunity || 'public'}:{device.snmpPort || 161}
@@ -758,6 +807,19 @@ export default function OltPage() {
                                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg>
                               </button>
                               <ActionDropdown isOpen={openPingMenuId === device.networkDeviceId} onClose={() => setOpenPingMenuId(null)} triggerButton={pingMenuRefs.current[device.networkDeviceId]}>
+                                {device.managementIp && (
+                                  <>
+                                    <a
+                                      href={`http://${device.managementIp}:${device.webPort || 80}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="w-full px-3 py-1.5 text-left text-sm text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 flex items-center gap-2 font-medium"
+                                    >
+                                      <ExternalLink className="w-4 h-4" /> Open Web GUI
+                                    </a>
+                                    <div className="border-t border-slate-200 dark:border-slate-700 my-1" />
+                                  </>
+                                )}
                                 <div className="px-2 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Health Check</div>
                                 <button onClick={() => handlePingNow(device)} className="w-full px-3 py-1.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-green-50 dark:hover:bg-green-900/20 flex items-center gap-2">
                                   <span className="w-2 h-2 rounded-full bg-green-500" /> Ping Now
