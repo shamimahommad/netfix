@@ -1,0 +1,105 @@
+================================================================================
+APEX·PULSE NOC - ENTERPRISE BROADBAND & TELECOM SAAS SUITE
+NOTEPAD SYSTEM BLUEPRINT & QUICK REFERENCE
+================================================================================
+Owner: Shamim Ahommad
+System Name: APEX·PULSE NOC / Enterprise Broadband OSS/BSS
+Architecture: Single-Repo Unified Deployment for Coolify / Docker (Port 80)
+Date: October 2026
+
+1. DESIGN IDENTITY & ORIGINALITY GUARANTEE:
+--------------------------------------------------------------------------------
+- Bespoke Executive Design: 100% original, modern light executive UI/UX.
+  * Canvas: Soft Slate (#f8fafc)
+  * Surface: Pure White (#ffffff) with crisp 1px borders (#e2e8f0)
+  * Typography: Plus Jakarta Sans (Headings/Body) + JetBrains Mono (IP, MAC, Money, Latency)
+  * Status Badges: Color-coded micro-badges (Emerald=Active, Amber=Due/Expiring, Rose=Expired, Indigo=Actions)
+- NO Clone Aesthetic: Completely eliminates the 2014-era Bootstrap 3/4 / AdminLTE look used by NetFee BD and SmartISP/ISPBILL.
+- Feels like an elite Silicon Valley / Telecom NOC suite (Linear, Stripe, Datadog caliber).
+
+2. 1-CLICK COOLIFY DEPLOYMENT SPECIFICATION (SINGLE PORT 80):
+--------------------------------------------------------------------------------
+- Deployment Mode: Dockerfile (Multi-stage build)
+- Stage 1: Node 20 Alpine compiles React/Tailwind frontend into /app/dist static assets
+- Stage 2: PHP 8.2-FPM Alpine + Nginx + Supervisor
+  * Nginx listens on Port 80
+  * Serves Single Page App (SPA) on /
+  * Reverse proxies Core PHP REST API on /api/* via fastcgi (127.0.0.1:9000)
+- Zero CORS issues, zero separate frontend/backend deployments.
+- In Coolify:
+  * Repository: Connect this Git repo
+  * Build Pack: Dockerfile
+  * Exposed Port: 80
+  * Environment Variables (Production MySQL):
+      DB_HOST=your_mariadb_host
+      DB_PORT=3306
+      DB_DATABASE=isp_saas
+      DB_USERNAME=isp_user
+      DB_PASSWORD=your_secure_password
+      JWT_SECRET=super_secret_jwt_key_here
+
+3. FULL SPECTRUM FEATURES INCLUDED:
+--------------------------------------------------------------------------------
+[A] Executive Dashboard:
+    - 6 Real-time metrics: Total Clients, Active Lines, Due/Unpaid Lines, Expired Lines, Today's Collection, Monthly Bill
+    - Live MikroTik RouterOS Rx/Tx Telemetry gauge with live bandwidth meter & CPU load
+    - Expiration warning banner (3-Day & 7-Day alerts) with single-click bulk SMS reminder
+    - Quick Action Drawer for day-to-day operations
+
+[B] Subscriber Directory & Queue Control:
+    - Filter tabs: All, Active (Paid), Due / Unpaid, Expired (Blocked), Expiring in 3/7 Days
+    - 20+ ISP Field Onboarding Slideover:
+      * Personal: Name, Mobile, Alt Phone, Email, NID
+      * Credentials: PPPoE Username, Auto-generated Strong Password, Gateway Router
+      * Optical FTTH: Zone/Area, Sub-zone, TJ Distribution Box No, OLT Port, Fiber Core Color
+      * Commercial: Package selection, Monthly Fee, Connection Fee, Advance Paid, Billing Type (Prepaid/Postpaid)
+    - Actions: Quick PPPoE Recharge, One-click MikroTik Session Kick (Port 8728), Enable/Disable toggle
+
+[C] Optical FTTH Network & Coverage Mapping:
+    - Coverage Areas & Sub-zones overview with Lineman assignment
+    - Distribution Boxes & Optical Splitters (TJ Boxes) table
+    - Live port capacity tracker with percentage usage progress bar
+    - Optical core color mapping (Blue, Orange, Green, Brown, Slate, White, etc.)
+
+[D] MikroTik RouterOS Central:
+    - Native Core PHP socket client (RouterosAPI) supporting v6 and v7 RouterOS
+    - Live Ping & Latency test (shows ms and CPU load)
+    - Active PPPoE sessions table with real-time disconnect
+
+[E] Bandwidth Profiles & Queues:
+    - Speed tiers (10M/10M, 20M/20M, 35M/35M, 50M/50M)
+    - Burst limit rules and Queue profile auto-sync
+
+[F] Billing, Invoicing & Due Recovery:
+    - Monthly Bill Sheet generator
+    - Cash collection in field with Printable Official Money Receipt
+    - Due recovery tracking
+
+[G] Resellers & Franchise Sub-ISPs:
+    - Franchise accounts with prepaid balance wallets
+    - Commission margin calculations (%)
+    - Instant wallet top-up modal with presets (৳2,000, ৳5,000, ৳10,000)
+
+[H] Hotspot Voucher Engine:
+    - Batch WiFi voucher card generator
+    - Customizable duration, data limit, and price
+    - Printable voucher cards with QR Code and PIN
+
+[I] Customer Support & Lineman CRM:
+    - Complaint ticket management (Fiber cut, ONU loss, slow speed)
+    - Priority levels (Critical, High, Medium, Low)
+    - Field Lineman assignment and Mark Resolved workflow
+
+[J] Customer Self-Care & Instant bKash Reconnect:
+    - Direct payment portal for overdue/expired subscribers
+    - Automated bKash MFS payment simulation
+    - Zero-operator instant unblock (MikroTik socket sets secret disabled=no within 3 seconds)
+
+4. TECHNOLOGY STACK:
+--------------------------------------------------------------------------------
+- Frontend: React 18 + Vite + Tailwind CSS v3 + Lucide Icons + Plus Jakarta Sans
+- Backend: Pure / Core PHP (Modular REST API, PDO prepared statements, Zero Laravel bloat)
+- Router Engine: Pure PHP RouterOS Socket API (Port 8728)
+- Database: MySQL / MariaDB (InnoDB) + Instant SQLite fallback for zero-config local dev
+- Web Server / Container: Nginx + PHP-FPM 8.2 + Supervisord on Alpine Linux
+================================================================================

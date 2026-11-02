@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    environment:
+      - DB_HOST=db
+      - DB_NAME=ispsaas_db
+      - DB_USER=ispsaas_user
+      - DB_PASS=SecretPass2026!
+    depends_on:
+      - db
+    restart: always
+
+  db:
+    image: mariadb:10.11
+    environment:
+      - MYSQL_ROOT_PASSWORD=RootSecret2026!
+      - MYSQL_DATABASE=ispsaas_db
+      - MYSQL_USER=ispsaas_user
+      - MYSQL_PASSWORD=SecretPass2026!
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./backend/database/schema.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: always
+
+volumes:
+  db_data:

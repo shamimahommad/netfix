@@ -1,0 +1,30 @@
+# =====================================================================
+# NetFix ISP SaaS - Apache / Shared cPanel Configuration (.htaccess)
+# Place this file in public_html when deploying to cPanel hosting
+# =====================================================================
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # 1. Forward all API calls to Core PHP REST API router
+  RewriteCond %{REQUEST_URI} ^/api [NC]
+  RewriteRule ^api/(.*)$ backend/index.php [QSA,L]
+
+  # 2. Allow direct access to existing static files / assets
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # 3. Frontend SPA Fallback: send all other paths to index.html
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+# Security: prevent directory browsing
+Options -Indexes
+
+# Security: block hidden files
+<FilesMatch "^\.">
+  Order allow,deny
+  Deny from all
+</FilesMatch>
