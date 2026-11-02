@@ -27,19 +27,21 @@ class TenantSequenceService {
         $current = (int)$stmt->fetchColumn();
 
         if ($type === 'customer') {
-            // Check global max in customers table across all tenants
-            $stmtMax = $db->query("SELECT MAX(CAST(customer_code AS UNSIGNED)) FROM customers");
-            $maxExisting = (int)$stmtMax->fetchColumn();
-            $base = self::BASE_CUSTOMER_ID;
+            // Hot path O(1): Only check table max if counter is at or below initial base
+            if ($current <= self::BASE_CUSTOMER_ID) {
+                $stmtMax = $db->query("SELECT MAX(CAST(customer_code AS UNSIGNED)) FROM customers");
+                $maxExisting = (int)$stmtMax->fetchColumn();
+                $nextVal = max(self::BASE_CUSTOMER_ID, $maxExisting) + 1;
+            } else {
+                $nextVal = $current + 1;
+            }
         } else {
-            // Check tenant-specific max
             $stmtMax = $db->prepare("SELECT MAX(CAST(customer_code AS UNSIGNED)) FROM customers WHERE tenant_id = :tid");
             $stmtMax->execute(['tid' => $tenantId]);
             $maxExisting = (int)$stmtMax->fetchColumn();
-            $base = 0;
+            $nextVal = max(0, $current, $maxExisting) + 1;
         }
 
-        $nextVal = max($base, $current, $maxExisting) + 1;
         return str_pad((string)$nextVal, $padding, '0', STR_PAD_LEFT);
     }
 
@@ -57,19 +59,20 @@ class TenantSequenceService {
         $current = (int)$stmtLock->fetchColumn();
 
         if ($type === 'customer') {
-            // Check global max in customers table across all tenants
-            $stmtMax = $db->query("SELECT MAX(CAST(customer_code AS UNSIGNED)) FROM customers");
-            $maxExisting = (int)$stmtMax->fetchColumn();
-            $base = self::BASE_CUSTOMER_ID;
+            // Ultra-fast O(1) atomic generation: never scans large tables once initialized
+            if ($current <= self::BASE_CUSTOMER_ID) {
+                $stmtMax = $db->query("SELECT MAX(CAST(customer_code AS UNSIGNED)) FROM customers");
+                $maxExisting = (int)$stmtMax->fetchColumn();
+                $nextVal = max(self::BASE_CUSTOMER_ID, $maxExisting) + 1;
+            } else {
+                $nextVal = $current + 1;
+            }
         } else {
-            // Check tenant-specific max
             $stmtMax = $db->prepare("SELECT MAX(CAST(customer_code AS UNSIGNED)) FROM customers WHERE tenant_id = :tid");
             $stmtMax->execute(['tid' => $tenantId]);
             $maxExisting = (int)$stmtMax->fetchColumn();
-            $base = 0;
+            $nextVal = max(0, $current, $maxExisting) + 1;
         }
-
-        $nextVal = max($base, $current, $maxExisting) + 1;
 
         // 2. Atomically update the counter
         $stmtUp = $db->prepare("UPDATE tenant_sequences SET current_value = :val, updated_at = NOW() WHERE tenant_id = :tid AND sequence_type = :type");

@@ -277,12 +277,15 @@ class BillingController {
         }
 
         if (!empty($_GET['search'])) {
-            $search = '%' . trim($_GET['search']) . '%';
-            $where[] = "(i.invoice_number LIKE :s1 OR c.full_name LIKE :s2 OR c.phone LIKE :s3 OR c.customer_code LIKE :s4)";
+            $rawSearch = trim($_GET['search']);
+            $search = '%' . $rawSearch . '%';
+            $where[] = "(i.invoice_number = :exact_inv OR i.invoice_number LIKE :s1 OR c.customer_code = :exact_cust OR c.phone = :exact_phone OR c.full_name LIKE :s2 OR c.phone LIKE :s3)";
+            $params['exact_inv'] = $rawSearch;
+            $params['exact_cust'] = $rawSearch;
+            $params['exact_phone'] = $rawSearch;
             $params['s1'] = $search;
             $params['s2'] = $search;
             $params['s3'] = $search;
-            $params['s4'] = $search;
         }
 
         $whereSql = implode(' AND ', $where);
