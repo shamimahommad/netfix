@@ -60,13 +60,6 @@ const PROTOCOLS: Array<{ label: string; value: NetworkProtocol }> = [
   { label: 'PPTP', value: 'pptp' },
 ];
 
-function randomString(length: number) {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
-  let out = '';
-  for (let i = 0; i < length; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  return out;
-}
-
 function normalizePhone(phone: string) {
   return phone.replace(/[^\d]/g, '');
 }
@@ -228,18 +221,6 @@ export default function AddClientPage() {
     () => PROTOCOLS.find((p) => p.value === form.protocol)?.label ?? form.protocol ?? '—',
     [form.protocol],
   );
-
-  // Auto-generate username/password when mobile changes (if empty)
-  useEffect(() => {
-    const digits = normalizePhone(form.mobileNo);
-    if (!digits) return;
-    setForm((prev) => {
-      const next = { ...prev };
-      if (!next.username.trim()) next.username = `u${digits.slice(-8)}`;
-      if (!next.password.trim()) next.password = randomString(10);
-      return next;
-    });
-  }, [form.mobileNo]);
 
   const loadServers = async () => {
     try {
@@ -595,7 +576,7 @@ export default function AddClientPage() {
                     placeholder="017XXXXXXXX"
                   />
                 </div>
-                <p className="mt-1 text-[11px] text-slate-400">Used for SMS billing alerts & auto-generates PPPoE login.</p>
+                <p className="mt-1 text-[11px] text-slate-400">Used for SMS billing alerts & customer portal login.</p>
                 {errors.mobileNo && <p className="mt-1 text-xs text-rose-500 font-medium">{errors.mobileNo}</p>}
               </div>
 
@@ -1158,7 +1139,8 @@ export default function AddClientPage() {
                     type="text"
                     value={form.username}
                     onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
-                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-mono focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${
+                    placeholder="Type PPPoE username"
+                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-mono placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${
                       errors.username ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
                     }`}
                   />
@@ -1176,7 +1158,8 @@ export default function AddClientPage() {
                     type={passwordRevealed ? 'text' : 'password'}
                     value={form.password}
                     onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
-                    className={`w-full pl-9 pr-9 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-mono focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${
+                    placeholder="Type PPPoE password"
+                    className={`w-full pl-9 pr-9 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-mono placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${
                       errors.password ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
                     }`}
                   />
