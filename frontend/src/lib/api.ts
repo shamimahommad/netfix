@@ -2,7 +2,18 @@ import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'ax
 import { useTenantStore } from '@/stores/tenantStore';
 import { useAuthStore } from '@/stores/authStore';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:4000/api/v1';
+const getApiBaseUrl = (): string => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
+  if (import.meta.env.PROD) {
+    if (!envUrl || envUrl.includes('localhost')) {
+      return '/api/v1';
+    }
+    return envUrl;
+  }
+  return envUrl || 'http://localhost:4000/api/v1';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 export const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,

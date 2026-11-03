@@ -9,13 +9,15 @@ WORKDIR /app
 COPY frontend/package*.json ./
 RUN npm install
 COPY frontend/ ./
+ARG VITE_API_BASE_URL=/api/v1
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 
-# Stage 2: Production Latest Patched PHP 8.3 + Nginx Web Server (Immune to CVE-2024-4577)
+# Stage 2: Production Latest Patched PHP 8.3 + Nginx Web Server
 FROM php:8.3-fpm-alpine
 
-# Install Nginx and required PHP extensions
-RUN apk add --no-cache nginx supervisor curl \
+# Install Nginx, supervisor, curl and required PHP extensions
+RUN apk add --no-cache nginx supervisor curl tzdata \
     && docker-php-ext-install pdo pdo_mysql bcmath sockets
 
 WORKDIR /var/www/html
@@ -29,8 +31,11 @@ COPY backend/ /var/www/html/backend
 # Configure Nginx
 COPY docker/nginx.conf /etc/nginx/http.d/default.conf
 
-# Configure Supervisor to run both Nginx and PHP-FPM
+# Configure Supervisor to run Nginx, PHP-FPM, and Crond
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Setup cron job for OLT background sync every 2 hours
+RUN echo "0 */2 * * * php /var/www/html/backend/cron/sync_olt.php >> /var/log/cron.log 2>&1" > /etc/crontabs/root
 
 # Set permissions
 RUN chown -R www-data:www-data /var/www/html \
