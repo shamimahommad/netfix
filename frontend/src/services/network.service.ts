@@ -25,6 +25,11 @@ export const networkService = {
     return response.data;
   },
 
+  async getNetworkDeviceById(deviceId: string): Promise<{ success: boolean; data: NetworkDevice }> {
+    const response = await api.get<{ success: boolean; data: NetworkDevice }>(`/network/devices/${deviceId}`);
+    return response.data;
+  },
+
   async createOltDevice(payload: CreateOltDevicePayload): Promise<CreateNetworkDeviceResponse> {
     const response = await api.post<CreateNetworkDeviceResponse>('/network/devices/olt', payload);
     return response.data;
@@ -83,6 +88,25 @@ export const networkService = {
 
   async getNextDeviceCode(): Promise<{ deviceCode: string }> {
     const response = await api.get<{ deviceCode: string }>('/network/devices/next-code');
+    return response.data;
+  },
+
+  async getOltStatus(deviceId: string, refresh = false): Promise<{ success: boolean; data: any }> {
+    const response = await api.get<{ success: boolean; data: any }>(`/network/devices/${deviceId}/olt-status`, {
+      params: refresh ? { refresh: 'true' } : undefined,
+    });
+    return response.data;
+  },
+
+  async getOltOnus(deviceId: string, pon?: number): Promise<{ success: boolean; data: { total: number; onus: any[] } }> {
+    const response = await api.get<{ success: boolean; data: { total: number; onus: any[] } }>(`/network/devices/${deviceId}/onus`, {
+      params: pon ? { pon } : undefined,
+    });
+    return response.data;
+  },
+
+  async syncOlt(deviceId: string): Promise<{ success: boolean; message: string; data: any }> {
+    const response = await api.post<{ success: boolean; message: string; data: any }>(`/network/devices/${deviceId}/sync-olt`);
     return response.data;
   },
 };

@@ -71,6 +71,54 @@ class NetworkController {
         ]);
     }
 
+    public static function show(string $id): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) AND tenant_id = :tid LIMIT 1");
+        $stmt->execute(['id' => $id, 'code' => $id, 'tid' => $tenantId]);
+        $r = $stmt->fetch();
+
+        if (!$r) {
+            Response::error('Device not found', 404);
+        }
+
+        $devId = (string)$r['network_device_id'];
+        $device = [
+            'networkDeviceId' => $devId,
+            'deviceId' => $devId,
+            'device_id' => $devId,
+            'id' => $devId,
+            'deviceCode' => $r['device_code'],
+            'deviceName' => $r['device_name'],
+            'deviceType' => $r['device_type'],
+            'vendor' => $r['vendor'],
+            'status' => $r['status'],
+            'managementIp' => $r['management_ip'],
+            'managementPort' => (int)$r['management_port'],
+            'winboxPort' => $r['winbox_port'] ? (int)$r['winbox_port'] : null,
+            'webPort' => $r['web_port'] ? (int)$r['web_port'] : null,
+            'apiUsername' => $r['api_username'],
+            'isProduction' => (bool)$r['is_production'],
+            'customPingInterval' => $r['custom_ping_interval'],
+            'snmpCommunity' => $r['snmp_community'] ?? 'public',
+            'snmpPort' => (int)($r['snmp_port'] ?? 161),
+            'ponType' => $r['pon_type'] ?? 'gpon',
+            'totalPonPorts' => (int)($r['total_pon_ports'] ?? 8),
+            'lastSyncAt' => $r['last_sync_at'],
+            'telemetry' => json_decode($r['telemetry'] ?? '{}', true) ?: [],
+            'createdAt' => $r['created_at'],
+            'pingStatus' => $r['status'] === 'active' ? 'online' : 'offline',
+            'latencyMs' => $r['status'] === 'active' ? 5 : null,
+        ];
+
+        Response::json([
+            'success' => true,
+            'data' => $device,
+        ]);
+    }
+
     public static function dropdown(): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
@@ -419,23 +467,13 @@ class NetworkController {
             Response::error('OLT device not found', 404);
         }
 
-        require_once __DIR__ . '/../lib/VsolOltClient.php';
-        $ip = $device['management_ip'] ?? '114.130.99.52';
-        $webPort = !empty($device['web_port']) ? (int)$device['web_port'] : 1010;
-        $username = !empty($device['api_username']) ? $device['api_username'] : 'star';
-        $password = !empty($device['api_password']) ? $device['api_password'] : 'star321';
-        $protocol = ($webPort == 1010 || $webPort == 443) ? 'https' : 'http';
-
-        $client = new VsolOltClient($ip, $webPort, $username, $password, $protocol);
-        $info = $client->getSystemInfo();
-        $ports = $client->getPonPorts();
+        require_once __DIR__ . '/../lib/OltSyncService.php';
+        $force = !empty($_GET['refresh']) && $_GET['refresh'] === 'true';
+        $data = OltSyncService::sync($db, $device, $force);
 
         Response::json([
             'success' => true,
-            'data' => [
-                'system' => $info,
-                'ports' => $ports,
-            ],
+            'data' => $data,
         ]);
     }
 
@@ -452,16 +490,60 @@ class NetworkController {
             Response::error('OLT device not found', 404);
         }
 
-        require_once __DIR__ . '/../lib/VsolOltClient.php';
-        $ip = $device['management_ip'] ?? '114.130.99.52';
-        $webPort = !empty($device['web_port']) ? (int)$device['web_port'] : 1010;
-        $username = !empty($device['api_username']) ? $device['api_username'] : 'star';
-        $password = !empty($device['api_password']) ? $device['api_password'] : 'star321';
-        $protocol = ($webPort == 1010 || $webPort == 443) ? 'https' : 'http';
-
         $pon = !empty($_GET['pon']) ? (int)$_GET['pon'] : null;
-        $client = new VsolOltClient($ip, $webPort, $username, $password, $protocol);
-        $onus = $client->getOnus($pon);
+
+        // Fetch customer network accounts for this tenant to match by MAC address
+        $custMap = [];
+        try {
+            $cStmt = $db->prepare("SELECT c.customer_id, c.customer_code, c.full_name, na.username, na.mac_address 
+                FROM customer_network_accounts na
+                JOIN customers c ON c.customer_id = na.customer_id
+                WHERE na.tenant_id = :tid AND na.mac_address IS NOT NULL AND na.mac_address != ''");
+            $cStmt->execute(['tid' => $tenantId]);
+            $custRows = $cStmt->fetchAll();
+            foreach ($custRows as $cr) {
+                $m = strtoupper(str_replace(['-', '.', ' '], ':', trim($cr['mac_address'])));
+                $custMap[$m] = $cr;
+            }
+        } catch (\Throwable $e) {}
+
+        // Query fast local DB storage
+        $sql = "SELECT * FROM olt_onus WHERE network_device_id = :did AND tenant_id = :tid";
+        $params = ['did' => $deviceId, 'tid' => $tenantId];
+        if ($pon) {
+            $sql .= " AND pon_port = :pon";
+            $params['pon'] = $pon;
+        }
+        $sql .= " ORDER BY pon_port ASC, onu_id ASC";
+
+        $onuStmt = $db->prepare($sql);
+        $onuStmt->execute($params);
+        $rows = $onuStmt->fetchAll();
+
+        $onus = [];
+        foreach ($rows as $r) {
+            $m = strtoupper($r['mac_address']);
+            $matchedCustomer = null;
+            if (isset($custMap[$m])) {
+                $matchedCustomer = [
+                    'customerId' => (string)$custMap[$m]['customer_id'],
+                    'customerCode' => (string)$custMap[$m]['customer_code'],
+                    'customerName' => (string)$custMap[$m]['full_name'],
+                    'username' => (string)$custMap[$m]['username'],
+                ];
+            }
+
+            $onus[] = [
+                'ponPort' => (int)$r['pon_port'],
+                'ponPortName' => $r['pon_port_name'],
+                'onuId' => $r['onu_id'],
+                'macAddress' => $m,
+                'rxPowerDbm' => (float)$r['rx_power_dbm'],
+                'status' => $r['status'],
+                'lastSyncAt' => $r['last_sync_at'],
+                'customer' => $matchedCustomer,
+            ];
+        }
 
         Response::json([
             'success' => true,
@@ -469,6 +551,29 @@ class NetworkController {
                 'total' => count($onus),
                 'onus' => $onus,
             ],
+        ]);
+    }
+
+    public static function syncOlt(string $deviceId): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id AND tenant_id = :tid LIMIT 1");
+        $stmt->execute(['id' => $deviceId, 'tid' => $tenantId]);
+        $device = $stmt->fetch();
+
+        if (!$device) {
+            Response::error('OLT device not found', 404);
+        }
+
+        require_once __DIR__ . '/../lib/OltSyncService.php';
+        $data = OltSyncService::sync($db, $device, true);
+
+        Response::json([
+            'success' => true,
+            'message' => 'OLT telemetry and ONUs synchronized successfully',
+            'data' => $data,
         ]);
     }
 

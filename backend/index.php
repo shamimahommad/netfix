@@ -277,11 +277,17 @@ if ($method === 'GET' && preg_match('#^/network/devices/([^/]+)/olt-status$#', $
 if ($method === 'GET' && preg_match('#^/network/devices/([^/]+)/onus$#', $uri, $m)) {
     NetworkController::oltOnus($m[1]);
 }
+if ($method === 'POST' && preg_match('#^/network/devices/([^/]+)/sync-olt$#', $uri, $m)) {
+    NetworkController::syncOlt($m[1]);
+}
 if ($method === 'POST' && preg_match('#^/network/devices/([^/]+)/ping-now$#', $uri, $m)) {
     NetworkController::pingNow($m[1]);
 }
 if ($method === 'GET' && preg_match('#^/network/devices/([^/]+)/profiles$#', $uri, $m)) {
     NetworkController::getProfiles($m[1]);
+}
+if ($method === 'GET' && preg_match('#^/network/devices/([^/]+)$#', $uri, $m)) {
+    NetworkController::show($m[1]);
 }
 if ($method === 'PUT' && preg_match('#^/network/devices/([^/]+)$#', $uri, $m)) {
     NetworkController::update($m[1]);

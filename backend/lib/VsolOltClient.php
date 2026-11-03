@@ -100,12 +100,43 @@ class VsolOltClient {
         return $ports;
     }
 
-    public function getOnus(?int $targetPon = null): array {
+    public function getOnus(?int $targetPon = null, bool $forceRefresh = false): array {
+        $cacheFile = sys_get_temp_dir() . '/vsol_onus_' . md5($this->host . ':' . $this->port) . '.json';
+        if (!$forceRefresh && !$targetPon && file_exists($cacheFile) && (time() - filemtime($cacheFile) < 45)) {
+            $cached = json_decode(file_get_contents($cacheFile), true);
+            if (is_array($cached)) return $cached;
+        }
+
         $onus = [];
         $ponRange = $targetPon ? [$targetPon] : [1, 2, 3, 4];
 
+        // Fetch in parallel using curl_multi
+        $mh = curl_multi_init();
+        $curlHandles = [];
+
         foreach ($ponRange as $pon) {
-            $html = $this->request("onuReceivePower.html?gponid=$pon");
+            $url = $this->getBaseUrl() . "/onuReceivePower.html?gponid=$pon";
+            $ch = curl_init($url);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_TIMEOUT, $this->timeout);
+            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+            curl_multi_add_handle($mh, $ch);
+            $curlHandles[$pon] = $ch;
+        }
+
+        $running = null;
+        do {
+            curl_multi_exec($mh, $running);
+            curl_multi_select($mh, 0.1);
+        } while ($running > 0);
+
+        foreach ($curlHandles as $pon => $ch) {
+            $html = curl_multi_getcontent($ch);
+            curl_multi_remove_handle($mh, $ch);
+            curl_close($ch);
+
             if (!$html) continue;
 
             if (preg_match_all('/<td>(EPON0\/\d+:\d+)\s*<\/td><td>([0-9A-Fa-f:]{17})<\/td><td>([-0-9\.]+)<\/td>/is', $html, $matches, PREG_SET_ORDER)) {
@@ -121,6 +152,12 @@ class VsolOltClient {
                 }
             }
         }
+        curl_multi_close($mh);
+
+        if (!$targetPon && !empty($onus)) {
+            @file_put_contents($cacheFile, json_encode($onus));
+        }
+
         return $onus;
     }
 

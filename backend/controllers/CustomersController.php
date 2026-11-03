@@ -195,6 +195,73 @@ class CustomersController {
 
         $metadata = json_decode($customer['metadata'] ?? '{}', true) ?: [];
 
+        // Resolve ONU Information by matching Customer's MAC with OLT Connected ONUs
+        $onuData = [
+            'olt' => null,
+            'onuMac' => null,
+            'ponId' => null,
+            'vlan' => null,
+            'power' => null,
+            'distance' => null,
+            'lastUpdate' => null,
+        ];
+
+        $targetMac = !empty($net['mac_address']) ? trim($net['mac_address']) : '';
+
+        // If MAC is not saved, auto-discover from live MikroTik active session
+        if (empty($targetMac) && !empty($net['username']) && !empty($net['network_device_id'])) {
+            try {
+                $rStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :did LIMIT 1");
+                $rStmt->execute(['did' => $net['network_device_id']]);
+                $rDev = $rStmt->fetch();
+                if ($rDev && !empty($rDev['management_ip'])) {
+                    require_once __DIR__ . '/../lib/RouterosAPI.php';
+                    $api = new RouterosAPI();
+                    $rPort = (int)($rDev['management_port'] ?: 7636);
+                    $rUser = $rDev['api_username'] ?? 'admin';
+                    $rPass = $rDev['api_password'] ?? '';
+                    if ($api->connect($rDev['management_ip'], $rUser, $rPass, $rPort)) {
+                        $api->write('/ppp/active/print', false);
+                        $api->write('?name=' . $net['username']);
+                        $activeSess = $api->read();
+                        $api->disconnect();
+                        if (!empty($activeSess[0]['caller-id'])) {
+                            $targetMac = trim($activeSess[0]['caller-id']);
+                            $upStmt = $db->prepare("UPDATE customer_network_accounts SET mac_address = :mac, is_online = 1 WHERE customer_id = :cid");
+                            $upStmt->execute(['mac' => $targetMac, 'cid' => $id]);
+                            $net['mac_address'] = $targetMac;
+                            $net['is_online'] = 1;
+                        }
+                    }
+                }
+            } catch (\Throwable $e) {}
+        }
+
+        // Match MAC with fast stored OLT connected ONUs (0ms SQL latency)
+        if (!empty($targetMac)) {
+            try {
+                $cleanMac = strtoupper(str_replace(['-', '.', ' '], ':', trim($targetMac)));
+                $onuStmt = $db->prepare("SELECT o.*, nd.device_name 
+                    FROM olt_onus o 
+                    JOIN network_devices nd ON nd.network_device_id = o.network_device_id 
+                    WHERE o.tenant_id = :tid AND o.mac_address = :mac 
+                    LIMIT 1");
+                $onuStmt->execute(['tid' => $tenantId, 'mac' => $cleanMac]);
+                $matchedOnu = $onuStmt->fetch();
+                if ($matchedOnu) {
+                    $onuData = [
+                        'olt' => $matchedOnu['device_name'],
+                        'onuMac' => $matchedOnu['mac_address'],
+                        'ponId' => $matchedOnu['pon_port_name'] . ' (' . $matchedOnu['onu_id'] . ')',
+                        'vlan' => '100',
+                        'power' => $matchedOnu['rx_power_dbm'] . ' dBm',
+                        'distance' => 'Online',
+                        'lastUpdate' => $matchedOnu['last_sync_at'],
+                    ];
+                }
+            } catch (\Throwable $e) {}
+        }
+
         Response::json([
             'success' => true,
             'data' => [
@@ -244,8 +311,8 @@ class CustomersController {
                     'username' => $net['username'] ?? '',
                     'password' => $net['password'] ?? '',
                     'ipAddress' => $net['current_ip'] ?? $net['remote_address'] ?? null,
-                    'macAddress' => $net['mac_address'] ?? null,
-                    'activeMacAddress' => $net['mac_address'] ?? null,
+                    'macAddress' => $net['mac_address'] ?? $targetMac ?: null,
+                    'activeMacAddress' => $net['mac_address'] ?? $targetMac ?: null,
                     'deviceVendor' => null,
                     'vendorSource' => null,
                     'uptime' => (int)($net['uptime_seconds'] ?? 0),
@@ -267,15 +334,7 @@ class CustomersController {
                     'connectedBy' => $customer['created_by'] ?? 'Admin',
                     'location' => $customer['installation_address'] ?? '',
                 ],
-                'onu' => [
-                    'olt' => null,
-                    'onuMac' => null,
-                    'ponId' => null,
-                    'vlan' => null,
-                    'power' => null,
-                    'distance' => null,
-                    'lastUpdate' => null,
-                ],
+                'onu' => $onuData,
             ],
         ]);
     }

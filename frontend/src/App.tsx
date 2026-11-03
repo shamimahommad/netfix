@@ -20,6 +20,7 @@ import SupportPage from './pages/SupportPage';
 import NetworkPage from './pages/NetworkPage';
 import MikroTikPage from './pages/MikroTikPage';
 import OltPage from './pages/OltPage';
+import OltDetailPage from './pages/OltDetailPage';
 import PackageCopyPage from './pages/PackageCopyPage';
 import PlaceholderPage from './pages/PlaceholderPage';
 import ChangePasswordPage from './pages/ChangePasswordPage';
@@ -199,6 +200,8 @@ function AppContent() {
           <Route path="network/packages" element={<AdminOnlyGuard><PackagePlansPage /></AdminOnlyGuard>} />
           <Route path="network/monitoring/live-traffic" element={<AdminOnlyGuard><LiveTrafficPage /></AdminOnlyGuard>} />
           <Route path="network/olt" element={<AdminOnlyGuard><OltPage /></AdminOnlyGuard>} />
+          <Route path="network/olt/:id" element={<AdminOnlyGuard><OltDetailPage /></AdminOnlyGuard>} />
+          <Route path="network/olt/view/:id" element={<AdminOnlyGuard><OltDetailPage /></AdminOnlyGuard>} />
           <Route path="network/:type" element={<AdminOnlyGuard><NetworkPage /></AdminOnlyGuard>} />
           <Route path="network" element={<Navigate to="/dashboard/network/mikrotik" replace />} />
           <Route path="service-area/areas" element={<ServiceAreasPage />} />

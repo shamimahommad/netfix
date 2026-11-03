@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, memo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useToastContext } from '@/contexts/ToastContext';
 import { networkService } from '@/services/network.service';
 import {
@@ -11,7 +12,7 @@ import { ActionDropdown } from '@/components/ui/ActionDropdown';
 import { usePingStatus } from '@/hooks/usePingStatus';
 import { usePingStatusStore } from '@/stores/pingStatusStore';
 import { PageHeader } from '@/components/common';
-import { Lock, ExternalLink, Globe } from 'lucide-react';
+import { Lock, Zap } from 'lucide-react';
 
 const getStatusBadgeClass = (status: NetworkDevice['status']): string => {
   const classes: Record<NetworkDevice['status'], string> = {
@@ -74,6 +75,7 @@ const PingStatusIndicator = memo(({ deviceId }: { deviceId: string }) => {
 PingStatusIndicator.displayName = 'PingStatusIndicator';
 
 export default function OltPage() {
+  const navigate = useNavigate();
   const toast = useToastContext();
   const [devices, setDevices] = useState<NetworkDevice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -751,13 +753,19 @@ export default function OltPage() {
                   {devices.map((device) => {
                     const vendorLabel = (device.vendor || 'olt').toUpperCase();
                     const ponInfo = `${(device.ponType || 'gpon').toUpperCase()} (${device.totalPonPorts || 8} Ports)`;
-                    const isHttps = device.webPort === 1010 || device.webPort === 443;
-                    const webUrl = `${isHttps ? 'https' : 'http'}://${device.managementIp}:${device.webPort || 80}/action/login.html`;
 
                     return (
                       <tr key={device.networkDeviceId} className="hover:bg-gradient-to-r hover:from-teal-50/50 hover:to-cyan-50/50 dark:hover:from-teal-900/10 dark:hover:to-cyan-900/10 transition-all duration-200">
                         <td className="px-3 py-4 text-sm font-semibold text-slate-900 dark:text-slate-100 font-mono">{device.deviceCode}</td>
-                        <td className="px-3 py-4 text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{device.deviceName}</td>
+                        <td className="px-3 py-4 text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
+                          <button
+                            onClick={() => navigate(`/dashboard/network/olt/${device.networkDeviceId}`)}
+                            className="hover:text-blue-600 dark:hover:text-blue-400 font-bold transition-colors text-left truncate block max-w-full"
+                            title="Click to view full OLT details & connected ONUs"
+                          >
+                            {device.deviceName}
+                          </button>
+                        </td>
                         <td className="px-3 py-4 text-xs">
                           <span className="font-semibold text-blue-600 dark:text-blue-400">{vendorLabel}</span>
                           <span className="text-slate-400 dark:text-slate-500 mx-1">•</span>
@@ -772,30 +780,24 @@ export default function OltPage() {
                           <PingStatusIndicator deviceId={device.networkDeviceId} />
                         </td>
                         <td className="px-3 py-4 text-sm font-mono">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-slate-900 dark:text-slate-100 font-semibold">{device.managementIp || '—'}</span>
-                            {device.managementIp && (
-                              <a
-                                href={webUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-md bg-teal-50 hover:bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:hover:bg-teal-900/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800 transition-colors shadow-2xs"
-                                title="Open VSOL Web GUI in new tab"
-                              >
-                                <ExternalLink className="w-3 h-3" />
-                                GUI:{device.webPort || 80}
-                              </a>
-                            )}
-                          </div>
+                          <span className="text-slate-900 dark:text-slate-100 font-semibold">{device.managementIp || '—'}</span>
                           <div className="text-[11px] text-slate-400 mt-0.5">
-                            CLI: {device.managementPort || 23}
+                            Port: {device.managementPort || 23}
                           </div>
                         </td>
                         <td className="px-3 py-4 text-xs text-slate-600 dark:text-slate-400 font-mono truncate">
                           {device.snmpCommunity || 'public'}:{device.snmpPort || 161}
                         </td>
                         <td className="px-3 py-4">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              onClick={() => navigate(`/dashboard/network/olt/${device.networkDeviceId}`)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-xs font-semibold shadow-2xs transition-all active:scale-95"
+                              title="View connected ONUs & system telemetry"
+                            >
+                              <Zap className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                              <span>ONUs</span>
+                            </button>
                             <button onClick={() => handleEdit(device)} className="p-2 text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 rounded-lg transition-colors" title="Edit">
                               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                             </button>
@@ -809,19 +811,16 @@ export default function OltPage() {
                                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg>
                               </button>
                               <ActionDropdown isOpen={openPingMenuId === device.networkDeviceId} onClose={() => setOpenPingMenuId(null)} triggerButton={pingMenuRefs.current[device.networkDeviceId]}>
-                                {device.managementIp && (
-                                  <>
-                                    <a
-                                      href={webUrl}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="w-full px-3 py-1.5 text-left text-sm text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 flex items-center gap-2 font-medium"
-                                    >
-                                      <ExternalLink className="w-4 h-4" /> Open Web GUI
-                                    </a>
-                                    <div className="border-t border-slate-200 dark:border-slate-700 my-1" />
-                                  </>
-                                )}
+                                <button
+                                  onClick={() => {
+                                    setOpenPingMenuId(null);
+                                    navigate(`/dashboard/network/olt/${device.networkDeviceId}`);
+                                  }}
+                                  className="w-full px-3 py-1.5 text-left text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center gap-2 font-medium"
+                                >
+                                  <Zap className="w-4 h-4" /> View ONUs & Telemetry
+                                </button>
+                                <div className="border-t border-slate-200 dark:border-slate-700 my-1" />
                                 <div className="px-2 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Health Check</div>
                                 <button onClick={() => handlePingNow(device)} className="w-full px-3 py-1.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-green-50 dark:hover:bg-green-900/20 flex items-center gap-2">
                                   <span className="w-2 h-2 rounded-full bg-green-500" /> Ping Now
