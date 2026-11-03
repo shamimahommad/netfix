@@ -7,8 +7,6 @@ services:
       dockerfile: Dockerfile
     expose:
       - "80"
-    ports:
-      - "${HOST_HTTP_PORT:-8080}:80"
     environment:
       - DB_HOST=${DB_HOST:-db}
       - DB_PORT=${DB_PORT:-3306}
