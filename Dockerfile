@@ -52,4 +52,7 @@ RUN chown -R www-data:www-data /var/www/html \
 
 EXPOSE 80
 
+HEALTHCHECK --interval=20s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -f http://127.0.0.1/health || exit 1
+
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
