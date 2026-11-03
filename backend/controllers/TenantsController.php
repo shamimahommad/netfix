@@ -18,7 +18,9 @@ class TenantsController {
             tl.max_routers,
             tl.max_resellers,
             (SELECT COUNT(*) FROM customers c WHERE c.tenant_id = t.tenant_id) as total_customers,
-            (SELECT COUNT(*) FROM network_devices nd WHERE nd.tenant_id = t.tenant_id) as total_routers
+            (SELECT COUNT(*) FROM network_devices nd WHERE nd.tenant_id = t.tenant_id AND nd.device_type = 'router') as total_routers,
+            (SELECT COUNT(*) FROM network_devices nd WHERE nd.tenant_id = t.tenant_id AND nd.device_type = 'olt') as total_olts,
+            (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.tenant_id) as total_users
             FROM tenants t
             LEFT JOIN tenant_limits tl ON tl.tenant_id = t.tenant_id
             ORDER BY t.tenant_id DESC");
@@ -51,8 +53,10 @@ class TenantsController {
                 'activatedAt' => $r['activated_at'],
                 'createdAt' => $r['created_at'],
                 'updatedAt' => $r['updated_at'] ?? $r['created_at'],
-                'totalCustomers' => (int)$r['total_customers'],
-                'totalRouters' => (int)$r['total_routers'],
+                'totalCustomers' => (int)($r['total_customers'] ?? 0),
+                'totalRouters' => (int)($r['total_routers'] ?? 0),
+                'totalOlts' => (int)($r['total_olts'] ?? 0),
+                'totalUsers' => (int)($r['total_users'] ?? 0),
                 'limits' => $limits,
 
                 // SnakeCase backward compatibility
@@ -63,8 +67,10 @@ class TenantsController {
                 'business_email' => $r['business_email'],
                 'business_phone' => $r['business_phone'],
                 'business_address' => $r['business_address'],
-                'total_customers' => (int)$r['total_customers'],
-                'total_routers' => (int)$r['total_routers'],
+                'total_customers' => (int)($r['total_customers'] ?? 0),
+                'total_routers' => (int)($r['total_routers'] ?? 0),
+                'total_olts' => (int)($r['total_olts'] ?? 0),
+                'total_users' => (int)($r['total_users'] ?? 0),
                 'max_customers' => (int)($r['max_customers'] ?? 5000),
                 'max_routers' => (int)($r['max_routers'] ?? 10),
                 'max_resellers' => (int)($r['max_resellers'] ?? 50),
