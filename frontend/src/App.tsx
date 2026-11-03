@@ -136,10 +136,10 @@ function AppContent() {
           <Route path="tenants" element={<ISPsListPage />} />
           <Route path="tenants/:tenantId/payment-callback" element={<PaymentCallbackPage />} />
           <Route path="tenants/:tenantId" element={<ISPProfilePage />} />
-          <Route path="customers" element={<div className="p-4">Customers (Coming Soon)</div>} />
-          <Route path="billing" element={<div className="p-4">Billing (Coming Soon)</div>} />
-          <Route path="network" element={<div className="p-4">Network (Coming Soon)</div>} />
-          <Route path="settings" element={<div className="p-4">Settings (Coming Soon)</div>} />
+          <Route path="customers" element={<PlaceholderPage title="Global Customers" description="View and manage customer accounts across all ISP tenants." />} />
+          <Route path="billing" element={<PlaceholderPage title="Platform Billing & Subscriptions" description="Manage SaaS subscription packages, tenant billing cycles, and invoice collections." />} />
+          <Route path="network" element={<PlaceholderPage title="Network Infrastructure" description="Global network telemetry, router nodes, and cloud server health." />} />
+          <Route path="settings" element={<PlaceholderPage title="SaaS System Settings" description="Configure global platform preferences, security, API integrations, and maintenance schedules." />} />
           <Route index element={<Navigate to="/saas/dashboard" replace />} />
         </Route>
 

@@ -16,6 +16,11 @@ export function RouteGuard({ allow, children }: RouteGuardProps) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
+  // SaaS Super Admin has master access across portals (including tenant ISP dashboard when inspecting/impersonating)
+  if (userType === 'saas') {
+    return children;
+  }
+
   if (!allow.includes(userType)) {
     return (
       <ErrorPage

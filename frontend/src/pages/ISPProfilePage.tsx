@@ -326,7 +326,7 @@ export default function ISPProfilePage() {
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 p-6"
+        className="w-full flex items-center justify-center py-12"
       >
         <div className="max-w-4xl mx-auto flex flex-col items-center justify-center min-h-[50vh]">
           <Loader2 className="w-12 h-12 text-indigo-600 dark:text-indigo-400 animate-spin mb-4" />
@@ -341,7 +341,7 @@ export default function ISPProfilePage() {
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 p-6"
+        className="w-full flex items-center justify-center py-12"
       >
         <div className="max-w-md mx-auto flex flex-col items-center justify-center min-h-[50vh]">
           <div className="rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 p-6 flex flex-col items-center gap-4 w-full">
@@ -367,7 +367,7 @@ export default function ISPProfilePage() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.3 }}
-      className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 p-6"
+      className="w-full"
     >
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Header */}

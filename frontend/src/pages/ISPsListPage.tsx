@@ -1100,7 +1100,7 @@ export default function ISPsListPage() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.3 }}
-      className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 p-6"
+      className="w-full"
     >
       <div className="max-w-6xl mx-auto space-y-6">
         {/* Header */}

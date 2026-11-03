@@ -25,7 +25,37 @@ class TenantsController {
         $rows = $stmt->fetchAll();
 
         $tenants = array_map(function($r) {
+            $limits = [
+                'maxRouters' => (int)($r['max_routers'] ?? 10),
+                'maxOlts' => 5,
+                'maxUsers' => (int)($r['max_resellers'] ?? 50),
+                'maxCustomers' => (int)($r['max_customers'] ?? 5000),
+                'mapEnabled' => true,
+                'monitoringEnabled' => true,
+            ];
+
             return [
+                // CamelCase for modern frontend
+                'tenantId' => (string)$r['tenant_id'],
+                'tenantCode' => $r['tenant_code'],
+                'tenantName' => $r['tenant_name'],
+                'tenantSlug' => $r['tenant_slug'],
+                'businessEmail' => $r['business_email'],
+                'businessPhone' => $r['business_phone'],
+                'businessAddress' => $r['business_address'],
+                'countryCode' => $r['country_code'] ?? 'BD',
+                'timezone' => $r['timezone'] ?? 'Asia/Dhaka',
+                'currencyCode' => $r['currency_code'] ?? 'BDT',
+                'status' => $r['status'] ?? 'active',
+                'trialEndsAt' => $r['trial_ends_at'],
+                'activatedAt' => $r['activated_at'],
+                'createdAt' => $r['created_at'],
+                'updatedAt' => $r['updated_at'] ?? $r['created_at'],
+                'totalCustomers' => (int)$r['total_customers'],
+                'totalRouters' => (int)$r['total_routers'],
+                'limits' => $limits,
+
+                // SnakeCase backward compatibility
                 'tenant_id' => (string)$r['tenant_id'],
                 'tenant_code' => $r['tenant_code'],
                 'tenant_name' => $r['tenant_name'],
@@ -33,13 +63,13 @@ class TenantsController {
                 'business_email' => $r['business_email'],
                 'business_phone' => $r['business_phone'],
                 'business_address' => $r['business_address'],
-                'status' => $r['status'],
                 'total_customers' => (int)$r['total_customers'],
                 'total_routers' => (int)$r['total_routers'],
                 'max_customers' => (int)($r['max_customers'] ?? 5000),
                 'max_routers' => (int)($r['max_routers'] ?? 10),
                 'max_resellers' => (int)($r['max_resellers'] ?? 50),
                 'created_at' => $r['created_at'],
+                'updated_at' => $r['updated_at'] ?? $r['created_at'],
             ];
         }, $rows);
 
@@ -53,7 +83,16 @@ class TenantsController {
         $user = AuthMiddleware::requireAuth();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT * FROM tenants WHERE tenant_id = :id LIMIT 1");
+        $stmt = $db->prepare("SELECT 
+            t.*,
+            tl.max_customers,
+            tl.max_routers,
+            tl.max_resellers,
+            (SELECT COUNT(*) FROM customers c WHERE c.tenant_id = t.tenant_id) as total_customers,
+            (SELECT COUNT(*) FROM network_devices nd WHERE nd.tenant_id = t.tenant_id) as total_routers
+            FROM tenants t
+            LEFT JOIN tenant_limits tl ON tl.tenant_id = t.tenant_id
+            WHERE t.tenant_id = :id LIMIT 1");
         $stmt->execute(['id' => $id]);
         $tenant = $stmt->fetch();
 
@@ -61,9 +100,49 @@ class TenantsController {
             Response::error('Tenant not found', 404);
         }
 
+        $limits = [
+            'maxRouters' => (int)($tenant['max_routers'] ?? 10),
+            'maxOlts' => 5,
+            'maxUsers' => (int)($tenant['max_resellers'] ?? 50),
+            'maxCustomers' => (int)($tenant['max_customers'] ?? 5000),
+            'mapEnabled' => true,
+            'monitoringEnabled' => true,
+        ];
+
+        $data = [
+            // CamelCase
+            'tenantId' => (string)$tenant['tenant_id'],
+            'tenantCode' => $tenant['tenant_code'],
+            'tenantName' => $tenant['tenant_name'],
+            'tenantSlug' => $tenant['tenant_slug'],
+            'businessEmail' => $tenant['business_email'],
+            'businessPhone' => $tenant['business_phone'],
+            'businessAddress' => $tenant['business_address'],
+            'countryCode' => $tenant['country_code'] ?? 'BD',
+            'timezone' => $tenant['timezone'] ?? 'Asia/Dhaka',
+            'currencyCode' => $tenant['currency_code'] ?? 'BDT',
+            'status' => $tenant['status'] ?? 'active',
+            'trialEndsAt' => $tenant['trial_ends_at'],
+            'activatedAt' => $tenant['activated_at'],
+            'createdAt' => $tenant['created_at'],
+            'updatedAt' => $tenant['updated_at'] ?? $tenant['created_at'],
+            'totalCustomers' => (int)$tenant['total_customers'],
+            'totalRouters' => (int)$tenant['total_routers'],
+            'limits' => $limits,
+
+            // SnakeCase
+            'tenant_id' => (string)$tenant['tenant_id'],
+            'tenant_code' => $tenant['tenant_code'],
+            'tenant_name' => $tenant['tenant_name'],
+            'tenant_slug' => $tenant['tenant_slug'],
+            'business_email' => $tenant['business_email'],
+            'business_phone' => $tenant['business_phone'],
+            'business_address' => $tenant['business_address'],
+        ];
+
         Response::json([
             'success' => true,
-            'data' => $tenant,
+            'data' => $data,
         ]);
     }
 
@@ -71,7 +150,16 @@ class TenantsController {
         $user = AuthMiddleware::requireAuth();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT * FROM tenants WHERE tenant_id = :id LIMIT 1");
+        $stmt = $db->prepare("SELECT 
+            t.*,
+            tl.max_customers,
+            tl.max_routers,
+            tl.max_resellers,
+            (SELECT COUNT(*) FROM customers c WHERE c.tenant_id = t.tenant_id) as total_customers,
+            (SELECT COUNT(*) FROM network_devices nd WHERE nd.tenant_id = t.tenant_id) as total_routers
+            FROM tenants t
+            LEFT JOIN tenant_limits tl ON tl.tenant_id = t.tenant_id
+            WHERE t.tenant_id = :id LIMIT 1");
         $stmt->execute(['id' => $id]);
         $tenant = $stmt->fetch();
 
@@ -79,36 +167,113 @@ class TenantsController {
             Response::error('Tenant not found', 404);
         }
 
+        $limits = [
+            'maxRouters' => (int)($tenant['max_routers'] ?? 10),
+            'maxOlts' => 5,
+            'maxUsers' => (int)($tenant['max_resellers'] ?? 50),
+            'maxCustomers' => (int)($tenant['max_customers'] ?? 5000),
+            'mapEnabled' => true,
+            'monitoringEnabled' => true,
+        ];
+
+        $tenantData = [
+            'tenantId' => (string)$tenant['tenant_id'],
+            'tenantCode' => $tenant['tenant_code'],
+            'tenantName' => $tenant['tenant_name'],
+            'tenantSlug' => $tenant['tenant_slug'],
+            'businessEmail' => $tenant['business_email'],
+            'businessPhone' => $tenant['business_phone'],
+            'businessAddress' => $tenant['business_address'],
+            'countryCode' => $tenant['country_code'] ?? 'BD',
+            'timezone' => $tenant['timezone'] ?? 'Asia/Dhaka',
+            'currencyCode' => $tenant['currency_code'] ?? 'BDT',
+            'status' => $tenant['status'] ?? 'active',
+            'trialEndsAt' => $tenant['trial_ends_at'],
+            'activatedAt' => $tenant['activated_at'],
+            'createdAt' => $tenant['created_at'],
+            'updatedAt' => $tenant['updated_at'] ?? $tenant['created_at'],
+            'totalCustomers' => (int)$tenant['total_customers'],
+            'totalRouters' => (int)$tenant['total_routers'],
+            'limits' => $limits,
+            'tenant_id' => (string)$tenant['tenant_id'],
+            'tenant_code' => $tenant['tenant_code'],
+            'tenant_name' => $tenant['tenant_name'],
+        ];
+
+        // Fetch settings from tenant_settings table
+        $stmtSet = $db->prepare("SELECT setting_key, setting_value FROM tenant_settings WHERE tenant_id = :tid");
+        $stmtSet->execute(['tid' => $id]);
+        $settingsRows = $stmtSet->fetchAll(PDO::FETCH_KEY_PAIR) ?: [];
+
+        $settings = [
+            'tenantSettingsId' => (string)$tenant['tenant_id'],
+            'tenantId' => (string)$tenant['tenant_id'],
+            'mapEnabled' => isset($settingsRows['map_enabled']) ? (bool)$settingsRows['map_enabled'] : true,
+            'monitoringEnabled' => isset($settingsRows['monitoring_enabled']) ? (bool)$settingsRows['monitoring_enabled'] : true,
+            'smsEnabled' => isset($settingsRows['sms_enabled']) ? (bool)$settingsRows['sms_enabled'] : true,
+            'paymentBkashEnabled' => isset($settingsRows['payment_bkash_enabled']) ? (bool)$settingsRows['payment_bkash_enabled'] : false,
+            'paymentSurjopayEnabled' => isset($settingsRows['payment_surjopay_enabled']) ? (bool)$settingsRows['payment_surjopay_enabled'] : false,
+            'paymentSslEnabled' => isset($settingsRows['payment_ssl_enabled']) ? (bool)$settingsRows['payment_ssl_enabled'] : false,
+            'createdAt' => $tenant['created_at'],
+            'updatedAt' => $tenant['updated_at'] ?? $tenant['created_at'],
+        ];
+
+        // Payment gateways
         $stmtPg = $db->prepare("SELECT * FROM payment_gateway_settings WHERE tenant_id = :tid");
         $stmtPg->execute(['tid' => $id]);
-        $pgs = $stmtPg->fetchAll() ?: [];
+        $pgRows = $stmtPg->fetchAll() ?: [];
+        $paymentGateways = array_map(function($pg) {
+            return [
+                'paymentGatewaySettingsId' => (string)$pg['id'],
+                'tenantId' => (string)$pg['tenant_id'],
+                'gateway' => $pg['gateway'],
+                'isEnabled' => (bool)$pg['is_active'],
+                'credentials' => [
+                    'appKey' => $pg['app_key'] ?? '',
+                    'appSecret' => $pg['app_secret'] ?? '',
+                    'username' => $pg['username'] ?? '',
+                    'password' => $pg['password'] ?? '',
+                    'sandbox' => (bool)$pg['is_sandbox'],
+                ],
+                'createdAt' => $pg['created_at'],
+                'updatedAt' => $pg['updated_at'],
+            ];
+        }, $pgRows);
 
-        $stmtSms = $db->prepare("SELECT * FROM sms_gateway_settings WHERE tenant_id = :tid LIMIT 1");
+        // SMS gateways
+        $stmtSms = $db->prepare("SELECT * FROM sms_gateway_settings WHERE tenant_id = :tid");
         $stmtSms->execute(['tid' => $id]);
-        $sms = $stmtSms->fetch() ?: [];
+        $smsRows = $stmtSms->fetchAll() ?: [];
+        $smsGateways = array_map(function($sms) {
+            return [
+                'smsGatewaySettingsId' => (string)$sms['id'],
+                'tenantId' => (string)$sms['tenant_id'],
+                'providerName' => $sms['provider'],
+                'isEnabled' => (bool)$sms['is_active'],
+                'credentials' => [
+                    'apiKey' => $sms['api_key'] ?? '',
+                    'senderId' => $sms['sender_id'] ?? '',
+                    'balance' => (float)$sms['balance'],
+                ],
+                'createdAt' => $sms['created_at'],
+                'updatedAt' => $sms['updated_at'],
+            ];
+        }, $smsRows);
 
         Response::json([
             'success' => true,
             'data' => [
-                'tenant' => [
-                    'tenantId' => (string)$tenant['tenant_id'],
-                    'tenantName' => $tenant['tenant_name'],
-                    'tenantCode' => $tenant['tenant_code'],
-                    'businessEmail' => $tenant['business_email'],
-                    'businessPhone' => $tenant['business_phone'],
-                    'businessAddress' => $tenant['business_address'],
-                    'currencyCode' => $tenant['currency_code'] ?? 'BDT',
-                    'timezone' => $tenant['timezone'] ?? 'Asia/Dhaka',
-                    'status' => $tenant['status'],
-                ],
+                'tenant' => $tenantData,
+                'settings' => $settings,
+                'paymentGateways' => $paymentGateways,
+                'smsGateways' => $smsGateways,
+                'smsGateway' => $smsGateways[0] ?? null,
                 'features' => [
                     'mikrotikSync' => true,
                     'customerPortal' => true,
                     'smsNotifications' => true,
                     'resellerCommission' => true,
                 ],
-                'paymentGateways' => $pgs,
-                'smsGateway' => $sms,
             ],
         ]);
     }
@@ -163,30 +328,80 @@ class TenantsController {
             Response::error('Tenant Name and Business Email are required', 400);
         }
 
-        $code = 'ISP' . rand(100, 999);
-        $slug = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $name)) . '-' . rand(10, 99);
+        $code = trim($data['tenantCode'] ?? $data['tenant_code'] ?? '');
+        if (empty($code)) {
+            $code = 'ISP' . rand(100, 999);
+        }
+
+        $slug = trim($data['tenantSlug'] ?? $data['tenant_slug'] ?? '');
+        if (empty($slug)) {
+            $slug = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $name)) . '-' . rand(10, 99);
+        }
+
+        $countryCode = strtoupper(trim($data['countryCode'] ?? $data['country_code'] ?? 'BD'));
+        $status = $data['status'] ?? 'active';
+        $phone = $data['businessPhone'] ?? $data['business_phone'] ?? null;
+        $address = $data['businessAddress'] ?? $data['business_address'] ?? null;
 
         $db = Database::getConnection();
         $stmt = $db->prepare("INSERT INTO tenants 
-            (tenant_code, tenant_name, tenant_slug, business_email, business_phone, business_address, status)
-            VALUES (:code, :name, :slug, :email, :phone, :addr, 'active')");
+            (tenant_code, tenant_name, tenant_slug, business_email, business_phone, business_address, country_code, status)
+            VALUES (:code, :name, :slug, :email, :phone, :addr, :country, :status)");
         $stmt->execute([
             'code' => $code,
             'name' => $name,
             'slug' => $slug,
             'email' => $email,
-            'phone' => $data['businessPhone'] ?? null,
-            'addr' => $data['businessAddress'] ?? null,
+            'phone' => $phone,
+            'addr' => $address,
+            'country' => $countryCode,
+            'status' => $status,
         ]);
 
-        $id = $db->lastInsertId();
+        $id = (int)$db->lastInsertId();
+
+        // Create default limits
+        $limits = $data['limits'] ?? [];
+        $maxCustomers = (int)($limits['maxCustomers'] ?? $limits['max_customers'] ?? 5000);
+        $maxRouters = (int)($limits['maxRouters'] ?? $limits['max_routers'] ?? 10);
+        $maxUsers = (int)($limits['maxUsers'] ?? $limits['max_resellers'] ?? 50);
+
+        $stmtLim = $db->prepare("INSERT INTO tenant_limits (tenant_id, max_customers, max_routers, max_resellers)
+            VALUES (:id, :mc, :mr, :mres)");
+        $stmtLim->execute([
+            'id' => $id,
+            'mc' => $maxCustomers,
+            'mr' => $maxRouters,
+            'mres' => $maxUsers,
+        ]);
+
+        // If admin password is provided, create initial tenant admin user
+        $adminPassword = $data['adminPassword'] ?? null;
+        if (!empty($adminPassword)) {
+            $passwordHash = password_hash($adminPassword, PASSWORD_BCRYPT);
+            $stmtUser = $db->prepare("INSERT INTO users 
+                (tenant_id, email, username, password_hash, first_name, last_name, phone, role, role_level, status)
+                VALUES (:tid, :email, :username, :hash, :fn, :ln, :phone, 'admin', 100, 'active')");
+            $stmtUser->execute([
+                'tid' => $id,
+                'email' => $email,
+                'username' => strtolower($code) . '_admin',
+                'hash' => $passwordHash,
+                'fn' => $name,
+                'ln' => 'Admin',
+                'phone' => $phone,
+            ]);
+        }
 
         Response::json([
             'success' => true,
             'message' => 'Tenant created successfully',
             'data' => [
+                'tenantId' => (string)$id,
                 'tenant_id' => (string)$id,
+                'tenantCode' => $code,
                 'tenant_code' => $code,
+                'tenantName' => $name,
                 'tenant_name' => $name,
             ],
         ], 201);
@@ -197,13 +412,54 @@ class TenantsController {
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("UPDATE tenants SET tenant_name = :name, business_phone = :phone, business_address = :addr WHERE tenant_id = :id");
-        $stmt->execute([
-            'name' => $data['tenant_name'] ?? $data['tenantName'] ?? '',
-            'phone' => $data['business_phone'] ?? $data['businessPhone'] ?? null,
-            'addr' => $data['business_address'] ?? $data['businessAddress'] ?? null,
-            'id' => $id,
-        ]);
+        $name = $data['tenantName'] ?? $data['tenant_name'] ?? null;
+        $phone = $data['businessPhone'] ?? $data['business_phone'] ?? null;
+        $address = $data['businessAddress'] ?? $data['business_address'] ?? null;
+        $status = $data['status'] ?? null;
+        $country = $data['countryCode'] ?? $data['country_code'] ?? null;
+
+        $updates = [];
+        $params = ['id' => $id];
+
+        if ($name !== null) { $updates[] = "tenant_name = :name"; $params['name'] = $name; }
+        if ($phone !== null) { $updates[] = "business_phone = :phone"; $params['phone'] = $phone; }
+        if ($address !== null) { $updates[] = "business_address = :addr"; $params['addr'] = $address; }
+        if ($status !== null) { $updates[] = "status = :status"; $params['status'] = $status; }
+        if ($country !== null) { $updates[] = "country_code = :country"; $params['country'] = $country; }
+
+        if (!empty($updates)) {
+            $sql = "UPDATE tenants SET " . implode(', ', $updates) . " WHERE tenant_id = :id";
+            $stmt = $db->prepare($sql);
+            $stmt->execute($params);
+        }
+
+        // Handle limits update if sent inside update payload
+        if (isset($data['limits']) && is_array($data['limits'])) {
+            $limits = $data['limits'];
+            $maxCustomers = (int)($limits['maxCustomers'] ?? $limits['max_customers'] ?? 5000);
+            $maxRouters = (int)($limits['maxRouters'] ?? $limits['max_routers'] ?? 10);
+            $maxUsers = (int)($limits['maxUsers'] ?? $limits['max_resellers'] ?? 50);
+
+            $stmtLim = $db->prepare("INSERT INTO tenant_limits (tenant_id, max_customers, max_routers, max_resellers)
+                VALUES (:id, :mc, :mr, :mres)
+                ON DUPLICATE KEY UPDATE max_customers = VALUES(max_customers), max_routers = VALUES(max_routers), max_resellers = VALUES(max_resellers)");
+            $stmtLim->execute([
+                'id' => $id,
+                'mc' => $maxCustomers,
+                'mr' => $maxRouters,
+                'mres' => $maxUsers,
+            ]);
+        }
+
+        // Handle admin password update if provided
+        if (!empty($data['adminPassword'])) {
+            $passwordHash = password_hash($data['adminPassword'], PASSWORD_BCRYPT);
+            $stmtUser = $db->prepare("UPDATE users SET password_hash = :hash WHERE tenant_id = :tid AND role = 'admin' LIMIT 1");
+            $stmtUser->execute([
+                'hash' => $passwordHash,
+                'tid' => $id,
+            ]);
+        }
 
         Response::json(['success' => true, 'message' => 'Tenant updated']);
     }
@@ -218,12 +474,123 @@ class TenantsController {
             ON DUPLICATE KEY UPDATE max_customers = VALUES(max_customers), max_routers = VALUES(max_routers), max_resellers = VALUES(max_resellers)");
         $stmt->execute([
             'id' => $id,
-            'mc' => (int)($data['max_customers'] ?? 5000),
-            'mr' => (int)($data['max_routers'] ?? 10),
-            'mres' => (int)($data['max_resellers'] ?? 50),
+            'mc' => (int)($data['max_customers'] ?? $data['maxCustomers'] ?? 5000),
+            'mr' => (int)($data['max_routers'] ?? $data['maxRouters'] ?? 10),
+            'mres' => (int)($data['max_resellers'] ?? $data['maxUsers'] ?? 50),
         ]);
 
         Response::json(['success' => true, 'message' => 'Limits updated']);
+    }
+
+    public static function updateFeatures(string $id): void {
+        $user = AuthMiddleware::requireAuth();
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+        $db = Database::getConnection();
+
+        $stmt = $db->prepare("INSERT INTO tenant_settings (tenant_id, setting_key, setting_value) 
+            VALUES (:tid, :key, :val) 
+            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
+
+        if (isset($data['mapEnabled'])) {
+            $stmt->execute(['tid' => $id, 'key' => 'map_enabled', 'val' => $data['mapEnabled'] ? '1' : '0']);
+        }
+        if (isset($data['monitoringEnabled'])) {
+            $stmt->execute(['tid' => $id, 'key' => 'monitoring_enabled', 'val' => $data['monitoringEnabled'] ? '1' : '0']);
+        }
+
+        Response::json(['success' => true, 'message' => 'Features updated']);
+    }
+
+    public static function updatePaymentGateways(string $id): void {
+        $user = AuthMiddleware::requireAuth();
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+        $gateways = $data['gateways'] ?? [];
+        $db = Database::getConnection();
+
+        foreach ($gateways as $gw) {
+            $name = $gw['gateway'] ?? '';
+            $enabled = !empty($gw['isEnabled']) ? 1 : 0;
+            $creds = $gw['credentials'] ?? [];
+
+            $stmt = $db->prepare("SELECT id FROM payment_gateway_settings WHERE tenant_id = :tid AND gateway = :gw LIMIT 1");
+            $stmt->execute(['tid' => $id, 'gw' => $name]);
+            $exists = $stmt->fetch();
+
+            if ($exists) {
+                $stmtUp = $db->prepare("UPDATE payment_gateway_settings 
+                    SET is_active = :act, 
+                        app_key = COALESCE(:ak, app_key), 
+                        app_secret = COALESCE(:as, app_secret),
+                        username = COALESCE(:un, username),
+                        password = COALESCE(:pw, password),
+                        is_sandbox = :sb
+                    WHERE id = :id");
+                $stmtUp->execute([
+                    'act' => $enabled,
+                    'ak' => $creds['appKey'] ?? null,
+                    'as' => $creds['appSecret'] ?? null,
+                    'un' => $creds['username'] ?? null,
+                    'pw' => $creds['password'] ?? null,
+                    'sb' => !empty($creds['sandbox']) ? 1 : 0,
+                    'id' => $exists['id'],
+                ]);
+            } else {
+                $stmtIn = $db->prepare("INSERT INTO payment_gateway_settings 
+                    (tenant_id, gateway, app_key, app_secret, username, password, is_sandbox, is_active)
+                    VALUES (:tid, :gw, :ak, :as, :un, :pw, :sb, :act)");
+                $stmtIn->execute([
+                    'tid' => $id,
+                    'gw' => $name,
+                    'ak' => $creds['appKey'] ?? '',
+                    'as' => $creds['appSecret'] ?? '',
+                    'un' => $creds['username'] ?? '',
+                    'pw' => $creds['password'] ?? '',
+                    'sb' => !empty($creds['sandbox']) ? 1 : 0,
+                    'act' => $enabled,
+                ]);
+            }
+        }
+
+        Response::json(['success' => true, 'message' => 'Payment gateways updated']);
+    }
+
+    public static function updateSmsGateway(string $id): void {
+        $user = AuthMiddleware::requireAuth();
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+        $db = Database::getConnection();
+
+        $provider = $data['providerName'] ?? 'mim_sms';
+        $enabled = !empty($data['isEnabled']) ? 1 : 0;
+        $creds = $data['credentials'] ?? [];
+
+        $stmt = $db->prepare("SELECT id FROM sms_gateway_settings WHERE tenant_id = :tid LIMIT 1");
+        $stmt->execute(['tid' => $id]);
+        $exists = $stmt->fetch();
+
+        if ($exists) {
+            $stmtUp = $db->prepare("UPDATE sms_gateway_settings 
+                SET provider = :p, is_active = :act, api_key = COALESCE(:ak, api_key), sender_id = COALESCE(:sid, sender_id)
+                WHERE id = :id");
+            $stmtUp->execute([
+                'p' => $provider,
+                'act' => $enabled,
+                'ak' => $creds['apiKey'] ?? null,
+                'sid' => $creds['senderId'] ?? null,
+                'id' => $exists['id'],
+            ]);
+        } else {
+            $stmtIn = $db->prepare("INSERT INTO sms_gateway_settings (tenant_id, provider, api_key, sender_id, is_active)
+                VALUES (:tid, :p, :ak, :sid, :act)");
+            $stmtIn->execute([
+                'tid' => $id,
+                'p' => $provider,
+                'ak' => $creds['apiKey'] ?? '',
+                'sid' => $creds['senderId'] ?? '',
+                'act' => $enabled,
+            ]);
+        }
+
+        Response::json(['success' => true, 'message' => 'SMS gateway updated']);
     }
 
     public static function delete(string $id): void {
@@ -236,4 +603,3 @@ class TenantsController {
         Response::json(['success' => true, 'message' => 'Tenant terminated']);
     }
 }
-

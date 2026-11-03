@@ -364,6 +364,15 @@ if ($method === 'POST' && $uri === '/tenants') {
 if ($method === 'GET' && preg_match('#^/tenants/([^/]+)/profile$#', $uri, $m)) {
     TenantsController::profile($m[1]);
 }
+if ($method === 'PUT' && preg_match('#^/tenants/([^/]+)/features$#', $uri, $m)) {
+    TenantsController::updateFeatures($m[1]);
+}
+if ($method === 'PUT' && preg_match('#^/tenants/([^/]+)/payment-gateways$#', $uri, $m)) {
+    TenantsController::updatePaymentGateways($m[1]);
+}
+if ($method === 'PUT' && preg_match('#^/tenants/([^/]+)/sms-gateway$#', $uri, $m)) {
+    TenantsController::updateSmsGateway($m[1]);
+}
 if ($method === 'PATCH' && preg_match('#^/tenants/([^/]+)/limits$#', $uri, $m)) {
     TenantsController::updateLimits($m[1]);
 }

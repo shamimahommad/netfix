@@ -17,6 +17,8 @@ export interface Tenant {
   createdAt: string;
   updatedAt: string;
   limits?: TenantLimits | null;
+  totalCustomers?: number;
+  totalRouters?: number;
 }
 
 export interface TenantsResponse {
