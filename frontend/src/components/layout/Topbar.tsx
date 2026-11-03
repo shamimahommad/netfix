@@ -1,4 +1,4 @@
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { MenuIcon, LogoutIcon, SettingsIcon } from '../icons/Icons';
 import { useTenantStore } from '@/stores/tenantStore';
@@ -56,7 +56,6 @@ const getBackToAdminLabel = (roleCode: string | undefined): string => {
 export default function Topbar({ onMenuClick, userType }: TopbarProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const pageTitle = getPageTitle(location.pathname);
   const { selectedTenant, setSelectedTenant, clearSelectedTenant } = useTenantStore();
   const { user, balance, refreshMe, logout } = useAuthStore();
@@ -80,7 +79,7 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchDropdownRef = useRef<HTMLDivElement>(null);
   const cancelTokenRef = useRef<CancelTokenSource | null>(null);
-  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const userName = user 
     ? `${user.first_name} ${user.last_name}`.trim() || user.email
@@ -343,7 +342,7 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
       {impersonated && (
         <div className="sticky top-0 z-40 flex items-center justify-between gap-3 px-4 py-2 bg-amber-500 text-amber-950 shadow-md">
           <span className="text-sm font-medium truncate">
-            Impersonating: {authUser ? `${authUser.first_name} ${authUser.last_name}`.trim() || authUser.email || authUser.username : '—'} ({getRoleDisplayLabel(authUser?.role_code)})
+            Impersonating: {authUser ? `${authUser.first_name} ${authUser.last_name}`.trim() || authUser.email || (authUser as any).username : '—'} ({getRoleDisplayLabel(authUser?.role_code)})
           </span>
           <button
             type="button"
@@ -657,6 +656,24 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
           </div>
         )}
 
+        {/* SaaS Super Admin Quick Exit Button */}
+        {user?.user_type === 'saas' && location.pathname.startsWith('/dashboard') && (
+          <button
+            type="button"
+            onClick={() => {
+              clearSelectedTenant();
+              navigate('/saas/dashboard');
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-sm transition-all active:scale-95 shrink-0"
+            title="Exit Tenant and Return to SaaS Admin Portal"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            <span className="hidden sm:inline">Back to SaaS</span>
+          </button>
+        )}
+
         {/* User info + Avatar dropdown (single ref wraps both desktop and mobile) */}
         <div ref={avatarDropdownRef} className="flex items-center">
           <div className="relative hidden sm:block">
@@ -679,6 +696,27 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
           </div>
           {isAvatarDropdownOpen && (
             <div className="absolute right-0 top-full mt-2 w-56 py-1.5 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 z-50">
+              {user?.user_type === 'saas' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAvatarDropdownOpen(false);
+                    clearSelectedTenant();
+                    navigate('/saas/dashboard');
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm font-semibold text-blue-700 dark:text-blue-300 bg-blue-50/70 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 border-b border-slate-200 dark:border-slate-700 transition-colors"
+                >
+                  <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-600 text-white shrink-0">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                    </svg>
+                  </span>
+                  <div>
+                    <p className="font-bold text-xs">Return to SaaS Admin</p>
+                    <p className="text-[11px] text-blue-600 dark:text-blue-400">Exit tenant and open SaaS</p>
+                  </div>
+                </button>
+              )}
               {impersonated && (
                 <button
                   type="button"
@@ -745,6 +783,27 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
           </button>
           {isAvatarDropdownOpen && (
             <div className="absolute right-0 top-full mt-2 w-56 py-1.5 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 z-50">
+              {user?.user_type === 'saas' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAvatarDropdownOpen(false);
+                    clearSelectedTenant();
+                    navigate('/saas/dashboard');
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm font-semibold text-blue-700 dark:text-blue-300 bg-blue-50/70 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 border-b border-slate-200 dark:border-slate-700 transition-colors"
+                >
+                  <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-600 text-white shrink-0">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                    </svg>
+                  </span>
+                  <div>
+                    <p className="font-bold text-xs">Return to SaaS Admin</p>
+                    <p className="text-[11px] text-blue-600 dark:text-blue-400">Exit tenant and open SaaS</p>
+                  </div>
+                </button>
+              )}
               {impersonated && (
                 <button
                   type="button"

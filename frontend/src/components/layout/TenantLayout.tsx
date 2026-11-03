@@ -38,10 +38,11 @@ function getResellerWiseReportLabel(roleCode: string | undefined): string {
   return 'Reseller Wise Customers'; // admin, manager, tenant_admin, isp_admin
 }
 
-/** Network menu is only for admin-level roles. */
-function canSeeNetwork(roleCode: string | undefined): boolean {
+/** Network menu is only for admin-level roles or SaaS admin inspecting tenant. */
+function canSeeNetwork(roleCode: string | undefined, userType?: string): boolean {
+  if (userType === 'saas') return true;
   const r = (roleCode ?? '').toLowerCase();
-  return r === 'admin' || r === 'manager' || r === 'isp_admin' || r === 'tenant_admin';
+  return r === 'admin' || r === 'manager' || r === 'isp_admin' || r === 'tenant_admin' || r === 'saas_admin';
 }
 
 export default function TenantLayout() {
@@ -50,7 +51,17 @@ export default function TenantLayout() {
   const resellerLabels = getResellerMenuLabels(user?.role_code);
 
   const sidebarItems: SidebarItem[] = useMemo(() => {
-    const items: SidebarItem[] = [
+    const items: SidebarItem[] = [];
+
+    if (user?.user_type === 'saas') {
+      items.push({
+        label: '← Exit to SaaS Admin',
+        icon: <DashboardIcon />,
+        path: '/saas/dashboard',
+      });
+    }
+
+    items.push(
       {
         label: 'Dashboard',
         icon: <DashboardIcon />,
@@ -88,7 +99,7 @@ export default function TenantLayout() {
         icon: <CardIcon />,
         path: '/dashboard/my-packages',
       },
-    ];
+    );
 
     // Only show SMS menu if enabled and not agent
     const isAgent = (user?.role_code ?? '').toLowerCase() === 'agent';
@@ -177,8 +188,8 @@ export default function TenantLayout() {
       ],
     });
 
-    // Network menu: only for admin / manager / tenant_admin / isp_admin
-    if (canSeeNetwork(user?.role_code)) {
+    // Network menu: only for admin / manager / tenant_admin / isp_admin / saas_admin
+    if (canSeeNetwork(user?.role_code, user?.user_type)) {
       const networkSubmenu: SidebarItem['submenu'] = [
         { label: 'Mikrotik', path: '/dashboard/network/mikrotik' },
         { label: 'OLT', path: '/dashboard/network/olt' },
