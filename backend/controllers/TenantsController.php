@@ -260,6 +260,104 @@ class TenantsController {
             ];
         }, $smsRows);
 
+        // Fetch MikroTik Routers
+        $stmtRouters = $db->prepare("SELECT 
+            nd.network_device_id, nd.device_code, nd.device_name, nd.device_type, nd.vendor,
+            nd.management_ip, nd.management_port, nd.winbox_port, nd.web_port, nd.status,
+            nd.last_sync_at, nd.created_at,
+            (SELECT COUNT(*) FROM customer_network_accounts cna WHERE cna.network_device_id = nd.network_device_id) as total_customers
+            FROM network_devices nd 
+            WHERE nd.tenant_id = :tid AND nd.device_type = 'router'
+            ORDER BY nd.network_device_id DESC");
+        $stmtRouters->execute(['tid' => $id]);
+        $routersRows = $stmtRouters->fetchAll() ?: [];
+        $routers = array_map(function($r) {
+            return [
+                'networkDeviceId' => (string)$r['network_device_id'],
+                'deviceCode' => $r['device_code'],
+                'deviceName' => $r['device_name'],
+                'deviceType' => $r['device_type'],
+                'vendor' => $r['vendor'],
+                'managementIp' => $r['management_ip'],
+                'managementPort' => (int)$r['management_port'],
+                'winboxPort' => (int)($r['winbox_port'] ?? 8291),
+                'webPort' => (int)($r['web_port'] ?? 80),
+                'status' => $r['status'],
+                'lastSyncAt' => $r['last_sync_at'],
+                'totalCustomers' => (int)($r['total_customers'] ?? 0),
+                'createdAt' => $r['created_at'],
+            ];
+        }, $routersRows);
+
+        // Fetch OLT Devices
+        $stmtOlts = $db->prepare("SELECT 
+            nd.network_device_id, nd.device_code, nd.device_name, nd.device_type, nd.vendor,
+            nd.management_ip, nd.management_port, nd.pon_type, nd.total_pon_ports, nd.status,
+            nd.last_sync_at, nd.created_at,
+            (SELECT COUNT(*) FROM olt_onus o WHERE o.network_device_id = nd.network_device_id) as total_onus
+            FROM network_devices nd 
+            WHERE nd.tenant_id = :tid AND nd.device_type = 'olt'
+            ORDER BY nd.network_device_id DESC");
+        $stmtOlts->execute(['tid' => $id]);
+        $oltsRows = $stmtOlts->fetchAll() ?: [];
+        $olts = array_map(function($o) {
+            return [
+                'networkDeviceId' => (string)$o['network_device_id'],
+                'deviceCode' => $o['device_code'],
+                'deviceName' => $o['device_name'],
+                'deviceType' => $o['device_type'],
+                'vendor' => $o['vendor'],
+                'managementIp' => $o['management_ip'],
+                'managementPort' => (int)$o['management_port'],
+                'ponType' => $o['pon_type'] ?? 'gpon',
+                'totalPonPorts' => (int)($o['total_pon_ports'] ?? 8),
+                'totalOnus' => (int)($o['total_onus'] ?? 0),
+                'status' => $o['status'],
+                'lastSyncAt' => $o['last_sync_at'],
+                'createdAt' => $o['created_at'],
+            ];
+        }, $oltsRows);
+
+        // Fetch Tenant Staff / Admin Users
+        $stmtUsers = $db->prepare("SELECT user_id, email, username, first_name, last_name, phone, role, status, last_login_at, created_at 
+            FROM users 
+            WHERE tenant_id = :tid 
+            ORDER BY user_id ASC");
+        $stmtUsers->execute(['tid' => $id]);
+        $userRows = $stmtUsers->fetchAll() ?: [];
+        $usersList = array_map(function($u) {
+            return [
+                'userId' => (string)$u['user_id'],
+                'email' => $u['email'],
+                'username' => $u['username'],
+                'firstName' => $u['first_name'],
+                'lastName' => $u['last_name'],
+                'phone' => $u['phone'],
+                'role' => $u['role'],
+                'status' => $u['status'],
+                'lastLoginAt' => $u['last_login_at'],
+                'createdAt' => $u['created_at'],
+            ];
+        }, $userRows);
+
+        // Fetch Tenant Statistics
+        $stmtStats = $db->prepare("SELECT 
+            (SELECT COUNT(*) FROM customers WHERE tenant_id = :tid) as total_customers,
+            (SELECT COUNT(*) FROM network_devices WHERE tenant_id = :tid AND device_type = 'router') as total_routers,
+            (SELECT COUNT(*) FROM network_devices WHERE tenant_id = :tid AND device_type = 'olt') as total_olts,
+            (SELECT COUNT(*) FROM olt_onus WHERE tenant_id = :tid) as total_onus,
+            (SELECT COUNT(*) FROM users WHERE tenant_id = :tid AND role IN ('reseller', 'sub_reseller')) as total_resellers");
+        $stmtStats->execute(['tid' => $id]);
+        $statsRow = $stmtStats->fetch() ?: [];
+
+        $stats = [
+            'totalCustomers' => (int)($statsRow['total_customers'] ?? 0),
+            'totalRouters' => (int)($statsRow['total_routers'] ?? 0),
+            'totalOlts' => (int)($statsRow['total_olts'] ?? 0),
+            'totalOnus' => (int)($statsRow['total_onus'] ?? 0),
+            'totalResellers' => (int)($statsRow['total_resellers'] ?? 0),
+        ];
+
         Response::json([
             'success' => true,
             'data' => [
@@ -268,6 +366,11 @@ class TenantsController {
                 'paymentGateways' => $paymentGateways,
                 'smsGateways' => $smsGateways,
                 'smsGateway' => $smsGateways[0] ?? null,
+                'routers' => $routers,
+                'olts' => $olts,
+                'users' => $usersList,
+                'stats' => $stats,
+                'limits' => $limits,
                 'features' => [
                     'mikrotikSync' => true,
                     'customerPortal' => true,
@@ -591,6 +694,24 @@ class TenantsController {
         }
 
         Response::json(['success' => true, 'message' => 'SMS gateway updated']);
+    }
+
+    public static function resetAdminPassword(string $id): void {
+        $user = AuthMiddleware::requireAuth();
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+        $newPassword = trim($data['password'] ?? '');
+
+        if (strlen($newPassword) < 6) {
+            Response::error('Password must be at least 6 characters long', 400);
+        }
+
+        $db = Database::getConnection();
+        $hash = password_hash($newPassword, PASSWORD_BCRYPT);
+
+        $stmt = $db->prepare("UPDATE users SET password_hash = :hash WHERE tenant_id = :tid AND role IN ('admin', 'isp_admin') ORDER BY user_id ASC LIMIT 1");
+        $stmt->execute(['hash' => $hash, 'tid' => $id]);
+
+        Response::json(['success' => true, 'message' => 'Admin password has been reset successfully']);
     }
 
     public static function delete(string $id): void {

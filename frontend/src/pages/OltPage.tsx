@@ -512,7 +512,7 @@ export default function OltPage() {
                     {formErrors.managementIp && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.managementIp}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Web GUI Port</label>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Management HTTP API Port</label>
                     <input
                       type="number"
                       min={1}
@@ -520,9 +520,9 @@ export default function OltPage() {
                       value={formData.webPort ?? 80}
                       onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || 80 }))}
                       className={inputClass('webPort')}
-                      placeholder="80"
+                      placeholder="80 or 1010"
                     />
-                    <p className="mt-1 text-xs text-slate-500">Default: 80 (or 8080 / 443 for HTTPS)</p>
+                    <p className="mt-1 text-xs text-slate-500">Default: 80 (or 1010 for VSOL). Used internally by NetFix to sync ONUs & telemetry.</p>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Telnet / SSH CLI Port</label>
@@ -651,7 +651,7 @@ export default function OltPage() {
                     {formErrors.managementIp && <p className="mt-1 text-xs text-red-600">{formErrors.managementIp}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Web GUI Port</label>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Management HTTP API Port</label>
                     <input
                       type="number"
                       min={1}
@@ -659,8 +659,9 @@ export default function OltPage() {
                       value={formData.webPort ?? 80}
                       onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || 80 }))}
                       className={inputClass('webPort')}
-                      placeholder="80"
+                      placeholder="80 or 1010"
                     />
+                    <p className="mt-1 text-xs text-slate-500">Default: 80 (or 1010 for VSOL). Used internally by NetFix to sync ONUs & telemetry.</p>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Telnet / SSH CLI Port</label>

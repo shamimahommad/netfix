@@ -50,4 +50,19 @@ export const tenantProfileService = {
     });
     return response.data;
   },
+
+  async updateTenantLimits(tenantId: string, payload: { maxCustomers?: number; maxRouters?: number; maxOlts?: number; maxUsers?: number }): Promise<{ success: boolean; message: string }> {
+    const response = await api.patch<{ success: boolean; message: string }>(`/tenants/${tenantId}/limits`, payload);
+    return response.data;
+  },
+
+  async updateTenantDetails(tenantId: string, payload: any): Promise<{ success: boolean; message: string }> {
+    const response = await api.put<{ success: boolean; message: string }>(`/tenants/${tenantId}`, payload);
+    return response.data;
+  },
+
+  async resetAdminPassword(tenantId: string, password: string): Promise<{ success: boolean; message: string }> {
+    const response = await api.post<{ success: boolean; message: string }>(`/tenants/${tenantId}/reset-admin-password`, { password });
+    return response.data;
+  },
 };

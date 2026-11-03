@@ -15,30 +15,48 @@ import {
   Save,
   AlertCircle,
   Loader2,
+  Server,
+  Radio,
+  Users,
+  Key,
+  Edit,
+  LogIn,
+  CheckCircle2,
+  RefreshCw,
+  Sliders,
+  Globe,
+  Layers,
+  Clock,
 } from 'lucide-react';
 import { tenantProfileService } from '@/services/tenant-profile.service';
 import { useToastContext } from '@/contexts/ToastContext';
+import { useTenantStore } from '@/stores/tenantStore';
 import {
   TenantProfile,
-  UpdateTenantFeaturesPayload,
-  UpdatePaymentGatewaysPayload,
-  UpdateSmsGatewayPayload,
   PaymentGatewayConfig,
   BkashCredentials,
   SmsProvider,
+  TenantDeviceItem,
+  TenantUserItem,
 } from '@/types/tenant-profile.types';
 
-const stagger = { animate: { transition: { staggerChildren: 0.05 } } };
-const itemUp = { initial: { opacity: 0, y: 16 }, animate: { opacity: 1, y: 0 } };
+type ProfileTab = 'network' | 'limits' | 'features' | 'payment' | 'sms' | 'users';
+
+const itemUp = { initial: { opacity: 0, y: 12 }, animate: { opacity: 1, y: 0 } };
 
 export default function ISPProfilePage() {
   const { tenantId } = useParams<{ tenantId: string }>();
   const navigate = useNavigate();
   const toast = useToastContext();
+  const { setSelectedTenant } = useTenantStore();
 
   const [profile, setProfile] = useState<TenantProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Active Tab
+  const [activeTab, setActiveTab] = useState<ProfileTab>('network');
 
   // Feature toggles state
   const [features, setFeatures] = useState({
@@ -46,6 +64,15 @@ export default function ISPProfilePage() {
     monitoringEnabled: false,
   });
   const [isSavingFeatures, setIsSavingFeatures] = useState(false);
+
+  // Limits state
+  const [limitsForm, setLimitsForm] = useState({
+    maxCustomers: 5000,
+    maxRouters: 10,
+    maxOlts: 5,
+    maxUsers: 50,
+  });
+  const [isSavingLimits, setIsSavingLimits] = useState(false);
 
   // Payment gateways state
   const [paymentGateways, setPaymentGateways] = useState<PaymentGatewayConfig[]>([
@@ -68,10 +95,26 @@ export default function ISPProfilePage() {
     credentials: {} as Record<string, any>,
   });
   const [isSavingSmsGateway, setIsSavingSmsGateway] = useState(false);
-  const [showSmsCredentials, setShowSmsCredentials] = useState(true);
   const [showSmsTestModal, setShowSmsTestModal] = useState(false);
   const [testSmsNumber, setTestSmsNumber] = useState('');
   const [isSendingTestSms, setIsSendingTestSms] = useState(false);
+
+  // Edit Tenant Info Modal
+  const [showEditTenantModal, setShowEditTenantModal] = useState(false);
+  const [isSavingTenantInfo, setIsSavingTenantInfo] = useState(false);
+  const [tenantEditForm, setTenantEditForm] = useState({
+    tenantName: '',
+    businessEmail: '',
+    businessPhone: '',
+    businessAddress: '',
+    countryCode: 'BD',
+    status: 'active',
+  });
+
+  // Reset Admin Password Modal
+  const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
+  const [newAdminPassword, setNewAdminPassword] = useState('');
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
 
   useEffect(() => {
     if (tenantId) {
@@ -79,10 +122,11 @@ export default function ISPProfilePage() {
     }
   }, [tenantId]);
 
-  const loadProfile = async () => {
+  const loadProfile = async (isManualRefresh = false) => {
     if (!tenantId) return;
 
-    setIsLoading(true);
+    if (isManualRefresh) setIsRefreshing(true);
+    else setIsLoading(true);
     setError(null);
 
     try {
@@ -90,40 +134,67 @@ export default function ISPProfilePage() {
         tenantProfileService.getTenantProfile(tenantId),
         tenantProfileService.getSmsProviders().catch(() => ({ success: true, data: [] as SmsProvider[] })),
       ]);
+
       if (providersRes?.data) setSmsProviders(providersRes.data);
 
-      setProfile(response.data);
+      const pData = response.data;
+      setProfile(pData);
 
-      // Set feature toggles
-      if (response.data.settings) {
-        setFeatures({
-          mapEnabled: response.data.settings.mapEnabled,
-          monitoringEnabled: response.data.settings.monitoringEnabled,
+      // Populate Edit Form
+      if (pData.tenant) {
+        setTenantEditForm({
+          tenantName: pData.tenant.tenantName || '',
+          businessEmail: pData.tenant.businessEmail || '',
+          businessPhone: pData.tenant.businessPhone || '',
+          businessAddress: pData.tenant.businessAddress || '',
+          countryCode: pData.tenant.countryCode || 'BD',
+          status: pData.tenant.status || 'active',
         });
       }
 
-      // Set payment gateways
+      // Populate Limits
+      const l = pData.limits || pData.tenant?.limits;
+      if (l) {
+        setLimitsForm({
+          maxCustomers: l.maxCustomers || 5000,
+          maxRouters: l.maxRouters || 10,
+          maxOlts: l.maxOlts || 5,
+          maxUsers: l.maxUsers || 50,
+        });
+      }
+
+      // Feature toggles
+      if (pData.settings) {
+        setFeatures({
+          mapEnabled: Boolean(pData.settings.mapEnabled),
+          monitoringEnabled: Boolean(pData.settings.monitoringEnabled),
+        });
+      }
+
+      // Payment gateways
       const gateways: PaymentGatewayConfig[] = [
         { gateway: 'bkash', isEnabled: false, credentials: {} },
         { gateway: 'surjopay', isEnabled: false, credentials: {} },
         { gateway: 'ssl', isEnabled: false, credentials: {} },
       ];
 
-      response.data.paymentGateways.forEach((pg) => {
-        const index = gateways.findIndex((g) => g.gateway === pg.gateway);
-        if (index !== -1) {
-          gateways[index] = {
-            gateway: pg.gateway,
-            isEnabled: pg.isEnabled,
-            credentials: pg.credentials || {},
-          };
-        }
-      });
+      if (Array.isArray(pData.paymentGateways)) {
+        pData.paymentGateways.forEach((pg) => {
+          const index = gateways.findIndex((g) => g.gateway === pg.gateway);
+          if (index !== -1) {
+            gateways[index] = {
+              gateway: pg.gateway,
+              isEnabled: pg.isEnabled,
+              credentials: pg.credentials || {},
+            };
+          }
+        });
+      }
       setPaymentGateways(gateways);
 
-      // Set SMS gateway
-      if (response.data.smsGateways.length > 0) {
-        const sms = response.data.smsGateways[0];
+      // SMS gateway
+      if (Array.isArray(pData.smsGateways) && pData.smsGateways.length > 0) {
+        const sms = pData.smsGateways[0];
         setSmsGateway({
           providerName: sms.providerName,
           isEnabled: sms.isEnabled,
@@ -132,169 +203,82 @@ export default function ISPProfilePage() {
       }
     } catch (err: any) {
       console.error('Error loading tenant profile:', err);
-      const errorMessage = err.response?.data?.message || err.message || 'Failed to load ISP profile';
-      setError(errorMessage);
-      toast.error(errorMessage);
+      const msg = err.response?.data?.message || err.message || 'Failed to load ISP profile';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setIsLoading(false);
+      setIsRefreshing(false);
     }
+  };
+
+  const handleImpersonateLogin = () => {
+    if (!profile?.tenant) return;
+    setSelectedTenant(profile.tenant);
+    navigate('/dashboard');
   };
 
   const handleSaveFeatures = async () => {
     if (!tenantId) return;
-
     setIsSavingFeatures(true);
     try {
-      const payload: UpdateTenantFeaturesPayload = {
-        mapEnabled: features.mapEnabled,
-        monitoringEnabled: features.monitoringEnabled,
-      };
-
-      await tenantProfileService.updateTenantFeatures(tenantId, payload);
-      toast.success('Features updated successfully!');
-      loadProfile();
+      await tenantProfileService.updateTenantFeatures(tenantId, features);
+      toast.success('Feature toggles updated successfully');
+      loadProfile(true);
     } catch (err: any) {
-      console.error('Error updating features:', err);
-      const errorMessage = err.response?.data?.message || err.message || 'Failed to update features';
-      toast.error(errorMessage);
+      toast.error(err.response?.data?.message || 'Failed to update features');
     } finally {
       setIsSavingFeatures(false);
     }
   };
 
-  const handleSavePaymentGateways = async () => {
+  const handleSaveLimits = async () => {
     if (!tenantId) return;
-
-    setIsSavingPaymentGateways(true);
+    setIsSavingLimits(true);
     try {
-      const payload: UpdatePaymentGatewaysPayload = {
-        gateways: paymentGateways,
-      };
-
-      await tenantProfileService.updatePaymentGateways(tenantId, payload);
-      toast.success('Payment gateways updated successfully!');
-      loadProfile();
+      await tenantProfileService.updateTenantLimits(tenantId, limitsForm);
+      toast.success('Plan quotas and limits updated successfully');
+      loadProfile(true);
     } catch (err: any) {
-      console.error('Error updating payment gateways:', err);
-      const errorMessage = err.response?.data?.message || err.message || 'Failed to update payment gateways';
-      toast.error(errorMessage);
+      toast.error(err.response?.data?.message || 'Failed to update limits');
     } finally {
-      setIsSavingPaymentGateways(false);
+      setIsSavingLimits(false);
     }
   };
 
-  const handleSaveSmsGateway = async () => {
+  const handleSaveTenantInfo = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!tenantId) return;
-
-    if (!smsGateway.providerName.trim()) {
-      toast.error('Please select an SMS company');
-      return;
-    }
-
-    setIsSavingSmsGateway(true);
+    setIsSavingTenantInfo(true);
     try {
-      const payload: UpdateSmsGatewayPayload = {
-        providerName: smsGateway.providerName.trim(),
-        isEnabled: smsGateway.isEnabled,
-        credentials: smsGateway.credentials,
-      };
-
-      await tenantProfileService.updateSmsGateway(tenantId, payload);
-      toast.success('SMS gateway updated successfully!');
-      loadProfile();
+      await tenantProfileService.updateTenantDetails(tenantId, tenantEditForm);
+      toast.success('ISP details updated successfully');
+      setShowEditTenantModal(false);
+      loadProfile(true);
     } catch (err: any) {
-      console.error('Error updating SMS gateway:', err);
-      const errorMessage = err.response?.data?.message || err.message || 'Failed to update SMS gateway';
-      toast.error(errorMessage);
+      toast.error(err.response?.data?.message || 'Failed to update ISP details');
     } finally {
-      setIsSavingSmsGateway(false);
+      setIsSavingTenantInfo(false);
     }
   };
 
-  const handleSendTestSms = async () => {
-    if (!tenantId) return;
-    const digits = testSmsNumber.replace(/\D/g, '');
-    const mobile = digits.startsWith('88') ? digits : `88${digits}`;
-    if (mobile.length < 12) {
-      toast.error('Enter a valid mobile number (e.g. 88018xxxxxxxx)');
-      return;
-    }
-    setIsSendingTestSms(true);
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenantId || !newAdminPassword.trim()) return;
+    setIsResettingPassword(true);
     try {
-      await tenantProfileService.sendSmsTest(tenantId, mobile);
-      toast.success('Test SMS sent successfully!');
-      setShowSmsTestModal(false);
-      setTestSmsNumber('');
+      await tenantProfileService.resetAdminPassword(tenantId, newAdminPassword.trim());
+      toast.success('Admin password reset successfully');
+      setShowResetPasswordModal(false);
+      setNewAdminPassword('');
     } catch (err: any) {
-      const msg = err.response?.data?.message || err.message || 'Failed to send test SMS';
-      toast.error(msg);
+      toast.error(err.response?.data?.message || 'Failed to reset admin password');
     } finally {
-      setIsSendingTestSms(false);
+      setIsResettingPassword(false);
     }
   };
 
-  const enabledGateways = paymentGateways.filter((g) => g.isEnabled);
-
-  const openTestFlow = () => {
-    setTestAmount('100');
-    setShowTestAmountModal(true);
-  };
-
-  const closeTestAmountModal = () => {
-    setShowTestAmountModal(false);
-  };
-
-  const handlePayNowFromAmountModal = () => {
-    const amount = parseFloat(testAmount);
-    if (Number.isNaN(amount) || amount <= 0) {
-      toast.error('Please enter a valid amount');
-      return;
-    }
-    if (enabledGateways.length === 0) {
-      toast.error('Enable at least one payment gateway first');
-      return;
-    }
-    setShowTestAmountModal(false);
-    setShowGatewaySelectModal(true);
-  };
-
-  const handleTestGateway = async (gateway: string) => {
-    if (!tenantId) return;
-    const amount = parseFloat(testAmount);
-    if (Number.isNaN(amount) || amount <= 0) {
-      toast.error('Please enter a valid amount');
-      return;
-    }
-
-    setTestProcessingGateway(gateway);
-
-    if (gateway === 'bkash') {
-      try {
-        const callbackURL = `${window.location.origin}/saas/tenants/${tenantId}/payment-callback`;
-        const data = await tenantProfileService.createBkashPayment(tenantId, amount, callbackURL);
-        setShowGatewaySelectModal(false);
-        setTestProcessingGateway(null);
-        if (data?.bkashURL) {
-          window.location.href = data.bkashURL;
-          return;
-        }
-      } catch (err: any) {
-        const msg = err.response?.data?.message || err.message || 'Failed to start Bkash payment';
-        toast.error(msg);
-      } finally {
-        setTestProcessingGateway(null);
-      }
-      return;
-    }
-
-    // Other gateways: simulate for now
-    await new Promise((r) => setTimeout(r, 1500));
-    setTestProcessingGateway(null);
-    setShowGatewaySelectModal(false);
-    toast.success('Test complete');
-  };
-
-  const updateGatewayCredentials = (gateway: string, key: string, value: string | boolean) => {
+  const updateGatewayCredentials = (gateway: string, key: string, value: any) => {
     setPaymentGateways((prev) =>
       prev.map((g) => {
         if (g.gateway === gateway) {
@@ -311,7 +295,21 @@ export default function ISPProfilePage() {
     );
   };
 
-  const updateSmsCredentials = (key: string, value: string) => {
+  const handleSavePaymentGateways = async () => {
+    if (!tenantId) return;
+    setIsSavingPaymentGateways(true);
+    try {
+      await tenantProfileService.updatePaymentGateways(tenantId, { gateways: paymentGateways });
+      toast.success('Payment gateways updated successfully');
+      loadProfile(true);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to save payment gateways');
+    } finally {
+      setIsSavingPaymentGateways(false);
+    }
+  };
+
+  const updateSmsCredentials = (key: string, value: any) => {
     setSmsGateway((prev) => ({
       ...prev,
       credentials: {
@@ -321,212 +319,721 @@ export default function ISPProfilePage() {
     }));
   };
 
+  const handleSaveSmsGateway = async () => {
+    if (!tenantId) return;
+    setIsSavingSmsGateway(true);
+    try {
+      await tenantProfileService.updateSmsGateway(tenantId, {
+        providerName: smsGateway.providerName,
+        isEnabled: smsGateway.isEnabled,
+        credentials: smsGateway.credentials,
+      });
+      toast.success('SMS gateway updated successfully');
+      loadProfile(true);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to save SMS gateway');
+    } finally {
+      setIsSavingSmsGateway(false);
+    }
+  };
+
+  const handleSendTestSms = async () => {
+    if (!tenantId || !testSmsNumber.trim()) {
+      toast.error('Please enter a mobile number');
+      return;
+    }
+    setIsSendingTestSms(true);
+    try {
+      const res = await tenantProfileService.sendSmsTest(tenantId, testSmsNumber.trim());
+      toast.success(res.message || 'Test SMS sent successfully');
+      setShowSmsTestModal(false);
+      setTestSmsNumber('');
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to send test SMS');
+    } finally {
+      setIsSendingTestSms(false);
+    }
+  };
+
+  const enabledGateways = paymentGateways.filter((g) => g.isEnabled);
+
+  const openTestFlow = () => {
+    if (enabledGateways.length === 0) {
+      toast.error('Enable and save at least one payment gateway first');
+      return;
+    }
+    setShowTestAmountModal(true);
+  };
+
+  const handlePayNowFromAmountModal = () => {
+    const amount = parseFloat(testAmount);
+    if (Number.isNaN(amount) || amount <= 0) {
+      toast.error('Please enter a valid amount');
+      return;
+    }
+    setShowTestAmountModal(false);
+    setShowGatewaySelectModal(true);
+  };
+
+  const handleTestGateway = async (gateway: string) => {
+    if (!tenantId) return;
+    const amount = parseFloat(testAmount);
+    setTestProcessingGateway(gateway);
+    try {
+      const callbackURL = `${window.location.origin}/saas/tenants/${tenantId}/payment-callback`;
+      if (gateway === 'bkash') {
+        const { bkashURL } = await tenantProfileService.createBkashPayment(tenantId, amount, callbackURL);
+        if (bkashURL) window.location.href = bkashURL;
+        else toast.error('Failed to get bKash URL');
+      } else {
+        toast.info(`Test flow for ${gateway.toUpperCase()} initiated`);
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || `Failed to initiate ${gateway} test`);
+    } finally {
+      setTestProcessingGateway(null);
+    }
+  };
+
   if (isLoading) {
     return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="w-full flex items-center justify-center py-12"
-      >
-        <div className="max-w-4xl mx-auto flex flex-col items-center justify-center min-h-[50vh]">
-          <Loader2 className="w-12 h-12 text-indigo-600 dark:text-indigo-400 animate-spin mb-4" />
-          <p className="text-slate-600 dark:text-slate-400 font-medium">Loading ISP profile…</p>
-        </div>
-      </motion.div>
+      <div className="w-full flex flex-col items-center justify-center py-24 text-slate-500 dark:text-slate-400">
+        <Loader2 className="w-10 h-10 text-blue-600 animate-spin mb-4" />
+        <p className="text-sm font-medium">Loading ISP Profile & Telemetry...</p>
+      </div>
     );
   }
 
   if (error || !profile) {
     return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="w-full flex items-center justify-center py-12"
-      >
-        <div className="max-w-md mx-auto flex flex-col items-center justify-center min-h-[50vh]">
-          <div className="rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 p-6 flex flex-col items-center gap-4 w-full">
-            <AlertCircle className="w-12 h-12 text-red-500 dark:text-red-400" />
-            <p className="text-red-800 dark:text-red-300 font-medium text-center">{error || 'Failed to load ISP profile'}</p>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+      <div className="w-full max-w-lg mx-auto py-16">
+        <div className="rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 p-6 flex flex-col items-center gap-4 text-center">
+          <AlertCircle className="w-12 h-12 text-red-500" />
+          <h3 className="text-lg font-bold text-red-900 dark:text-red-200">Unable to Load ISP Profile</h3>
+          <p className="text-sm text-red-700 dark:text-red-300">{error || 'Tenant not found'}</p>
+          <div className="flex items-center gap-3 mt-2">
+            <button
               onClick={() => navigate('/saas/tenants')}
-              className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg hover:shadow-xl transition-all"
+              className="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-semibold"
             >
-              <ArrowLeft className="w-4 h-4" />
               Back to Tenants
-            </motion.button>
+            </button>
+            <button
+              onClick={() => loadProfile()}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold"
+            >
+              Retry
+            </button>
           </div>
         </div>
-      </motion.div>
+      </div>
     );
   }
 
+  const { tenant } = profile;
+  const routers = profile.routers || [];
+  const olts = profile.olts || [];
+  const users = profile.users || [];
+  const stats = profile.stats || {
+    totalCustomers: tenant.totalCustomers || 0,
+    totalRouters: tenant.totalRouters || 0,
+    totalOlts: olts.length,
+    totalOnus: olts.reduce((sum, o) => sum + (o.totalOnus || 0), 0),
+    totalResellers: 0,
+  };
+
+  const maxCustomers = limitsForm.maxCustomers || 5000;
+  const customerPercent = Math.min(Math.round((stats.totalCustomers / maxCustomers) * 100), 100);
+
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.3 }}
-      className="w-full"
-    >
-      <div className="max-w-4xl mx-auto space-y-6">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -12 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
-        >
-          <div className="flex items-center gap-4">
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+    <div className="w-full space-y-6">
+      {/* Top Header Card */}
+      <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 p-6 shadow-sm">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="flex items-start sm:items-center gap-4">
+            <button
               onClick={() => navigate('/saas/tenants')}
-              className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700/80 transition-colors"
+              className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors shrink-0"
+              title="Back to All Tenants"
             >
-              <ArrowLeft className="w-5 h-5 text-slate-600 dark:text-slate-400" />
-            </motion.button>
-            <div className="p-3 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-500/30">
-              <Building2 className="w-8 h-8" strokeWidth={2} />
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-xl shadow-md shrink-0">
+              {(tenant.tenantName || 'I').charAt(0).toUpperCase()}
             </div>
-            <div>
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-slate-800 via-blue-800 to-indigo-800 dark:from-slate-100 dark:via-blue-200 dark:to-indigo-200 bg-clip-text text-transparent">
-                {profile.tenant.tenantName}
-              </h1>
-              <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">Profile & configuration</p>
+
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 truncate">
+                  {tenant.tenantName}
+                </h1>
+                <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-600">
+                  {tenant.tenantCode}
+                </span>
+                <span
+                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${
+                    tenant.status === 'active'
+                      ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
+                      : tenant.status === 'trial'
+                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                      : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                  }`}
+                >
+                  {tenant.status}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-500 dark:text-slate-400">
+                <span className="flex items-center gap-1.5 truncate max-w-[200px]">
+                  <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  {tenant.businessEmail}
+                </span>
+                {tenant.businessPhone && (
+                  <span className="flex items-center gap-1.5 shrink-0">
+                    <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    {tenant.businessPhone}
+                  </span>
+                )}
+                <span className="flex items-center gap-1.5 shrink-0">
+                  <Globe className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  {tenant.countryCode || 'BD'} · {tenant.currencyCode || 'BDT'}
+                </span>
+                <span className="flex items-center gap-1.5 shrink-0">
+                  <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  Joined {new Date(tenant.createdAt).toLocaleDateString()}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Header Action Buttons */}
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <button
+              onClick={() => loadProfile(true)}
+              disabled={isRefreshing}
+              className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors disabled:opacity-50"
+              title="Refresh profile data"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-600' : ''}`} />
+            </button>
+
+            <button
+              onClick={() => setShowResetPasswordModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition-colors"
+            >
+              <Key className="w-3.5 h-3.5 text-amber-500" />
+              Reset Admin Password
+            </button>
+
+            <button
+              onClick={() => setShowEditTenantModal(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition-colors"
+            >
+              <Edit className="w-3.5 h-3.5 text-blue-500" />
+              Edit ISP Info
+            </button>
+
+            <button
+              onClick={handleImpersonateLogin}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm hover:shadow transition-all active:scale-95"
+            >
+              <LogIn className="w-4 h-4" />
+              Login to Tenant
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 5 Top Telemetry Stats Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+        {/* Subscribers */}
+        <div className="p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Subscribers</p>
+          <div className="flex items-baseline justify-between mt-1">
+            <h4 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+              {stats.totalCustomers.toLocaleString()}
+            </h4>
+            <span className="text-[11px] font-semibold text-slate-400">/ {maxCustomers}</span>
+          </div>
+          <div className="w-full bg-slate-100 dark:bg-slate-700 h-1.5 rounded-full mt-2 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${
+                customerPercent > 90 ? 'bg-red-500' : customerPercent > 70 ? 'bg-amber-500' : 'bg-blue-600'
+              }`}
+              style={{ width: `${customerPercent}%` }}
+            />
+          </div>
+        </div>
+
+        {/* MikroTik Routers */}
+        <div className="p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">MikroTik Routers</p>
+            <Server className="w-4 h-4 text-blue-500" />
+          </div>
+          <div className="flex items-baseline justify-between mt-1">
+            <h4 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+              {routers.length}
+            </h4>
+            <span className="text-[11px] font-semibold text-slate-400">/ {limitsForm.maxRouters} max</span>
+          </div>
+          <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-2 flex items-center gap-1">
+            <CheckCircle2 className="w-3 h-3" />
+            {routers.filter((r) => r.status === 'active').length} online nodes
+          </p>
+        </div>
+
+        {/* OLT Devices */}
+        <div className="p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">OLT Devices</p>
+            <Radio className="w-4 h-4 text-purple-500" />
+          </div>
+          <div className="flex items-baseline justify-between mt-1">
+            <h4 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+              {olts.length}
+            </h4>
+            <span className="text-[11px] font-semibold text-slate-400">/ {limitsForm.maxOlts} max</span>
+          </div>
+          <p className="text-[11px] text-purple-600 dark:text-purple-400 font-medium mt-2">
+            Fiber PON Nodes
+          </p>
+        </div>
+
+        {/* Active ONUs */}
+        <div className="p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Synced ONUs</p>
+            <Layers className="w-4 h-4 text-emerald-500" />
+          </div>
+          <h4 className="text-xl font-bold text-slate-900 dark:text-slate-100 mt-1">
+            {stats.totalOnus.toLocaleString()}
+          </h4>
+          <p className="text-[11px] text-slate-400 mt-2 flex items-center gap-1">
+            <Clock className="w-3 h-3 text-emerald-500" />
+            Background cached
+          </p>
+        </div>
+
+        {/* Staff & Admins */}
+        <div className="p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm col-span-2 sm:col-span-1">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Staff & Users</p>
+            <Users className="w-4 h-4 text-amber-500" />
+          </div>
+          <div className="flex items-baseline justify-between mt-1">
+            <h4 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+              {users.length}
+            </h4>
+            <span className="text-[11px] font-semibold text-slate-400">/ {limitsForm.maxUsers} limit</span>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-2">
+            Admins & Resellers
+          </p>
+        </div>
+      </div>
+
+      {/* Tabs Navigation Header */}
+      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700/80 pb-px overflow-x-auto">
+        {[
+          { id: 'network', label: 'Network Devices (MikroTik & OLT)', icon: Server, count: routers.length + olts.length },
+          { id: 'limits', label: 'Plan Quotas & Limits', icon: Sliders },
+          { id: 'features', label: 'Feature Toggles', icon: Activity },
+          { id: 'payment', label: 'Payment Gateways', icon: CreditCard, count: enabledGateways.length },
+          { id: 'sms', label: 'SMS Gateway', icon: MessageSquare },
+          { id: 'users', label: 'Tenant Staff & Admins', icon: Users, count: users.length },
+        ].map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as ProfileTab)}
+              className={`inline-flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-t-xl transition-all whitespace-nowrap border-b-2 ${
+                isActive
+                  ? 'border-blue-600 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-800'
+                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:border-slate-300'
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{tab.label}</span>
+              {typeof tab.count === 'number' && (
+                <span
+                  className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold ${
+                    isActive
+                      ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                  }`}
+                >
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tab 1: Network Devices (MikroTik & OLT) */}
+      {activeTab === 'network' && (
+        <motion.div {...itemUp} className="space-y-6">
+          {/* Section: MikroTik Routers */}
+          <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                  <Server className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">MikroTik Routers</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Core routing & bandwidth shaping nodes</p>
+                </div>
+              </div>
+              <button
+                onClick={handleImpersonateLogin}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                Manage in Tenant
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              {routers.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-xs">
+                  No MikroTik routers configured for this tenant yet.
+                </div>
+              ) : (
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 text-xs uppercase font-semibold border-b border-slate-200 dark:border-slate-700/80">
+                    <tr>
+                      <th className="py-3 px-4">Router Name</th>
+                      <th className="py-3 px-4">Device Code</th>
+                      <th className="py-3 px-4">Management Host / IP</th>
+                      <th className="py-3 px-4">API Port</th>
+                      <th className="py-3 px-4">Winbox Port</th>
+                      <th className="py-3 px-4">Subscribers</th>
+                      <th className="py-3 px-4">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200/80 dark:divide-slate-700/80">
+                    {routers.map((r) => (
+                      <tr key={r.networkDeviceId} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/20">
+                        <td className="py-3 px-4 font-semibold text-slate-900 dark:text-slate-100">
+                          {r.deviceName}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-xs text-slate-600 dark:text-slate-300">
+                          {r.deviceCode}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-xs text-slate-800 dark:text-slate-200">
+                          {r.managementIp || '—'}
+                        </td>
+                        <td className="py-3 px-4 text-xs text-slate-600 dark:text-slate-400 font-mono">
+                          {r.managementPort}
+                        </td>
+                        <td className="py-3 px-4 text-xs text-slate-600 dark:text-slate-400 font-mono">
+                          {r.winboxPort || 8291}
+                        </td>
+                        <td className="py-3 px-4 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                          {r.totalCustomers || 0}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold capitalize ${
+                              r.status === 'active'
+                                ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
+                                : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                            }`}
+                          >
+                            {r.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          {/* Section: OLT Devices */}
+          <div className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+                  <Radio className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">OLT Devices</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Optical line terminals & GPON/EPON telemetry</p>
+                </div>
+              </div>
+              <button
+                onClick={handleImpersonateLogin}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                View in OLT Page
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              {olts.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-xs">
+                  No OLT devices registered for this tenant yet.
+                </div>
+              ) : (
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 text-xs uppercase font-semibold border-b border-slate-200 dark:border-slate-700/80">
+                    <tr>
+                      <th className="py-3 px-4">OLT Name</th>
+                      <th className="py-3 px-4">Vendor</th>
+                      <th className="py-3 px-4">Management IP</th>
+                      <th className="py-3 px-4">PON Standard</th>
+                      <th className="py-3 px-4">PON Ports</th>
+                      <th className="py-3 px-4">Cached ONUs</th>
+                      <th className="py-3 px-4">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200/80 dark:divide-slate-700/80">
+                    {olts.map((o) => (
+                      <tr key={o.networkDeviceId} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/20">
+                        <td className="py-3 px-4 font-semibold text-slate-900 dark:text-slate-100">
+                          {o.deviceName}
+                        </td>
+                        <td className="py-3 px-4 text-xs uppercase font-bold text-slate-600 dark:text-slate-300">
+                          {o.vendor}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-xs text-slate-800 dark:text-slate-200">
+                          {o.managementIp}:{o.managementPort}
+                        </td>
+                        <td className="py-3 px-4 text-xs font-bold uppercase text-purple-600 dark:text-purple-400">
+                          {o.ponType || 'GPON'}
+                        </td>
+                        <td className="py-3 px-4 text-xs text-slate-600 dark:text-slate-300">
+                          {o.totalPonPorts || 8} Ports
+                        </td>
+                        <td className="py-3 px-4 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                          {o.totalOnus || 0} ONUs
+                        </td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold capitalize ${
+                              o.status === 'active'
+                                ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
+                                : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                            }`}
+                          >
+                            {o.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         </motion.div>
+      )}
 
-        {/* ISP Info Section */}
-        <motion.section
-          variants={itemUp}
-          initial="initial"
-          animate="animate"
-          className="rounded-2xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-xl border border-slate-200/60 dark:border-slate-700/60 shadow-xl overflow-hidden"
-        >
-          <div className="p-5 border-b border-slate-200/60 dark:border-slate-700/60 flex items-center gap-2">
-            <Building2 className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">ISP Information</h2>
+      {/* Tab 2: Plan Quotas & Limits */}
+      {activeTab === 'limits' && (
+        <motion.div {...itemUp} className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-200/80 dark:border-slate-700/80">
+            <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <Sliders className="w-5 h-5 text-blue-600" />
+              Tenant Resource Limits & Quotas
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Enforce maximum subscribers, network devices, and reseller user accounts allowed on this ISP plan
+            </p>
           </div>
+
           <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5">
-            <div className="flex items-start gap-3">
-              <span className="text-slate-400 dark:text-slate-500 mt-0.5">Code</span>
-              <p className="text-slate-900 dark:text-slate-100 font-semibold">{profile.tenant.tenantCode}</p>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                Max Allowed Customers / Subscribers
+              </label>
+              <input
+                type="number"
+                min="10"
+                step="50"
+                value={limitsForm.maxCustomers}
+                onChange={(e) => setLimitsForm({ ...limitsForm, maxCustomers: parseInt(e.target.value) || 0 })}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 text-slate-900 dark:text-slate-100 text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">Currently used: {stats.totalCustomers} customers</p>
             </div>
-            <div className="flex items-start gap-3">
-              <Mail className="w-4 h-4 text-slate-400 dark:text-slate-500 mt-0.5 shrink-0" />
-              <p className="text-slate-900 dark:text-slate-100 font-medium truncate">{profile.tenant.businessEmail}</p>
-            </div>
-            <div className="flex items-start gap-3">
-              <Phone className="w-4 h-4 text-slate-400 dark:text-slate-500 mt-0.5 shrink-0" />
-              <p className="text-slate-900 dark:text-slate-100 font-medium">{profile.tenant.businessPhone || '—'}</p>
-            </div>
-            <div className="flex items-start gap-3">
-              <span className="text-slate-400 dark:text-slate-500 mt-0.5">Status</span>
-              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300 capitalize">
-                {profile.tenant.status}
-              </span>
-            </div>
-            <div className="flex items-start gap-3 sm:col-span-2">
-              <Calendar className="w-4 h-4 text-slate-400 dark:text-slate-500 mt-0.5 shrink-0" />
-              <p className="text-slate-600 dark:text-slate-400 text-sm">
-                Created {new Date(profile.tenant.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
-              </p>
-            </div>
-          </div>
-        </motion.section>
 
-        {/* Feature Toggles Section */}
-        <motion.section
-          variants={itemUp}
-          initial="initial"
-          animate="animate"
-          className="rounded-2xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-xl border border-slate-200/60 dark:border-slate-700/60 shadow-xl overflow-hidden"
-        >
-          <div className="p-5 border-b border-slate-200/60 dark:border-slate-700/60 flex items-center gap-2">
-            <Activity className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">Feature Toggles</h2>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                Max Allowed MikroTik Routers
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={limitsForm.maxRouters}
+                onChange={(e) => setLimitsForm({ ...limitsForm, maxRouters: parseInt(e.target.value) || 0 })}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 text-slate-900 dark:text-slate-100 text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">Currently used: {routers.length} routers</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                Max Allowed OLT Devices
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={limitsForm.maxOlts}
+                onChange={(e) => setLimitsForm({ ...limitsForm, maxOlts: parseInt(e.target.value) || 0 })}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 text-slate-900 dark:text-slate-100 text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">Currently used: {olts.length} OLTs</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                Max Allowed Staff & Reseller Accounts
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={limitsForm.maxUsers}
+                onChange={(e) => setLimitsForm({ ...limitsForm, maxUsers: parseInt(e.target.value) || 0 })}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 text-slate-900 dark:text-slate-100 text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">Currently used: {users.length} user accounts</p>
+            </div>
           </div>
+
+          <div className="p-5 border-t border-slate-200/80 dark:border-slate-700/80 flex justify-end">
+            <button
+              onClick={handleSaveLimits}
+              disabled={isSavingLimits}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+            >
+              {isSavingLimits ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {isSavingLimits ? 'Saving...' : 'Save Plan Quotas'}
+            </button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Tab 3: Feature Toggles */}
+      {activeTab === 'features' && (
+        <motion.div {...itemUp} className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-200/80 dark:border-slate-700/80">
+            <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <Activity className="w-5 h-5 text-indigo-600" />
+              Tenant Feature Flags
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Enable or disable optional software modules for this specific ISP
+            </p>
+          </div>
+
           <div className="p-6 space-y-4">
-            <div className="flex items-center justify-between p-4 rounded-xl border border-slate-200/80 dark:border-slate-700/80 bg-slate-50/50 dark:bg-slate-900/30">
+            <div className="flex items-center justify-between p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-white">
-                  <Map className="w-6 h-6" strokeWidth={2} />
+                <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                  <Map className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-slate-900 dark:text-slate-100">Map / GIS</h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">Interactive map and GIS</p>
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">Interactive Map / GIS Service</h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Allows customer location tagging and optic fiber cable mapping on Leaflet</p>
                 </div>
               </div>
               <label className="relative inline-flex items-center cursor-pointer">
                 <input
                   type="checkbox"
                   checked={features.mapEnabled}
-                  onChange={(e) => setFeatures((prev) => ({ ...prev, mapEnabled: e.target.checked }))}
+                  onChange={(e) => setFeatures({ ...features, mapEnabled: e.target.checked })}
                   className="sr-only peer"
                 />
-                <div className="w-14 h-7 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all dark:border-slate-600 peer-checked:bg-gradient-to-r peer-checked:from-blue-600 peer-checked:to-indigo-600" />
+                <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600" />
               </label>
             </div>
-            <div className="flex items-center justify-between p-4 rounded-xl border border-slate-200/80 dark:border-slate-700/80 bg-slate-50/50 dark:bg-slate-900/30">
+
+            <div className="flex items-center justify-between p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-white">
-                  <Activity className="w-6 h-6" strokeWidth={2} />
+                <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                  <Activity className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-slate-900 dark:text-slate-100">Monitoring</h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">Network monitoring and analytics</p>
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">Network Live Traffic Monitoring</h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Enables high-frequency interface traffic graphing and latency telemetry</p>
                 </div>
               </div>
               <label className="relative inline-flex items-center cursor-pointer">
                 <input
                   type="checkbox"
                   checked={features.monitoringEnabled}
-                  onChange={(e) => setFeatures((prev) => ({ ...prev, monitoringEnabled: e.target.checked }))}
+                  onChange={(e) => setFeatures({ ...features, monitoringEnabled: e.target.checked })}
                   className="sr-only peer"
                 />
-                <div className="w-14 h-7 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-300 dark:peer-focus:ring-emerald-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all dark:border-slate-600 peer-checked:bg-gradient-to-r peer-checked:from-emerald-600 peer-checked:to-teal-600" />
+                <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600" />
               </label>
             </div>
           </div>
-          <div className="p-5 border-t border-slate-200/60 dark:border-slate-700/60 flex justify-end">
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+
+          <div className="p-5 border-t border-slate-200/80 dark:border-slate-700/80 flex justify-end">
+            <button
               onClick={handleSaveFeatures}
               disabled={isSavingFeatures}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-sm hover:shadow active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
             >
               {isSavingFeatures ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              {isSavingFeatures ? 'Saving…' : 'Save Features'}
-            </motion.button>
+              {isSavingFeatures ? 'Saving...' : 'Save Feature Flags'}
+            </button>
           </div>
-        </motion.section>
+        </motion.div>
+      )}
 
-        {/* Payment Gateways Section */}
-        <motion.section
-          variants={itemUp}
-          initial="initial"
-          animate="animate"
-          className="rounded-2xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-xl border border-slate-200/60 dark:border-slate-700/60 shadow-xl overflow-hidden"
-        >
-          <div className="p-5 border-b border-slate-200/60 dark:border-slate-700/60 flex items-center gap-2">
-            <CreditCard className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">Payment Gateways</h2>
+      {/* Tab 4: Payment Gateways */}
+      {activeTab === 'payment' && (
+        <motion.div {...itemUp} className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-purple-600" />
+                Payment Gateways & PGW Configuration
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Configure bKash Tokenized, SurjoPay, and SSLCommerz credentials for this tenant
+              </p>
+            </div>
+            <button
+              onClick={openTestFlow}
+              className="px-3.5 py-1.5 rounded-xl border border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/30 text-xs font-semibold transition-colors"
+            >
+              Test Payment Flow
+            </button>
           </div>
+
           <div className="p-6 space-y-4">
             {paymentGateways.map((gateway) => (
-              <div key={gateway.gateway} className="rounded-xl border border-slate-200/80 dark:border-slate-700/80 overflow-hidden bg-slate-50/30 dark:bg-slate-900/20">
+              <div
+                key={gateway.gateway}
+                className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-50/50 dark:bg-slate-900/20"
+              >
                 <div className="flex items-center justify-between p-4">
                   <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-lg uppercase">
+                    <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-300 font-bold text-sm flex items-center justify-center uppercase">
                       {gateway.gateway.charAt(0)}
                     </div>
                     <div>
-                      <h3 className="font-semibold text-slate-900 dark:text-slate-100 capitalize">{gateway.gateway}</h3>
-                      <p className="text-sm text-slate-600 dark:text-slate-400">Gateway configuration</p>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100 capitalize">
+                        {gateway.gateway === 'bkash' ? 'bKash Tokenized Checkout' : gateway.gateway === 'ssl' ? 'SSLCommerz Gateway' : 'SurjoPay PGW'}
+                      </h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {gateway.isEnabled ? 'Active on customer portal' : 'Disabled'}
+                      </p>
                     </div>
                   </div>
+
                   <div className="flex items-center gap-3">
                     <label className="relative inline-flex items-center cursor-pointer">
                       <input
@@ -539,244 +1046,529 @@ export default function ISPProfilePage() {
                         }
                         className="sr-only peer"
                       />
-                      <div className="w-14 h-7 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all dark:border-slate-600 peer-checked:bg-gradient-to-r peer-checked:from-purple-600 peer-checked:to-pink-600" />
+                      <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600" />
                     </label>
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
+
+                    <button
                       onClick={() => setExpandedGateway(expandedGateway === gateway.gateway ? null : gateway.gateway)}
-                      className="p-2 rounded-lg text-slate-500 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors"
+                      className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
                     >
-                      <ChevronDown
-                        className={`w-5 h-5 transition-transform duration-200 ${expandedGateway === gateway.gateway ? 'rotate-180' : ''}`}
-                      />
-                    </motion.button>
+                      <ChevronDown className={`w-4 h-4 transition-transform ${expandedGateway === gateway.gateway ? 'rotate-180' : ''}`} />
+                    </button>
                   </div>
                 </div>
+
                 {expandedGateway === gateway.gateway && (
-                  <div className="p-4 bg-slate-50 dark:bg-slate-900/50 space-y-3">
+                  <div className="p-4 bg-white dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-700 space-y-3">
                     {gateway.gateway === 'bkash' ? (
-                      <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                         <div>
-                          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">API Context Root</label>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">API Context Root</label>
                           <input
                             type="text"
                             value={(gateway.credentials as BkashCredentials)?.apiContextRoot || ''}
                             onChange={(e) => updateGatewayCredentials('bkash', 'apiContextRoot', e.target.value)}
-                            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 focus:border-purple-500 dark:focus:border-purple-400 outline-none text-slate-900 dark:text-slate-100"
-                            placeholder="e.g. https://tokenized.sandbox.bka.sh"
+                            placeholder="https://tokenized.sandbox.bka.sh"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Username (PGW)</label>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">PGW Username</label>
                           <input
                             type="text"
                             value={(gateway.credentials as BkashCredentials)?.username || ''}
                             onChange={(e) => updateGatewayCredentials('bkash', 'username', e.target.value)}
-                            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 focus:border-purple-500 dark:focus:border-purple-400 outline-none text-slate-900 dark:text-slate-100"
-                            placeholder="PGW username"
+                            placeholder="Merchant username"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Password (PGW)</label>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">PGW Password</label>
                           <input
                             type="password"
                             value={(gateway.credentials as BkashCredentials)?.password || ''}
                             onChange={(e) => updateGatewayCredentials('bkash', 'password', e.target.value)}
-                            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 focus:border-purple-500 dark:focus:border-purple-400 outline-none text-slate-900 dark:text-slate-100"
-                            placeholder="PGW password"
+                            placeholder="••••••••"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">App Key (PGW)</label>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">App Key</label>
                           <input
                             type="text"
                             value={(gateway.credentials as BkashCredentials)?.appKey || ''}
                             onChange={(e) => updateGatewayCredentials('bkash', 'appKey', e.target.value)}
-                            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 focus:border-purple-500 dark:focus:border-purple-400 outline-none text-slate-900 dark:text-slate-100"
-                            placeholder="App key"
+                            placeholder="bKash App Key"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">App Secret (PGW)</label>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">App Secret</label>
                           <input
                             type="password"
                             value={(gateway.credentials as BkashCredentials)?.appSecret || ''}
                             onChange={(e) => updateGatewayCredentials('bkash', 'appSecret', e.target.value)}
-                            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 focus:border-purple-500 dark:focus:border-purple-400 outline-none text-slate-900 dark:text-slate-100"
-                            placeholder="App secret"
+                            placeholder="bKash App Secret"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Mode</label>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Gateway Mode</label>
                           <select
                             value={(gateway.credentials as BkashCredentials)?.sandbox === false ? 'live' : 'sandbox'}
                             onChange={(e) => updateGatewayCredentials('bkash', 'sandbox', e.target.value === 'sandbox')}
-                            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 focus:border-purple-500 dark:focus:border-purple-400 outline-none text-slate-900 dark:text-slate-100"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                           >
-                            <option value="sandbox">Sandbox</option>
-                            <option value="live">Live</option>
+                            <option value="sandbox">Sandbox (Test Mode)</option>
+                            <option value="live">Live Production</option>
                           </select>
                         </div>
-                      </>
+                      </div>
                     ) : gateway.gateway === 'ssl' ? (
-                      <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                         <div>
-                          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Store ID</label>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Store ID</label>
                           <input
                             type="text"
-                            value={gateway.credentials?.store_id || gateway.credentials?.storeId || ''}
+                            value={gateway.credentials?.store_id || ''}
                             onChange={(e) => updateGatewayCredentials('ssl', 'store_id', e.target.value)}
-                            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 focus:border-purple-500 dark:focus:border-purple-400 outline-none text-slate-900 dark:text-slate-100"
-                            placeholder="SSLCommerz store_id"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Store Password</label>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Store Password</label>
                           <input
                             type="password"
-                            value={gateway.credentials?.store_passwd || gateway.credentials?.storePassword || ''}
+                            value={gateway.credentials?.store_passwd || ''}
                             onChange={(e) => updateGatewayCredentials('ssl', 'store_passwd', e.target.value)}
-                            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 focus:border-purple-500 dark:focus:border-purple-400 outline-none text-slate-900 dark:text-slate-100"
-                            placeholder="SSLCommerz store_passwd"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                           />
                         </div>
-                        <div>
-                          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Mode</label>
-                          <select
-                            value={(gateway.credentials?.is_live === true || gateway.credentials?.is_live === 'true') ? 'live' : 'sandbox'}
-                            onChange={(e) => updateGatewayCredentials('ssl', 'is_live', e.target.value === 'live')}
-                            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 focus:border-purple-500 dark:focus:border-purple-400 outline-none text-slate-900 dark:text-slate-100"
-                          >
-                            <option value="sandbox">Sandbox</option>
-                            <option value="live">Live</option>
-                          </select>
-                        </div>
-                      </>
+                      </div>
                     ) : (
-                      <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                         <div>
-                          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">API Key</label>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">API Key</label>
                           <input
                             type="text"
                             value={gateway.credentials?.apiKey || ''}
-                            onChange={(e) => updateGatewayCredentials(gateway.gateway, 'apiKey', e.target.value)}
-                            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 focus:border-purple-500 dark:focus:border-purple-400 outline-none text-slate-900 dark:text-slate-100"
-                            placeholder="Enter API key"
+                            onChange={(e) => updateGatewayCredentials('surjopay', 'apiKey', e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">API Secret</label>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">API Secret</label>
                           <input
                             type="password"
                             value={gateway.credentials?.apiSecret || ''}
-                            onChange={(e) => updateGatewayCredentials(gateway.gateway, 'apiSecret', e.target.value)}
-                            className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400 focus:border-purple-500 dark:focus:border-purple-400 outline-none text-slate-900 dark:text-slate-100"
-                            placeholder="Enter API secret"
+                            onChange={(e) => updateGatewayCredentials('surjopay', 'apiSecret', e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                           />
                         </div>
-                      </>
+                      </div>
                     )}
                   </div>
                 )}
               </div>
             ))}
           </div>
-          <div className="p-5 border-t border-slate-200/60 dark:border-slate-700/60 flex flex-wrap justify-between items-center gap-3">
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              type="button"
-              onClick={openTestFlow}
-              className="px-5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              Test payment
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+
+          <div className="p-5 border-t border-slate-200/80 dark:border-slate-700/80 flex justify-end">
+            <button
               onClick={handleSavePaymentGateways}
               disabled={isSavingPaymentGateways}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 via-pink-600 to-rose-600 text-white font-semibold shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
             >
               {isSavingPaymentGateways ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              {isSavingPaymentGateways ? 'Saving…' : 'Save Payment Gateways'}
-            </motion.button>
+              {isSavingPaymentGateways ? 'Saving...' : 'Save Payment Gateways'}
+            </button>
           </div>
-        </motion.section>
+        </motion.div>
+      )}
 
-        {/* Test Payment - Amount Modal */}
-        <AnimatePresence>
-          {showTestAmountModal && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-              onClick={closeTestAmountModal}
+      {/* Tab 5: SMS Gateway */}
+      {activeTab === 'sms' && (
+        <motion.div {...itemUp} className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-amber-600" />
+                Tenant SMS Gateway Configuration
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Automated SMS alerts for expiry notices, recharge confirmations, and OTPs
+              </p>
+            </div>
+            <button
+              onClick={() => setShowSmsTestModal(true)}
+              className="px-3.5 py-1.5 rounded-xl border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/30 text-xs font-semibold transition-colors"
             >
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                onClick={(e) => e.stopPropagation()}
-                className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 p-6 w-full max-w-md"
-              >
-                <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-4">Test Payment</h3>
-              <div className="mb-4">
-                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Amount (৳)</label>
+              Test SMS
+            </button>
+          </div>
+
+          <div className="p-6 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  SMS Gateway Provider
+                </label>
+                <select
+                  value={smsGateway.providerName}
+                  onChange={(e) => setSmsGateway({ ...smsGateway, providerName: e.target.value })}
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 text-slate-900 dark:text-slate-100 text-sm font-medium outline-none focus:ring-2 focus:ring-amber-500"
+                >
+                  <option value="">Select a provider...</option>
+                  {smsProviders.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Gateway Active Status
+                </label>
+                <div className="flex items-center gap-3 pt-2">
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={smsGateway.isEnabled}
+                      onChange={(e) => setSmsGateway({ ...smsGateway, isEnabled: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600" />
+                  </label>
+                  <span className="text-xs text-slate-600 dark:text-slate-400">
+                    {smsGateway.isEnabled ? 'Enabled for customer alerts' : 'Disabled'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Sender ID / Masking Name
+                </label>
                 <input
-                  type="number"
-                  min="1"
-                  step="any"
-                  value={testAmount}
-                  onChange={(e) => setTestAmount(e.target.value)}
-                  className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-slate-900 dark:text-slate-100"
-                  placeholder="Enter amount"
+                  type="text"
+                  value={smsGateway.credentials?.senderName || smsGateway.credentials?.senderId || ''}
+                  onChange={(e) => updateSmsCredentials('senderName', e.target.value)}
+                  placeholder="e.g. NETFIX"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-amber-500"
                 />
               </div>
-              <div className="flex gap-3 justify-end">
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  API Key / Token
+                </label>
+                <input
+                  type="password"
+                  value={smsGateway.credentials?.apikey || smsGateway.credentials?.apiKey || ''}
+                  onChange={(e) => updateSmsCredentials('apikey', e.target.value)}
+                  placeholder="Enter API token from SMS provider"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 border-t border-slate-200/80 dark:border-slate-700/80 flex justify-end">
+            <button
+              onClick={handleSaveSmsGateway}
+              disabled={isSavingSmsGateway}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+            >
+              {isSavingSmsGateway ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {isSavingSmsGateway ? 'Saving...' : 'Save SMS Gateway'}
+            </button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Tab 6: Tenant Staff & Admins */}
+      {activeTab === 'users' && (
+        <motion.div {...itemUp} className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <Users className="w-5 h-5 text-blue-600" />
+                Tenant Staff & Administrator Accounts
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Authorized user logins registered under this ISP tenant
+              </p>
+            </div>
+            <button
+              onClick={() => setShowResetPasswordModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors"
+            >
+              <Key className="w-3.5 h-3.5 text-amber-500" />
+              Reset Admin Password
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            {users.length === 0 ? (
+              <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-xs">
+                No staff users found under this tenant.
+              </div>
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 text-xs uppercase font-semibold border-b border-slate-200 dark:border-slate-700/80">
+                  <tr>
+                    <th className="py-3 px-4">User</th>
+                    <th className="py-3 px-4">Username</th>
+                    <th className="py-3 px-4">Email</th>
+                    <th className="py-3 px-4">Phone</th>
+                    <th className="py-3 px-4">Role</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">Last Login</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200/80 dark:divide-slate-700/80">
+                  {users.map((u) => (
+                    <tr key={u.userId} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/20">
+                      <td className="py-3 px-4 font-semibold text-slate-900 dark:text-slate-100">
+                        {u.firstName} {u.lastName}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-xs text-slate-600 dark:text-slate-300">
+                        {u.username || '—'}
+                      </td>
+                      <td className="py-3 px-4 text-xs text-slate-600 dark:text-slate-300">
+                        {u.email}
+                      </td>
+                      <td className="py-3 px-4 text-xs text-slate-500">
+                        {u.phone || '—'}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 uppercase">
+                          {u.role}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 capitalize">
+                          {u.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-xs text-slate-400">
+                        {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : 'Never'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Edit Tenant Modal */}
+      <AnimatePresence>
+        {showEditTenantModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-6 w-full max-w-lg"
+            >
+              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">Edit ISP Tenant Details</h3>
+              <form onSubmit={handleSaveTenantInfo} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Company / ISP Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={tenantEditForm.tenantName}
+                    onChange={(e) => setTenantEditForm({ ...tenantEditForm, tenantName: e.target.value })}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Business Phone</label>
+                    <input
+                      type="text"
+                      value={tenantEditForm.businessPhone}
+                      onChange={(e) => setTenantEditForm({ ...tenantEditForm, businessPhone: e.target.value })}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Status</label>
+                    <select
+                      value={tenantEditForm.status}
+                      onChange={(e) => setTenantEditForm({ ...tenantEditForm, status: e.target.value })}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="active">Active</option>
+                      <option value="trial">Trial</option>
+                      <option value="suspended">Suspended</option>
+                      <option value="expired">Expired</option>
+                      <option value="terminated">Terminated</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Office / Business Address</label>
+                  <textarea
+                    rows={2}
+                    value={tenantEditForm.businessAddress}
+                    onChange={(e) => setTenantEditForm({ ...tenantEditForm, businessAddress: e.target.value })}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setShowEditTenantModal(false)}
+                    className="px-4 py-2 text-xs font-semibold border border-slate-200 dark:border-slate-700 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-slate-100"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingTenantInfo}
+                    className="px-4 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl disabled:opacity-50"
+                  >
+                    {isSavingTenantInfo ? 'Saving...' : 'Update Details'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Reset Admin Password Modal */}
+      <AnimatePresence>
+        {showResetPasswordModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-6 w-full max-w-sm"
+            >
+              <div className="flex items-center gap-3 mb-3 text-amber-600 dark:text-amber-400">
+                <Key className="w-5 h-5" />
+                <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">Reset ISP Admin Password</h3>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                Set a new login password for <strong>{tenant.tenantName}</strong> primary admin account.
+              </p>
+              <form onSubmit={handleResetPassword} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">New Password</label>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={newAdminPassword}
+                    onChange={(e) => setNewAdminPassword(e.target.value)}
+                    placeholder="Enter at least 6 characters"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowResetPasswordModal(false);
+                      setNewAdminPassword('');
+                    }}
+                    className="px-4 py-2 text-xs font-semibold border border-slate-200 dark:border-slate-700 rounded-xl text-slate-700 dark:text-slate-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isResettingPassword}
+                    className="px-4 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl disabled:opacity-50"
+                  >
+                    {isResettingPassword ? 'Resetting...' : 'Save New Password'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Test Payment Amount Modal */}
+      <AnimatePresence>
+        {showTestAmountModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowTestAmountModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-6 w-full max-w-sm"
+            >
+              <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 mb-2">Test Payment Gateway</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                Enter an amount in ৳ to simulate a recharge via this tenant's PGW credentials.
+              </p>
+              <input
+                type="number"
+                min="1"
+                step="any"
+                value={testAmount}
+                onChange={(e) => setTestAmount(e.target.value)}
+                className="w-full px-4 py-2.5 mb-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm font-bold"
+              />
+              <div className="flex justify-end gap-2.5">
                 <button
                   type="button"
-                  onClick={closeTestAmountModal}
-                  className="px-5 py-2.5 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-xl font-medium hover:bg-slate-100 dark:hover:bg-slate-700"
+                  onClick={() => setShowTestAmountModal(false)}
+                  className="px-4 py-2 text-xs font-semibold border border-slate-200 dark:border-slate-700 rounded-xl text-slate-700 dark:text-slate-300"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handlePayNowFromAmountModal}
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold shadow-sm hover:shadow transition-all active:scale-95"
+                  className="px-4 py-2 text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-xl shadow-sm"
                 >
-                  Pay Now
+                  Proceed to Pay
                 </button>
               </div>
-              </motion.div>
             </motion.div>
-          )}
-        </AnimatePresence>
+          </div>
+        )}
+      </AnimatePresence>
 
-        {/* Test Payment - Select Gateway Modal (enabled gateways only) */}
-        <AnimatePresence>
-          {showGatewaySelectModal && (
+      {/* Test Payment Gateway Select Modal */}
+      <AnimatePresence>
+        {showGatewaySelectModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={() => !testProcessingGateway && setShowGatewaySelectModal(false)}
+          >
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-              onClick={() => !testProcessingGateway && setShowGatewaySelectModal(false)}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-6 w-full max-w-sm"
             >
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 p-6 w-full max-w-md"
-                onClick={(e) => e.stopPropagation()}
-              >
-              <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-2">Select gateway</h3>
-              <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">Pay with one of the enabled gateways to complete the test.</p>
+              <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 mb-1">Select Gateway</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                Choose an enabled gateway to initiate the payment test:
+              </p>
               <div className="space-y-2">
                 {enabledGateways.map((g) => (
                   <button
@@ -784,211 +1576,71 @@ export default function ISPProfilePage() {
                     type="button"
                     disabled={!!testProcessingGateway}
                     onClick={() => handleTestGateway(g.gateway)}
-                    className="w-full px-4 py-3 rounded-xl font-medium capitalize bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 border border-purple-200 dark:border-purple-800 hover:from-purple-100 hover:to-pink-100 dark:hover:from-purple-800/30 dark:hover:to-pink-800/30 text-slate-900 dark:text-slate-100 flex items-center justify-center gap-2"
+                    className="w-full px-4 py-3 rounded-xl font-semibold capitalize bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 hover:bg-purple-100 text-purple-900 dark:text-purple-200 text-xs flex items-center justify-center gap-2"
                   >
                     {testProcessingGateway === g.gateway ? (
                       <>
-                        <span className="inline-block w-5 h-5 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />
-                        Processing…
+                        <Loader2 className="w-4 h-4 animate-spin text-purple-600" />
+                        Connecting to {g.gateway}...
                       </>
                     ) : (
-                      <>Pay with {g.gateway}</>
+                      <>Pay ৳{testAmount} via {g.gateway}</>
                     )}
                   </button>
                 ))}
               </div>
-              {!testProcessingGateway && (
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Test SMS Modal */}
+      <AnimatePresence>
+        {showSmsTestModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={() => !isSendingTestSms && setShowSmsTestModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-6 w-full max-w-sm"
+            >
+              <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 mb-1">Send Test SMS</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                Enter a mobile number to test the tenant's gateway credentials.
+              </p>
+              <input
+                type="text"
+                value={testSmsNumber}
+                onChange={(e) => setTestSmsNumber(e.target.value)}
+                placeholder="88018xxxxxxxx"
+                className="w-full px-4 py-2.5 mb-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-amber-500"
+              />
+              <div className="flex justify-end gap-2.5">
                 <button
                   type="button"
-                  onClick={() => setShowGatewaySelectModal(false)}
-                  className="mt-4 w-full px-4 py-2 border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 rounded-xl font-medium hover:bg-slate-100 dark:hover:bg-slate-700"
+                  onClick={() => setShowSmsTestModal(false)}
+                  className="px-4 py-2 text-xs font-semibold border border-slate-200 dark:border-slate-700 rounded-xl text-slate-700 dark:text-slate-300"
                 >
                   Cancel
                 </button>
-              )}
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* SMS Gateway Section */}
-        <motion.section
-          variants={itemUp}
-          initial="initial"
-          animate="animate"
-          className="rounded-2xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-xl border border-slate-200/60 dark:border-slate-700/60 shadow-xl overflow-hidden"
-        >
-          <div className="p-5 border-b border-slate-200/60 dark:border-slate-700/60 flex items-center gap-2">
-            <MessageSquare className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">SMS Gateway</h2>
-          </div>
-          <div className="p-6 space-y-4">
-            <div className="flex items-center justify-between p-4 rounded-xl border border-slate-200/80 dark:border-slate-700/80 bg-slate-50/50 dark:bg-slate-900/30">
-              <div className="flex items-center gap-4 flex-1">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-white shrink-0">
-                  <MessageSquare className="w-6 h-6" strokeWidth={2} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">SMS Company</label>
-                  <select
-                    value={smsGateway.providerName}
-                    onChange={(e) => setSmsGateway((prev) => ({ ...prev, providerName: e.target.value, credentials: prev.providerName === e.target.value ? prev.credentials : {} }))}
-                    className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-amber-500 dark:focus:ring-amber-400 focus:border-amber-500 outline-none text-slate-900 dark:text-slate-100"
-                  >
-                    <option value="">Select company</option>
-                    {smsProviders.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">Tenant-wise SMS gateway (API only)</p>
-                </div>
+                <button
+                  type="button"
+                  onClick={handleSendTestSms}
+                  disabled={isSendingTestSms}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl disabled:opacity-50"
+                >
+                  {isSendingTestSms ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                  {isSendingTestSms ? 'Sending...' : 'Send SMS'}
+                </button>
               </div>
-              <label className="relative inline-flex items-center cursor-pointer ml-4 shrink-0">
-                <input
-                  type="checkbox"
-                  checked={smsGateway.isEnabled}
-                  onChange={(e) => setSmsGateway((prev) => ({ ...prev, isEnabled: e.target.checked }))}
-                  className="sr-only peer"
-                />
-                <div className="w-14 h-7 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 dark:peer-focus:ring-amber-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all dark:border-slate-600 peer-checked:bg-gradient-to-r peer-checked:from-amber-600 peer-checked:to-orange-600"></div>
-              </label>
-            </div>
-
-            {smsGateway.providerName === 'MiMSMS' && (
-              <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-xl space-y-3">
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  <a href="https://www.mimsms.com/api-documentation/" target="_blank" rel="noopener noreferrer" className="underline hover:text-amber-600">MiMSMS API docs</a>
-                </p>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">UserName</label>
-                  <input
-                    type="text"
-                    value={smsGateway.credentials?.userName ?? smsGateway.credentials?.UserName ?? ''}
-                    onChange={(e) => updateSmsCredentials('userName', e.target.value)}
-                    className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-amber-500 dark:focus:ring-amber-400 focus:border-amber-500 outline-none text-slate-900 dark:text-slate-100"
-                    placeholder="you@example.com"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Apikey</label>
-                  <input
-                    type="password"
-                    value={smsGateway.credentials?.apikey ?? smsGateway.credentials?.Apikey ?? ''}
-                    onChange={(e) => updateSmsCredentials('apikey', e.target.value)}
-                    className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-amber-500 dark:focus:ring-amber-400 focus:border-amber-500 outline-none text-slate-900 dark:text-slate-100"
-                    placeholder="API Key from MiMSMS"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Sender Name</label>
-                  <input
-                    type="text"
-                    value={smsGateway.credentials?.senderName ?? smsGateway.credentials?.SenderName ?? ''}
-                    onChange={(e) => updateSmsCredentials('senderName', e.target.value)}
-                    className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-amber-500 dark:focus:ring-amber-400 focus:border-amber-500 outline-none text-slate-900 dark:text-slate-100"
-                    placeholder="Registered sender ID"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Transaction Type</label>
-                  <select
-                    value={smsGateway.credentials?.transactionType ?? smsGateway.credentials?.TransactionType ?? 'T'}
-                    onChange={(e) => updateSmsCredentials('transactionType', e.target.value)}
-                    className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-amber-500 dark:focus:ring-amber-400 outline-none text-slate-900 dark:text-slate-100"
-                  >
-                    <option value="T">T – Transactional</option>
-                    <option value="P">P – Promotional</option>
-                    <option value="D">D – Dynamic</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Campaign ID (optional, for Promotional)</label>
-                  <input
-                    type="text"
-                    value={smsGateway.credentials?.campaignId ?? smsGateway.credentials?.CampaignId ?? ''}
-                    onChange={(e) => updateSmsCredentials('campaignId', e.target.value)}
-                    className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-amber-500 dark:focus:ring-amber-400 focus:border-amber-500 outline-none text-slate-900 dark:text-slate-100"
-                    placeholder="null or approved campaign ID"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="p-5 border-t border-slate-200/60 dark:border-slate-700/60 flex flex-wrap items-center justify-end gap-2">
-            <motion.button
-              type="button"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => setShowSmsTestModal(true)}
-              disabled={!smsGateway.providerName || isSavingSmsGateway}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 border-amber-500 dark:border-amber-400 text-amber-600 dark:text-amber-400 font-semibold hover:bg-amber-50 dark:hover:bg-amber-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Test SMS
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={handleSaveSmsGateway}
-              disabled={isSavingSmsGateway}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 via-orange-600 to-red-600 text-white font-semibold shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSavingSmsGateway ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              {isSavingSmsGateway ? 'Saving…' : 'Save SMS Gateway'}
-            </motion.button>
-          </div>
-        </motion.section>
-
-        {/* Test SMS Modal */}
-        <AnimatePresence>
-          {showSmsTestModal && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-              onClick={() => !isSendingTestSms && setShowSmsTestModal(false)}
-            >
-              <motion.div
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                onClick={(e) => e.stopPropagation()}
-                className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-6 w-full max-w-sm"
-              >
-                <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-2">Send Test SMS</h3>
-                <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">Save gateway first, then enter a mobile number (e.g. 88018xxxxxxxx).</p>
-                <input
-                  type="text"
-                  value={testSmsNumber}
-                  onChange={(e) => setTestSmsNumber(e.target.value)}
-                  placeholder="88018xxxxxxxx"
-                  className="w-full px-4 py-2 mb-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-slate-900 dark:text-slate-100"
-                />
-                <div className="flex gap-2 justify-end">
-                  <button
-                    type="button"
-                    onClick={() => !isSendingTestSms && setShowSmsTestModal(false)}
-                    className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSendTestSms}
-                    disabled={isSendingTestSms}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-600 text-white font-medium disabled:opacity-50"
-                  >
-                    {isSendingTestSms ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                    {isSendingTestSms ? 'Sending…' : 'Send Test SMS'}
-                  </button>
-                </div>
-              </motion.div>
             </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }

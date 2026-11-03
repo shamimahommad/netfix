@@ -376,6 +376,9 @@ if ($method === 'PUT' && preg_match('#^/tenants/([^/]+)/sms-gateway$#', $uri, $m
 if ($method === 'PATCH' && preg_match('#^/tenants/([^/]+)/limits$#', $uri, $m)) {
     TenantsController::updateLimits($m[1]);
 }
+if ($method === 'POST' && preg_match('#^/tenants/([^/]+)/reset-admin-password$#', $uri, $m)) {
+    TenantsController::resetAdminPassword($m[1]);
+}
 if ($method === 'GET' && preg_match('#^/tenants/([^/]+)$#', $uri, $m)) {
     TenantsController::show($m[1]);
 }

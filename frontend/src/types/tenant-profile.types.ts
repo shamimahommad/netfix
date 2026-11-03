@@ -33,11 +33,63 @@ export interface SmsGatewaySettings {
   updatedAt: string;
 }
 
+export interface TenantDeviceItem {
+  networkDeviceId: string;
+  deviceCode: string;
+  deviceName: string;
+  deviceType: 'router' | 'olt' | 'switch' | 'access_point' | 'firewall';
+  vendor: string;
+  managementIp: string | null;
+  managementPort: number;
+  winboxPort?: number;
+  webPort?: number;
+  ponType?: string;
+  totalPonPorts?: number;
+  totalOnus?: number;
+  totalCustomers?: number;
+  status: string;
+  lastSyncAt: string | null;
+  createdAt: string;
+}
+
+export interface TenantUserItem {
+  userId: string;
+  email: string;
+  username: string | null;
+  firstName: string;
+  lastName: string;
+  phone?: string | null;
+  role: string;
+  status: string;
+  lastLoginAt: string | null;
+  createdAt: string;
+}
+
+export interface TenantStats {
+  totalCustomers: number;
+  totalRouters: number;
+  totalOlts: number;
+  totalOnus: number;
+  totalResellers: number;
+}
+
 export interface TenantProfile {
   tenant: Tenant;
   settings: TenantSettings | null;
   paymentGateways: PaymentGatewaySettings[];
   smsGateways: SmsGatewaySettings[];
+  routers?: TenantDeviceItem[];
+  olts?: TenantDeviceItem[];
+  users?: TenantUserItem[];
+  stats?: TenantStats;
+  limits?: {
+    maxRouters: number;
+    maxOlts: number;
+    maxUsers: number;
+    maxCustomers: number;
+    mapEnabled: boolean;
+    monitoringEnabled: boolean;
+  };
 }
 
 export interface TenantProfileResponse {
