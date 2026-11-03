@@ -1,23 +1,54 @@
-import { useState, FormEvent, useEffect } from 'react';
+import { useState, FormEvent, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Lock,
+  Mail,
+  Eye,
+  EyeOff,
+  ArrowRight,
+  CheckCircle2,
+  Sparkles,
+  Server,
+  Activity,
+  Building2,
+  ChevronRight,
+  AlertCircle,
+  X,
+  Search,
+  Zap,
+  HelpCircle,
+  Globe,
+  ShieldCheck,
+} from 'lucide-react';
 import { authService, AuthError } from '@/services/auth.service';
 import { useAuthStore } from '@/stores/authStore';
 import { tenantsService } from '@/services/tenants.service';
 import { Tenant } from '@/types/tenant.types';
-import { motion } from 'framer-motion';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const { setUser, user, isAuthenticated } = useAuthStore();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Tenant selection state
   const [showTenants, setShowTenants] = useState(false);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [isLoadingTenants, setIsLoadingTenants] = useState(false);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
+  const [tenantSearch, setTenantSearch] = useState('');
 
+  // UI helpers
+  const [demoFilled, setDemoFilled] = useState<string | null>(null);
+  const [showHelpModal, setShowHelpModal] = useState(false);
+
+  // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated && user) {
       if (user.user_type === 'saas') {
@@ -32,21 +63,23 @@ export default function LoginPage() {
     }
   }, [isAuthenticated, user, navigate]);
 
+  // Load remembered email and tenants on mount
   useEffect(() => {
+    const savedEmail = localStorage.getItem('netfix_remembered_email');
+    if (savedEmail) {
+      setEmail(savedEmail);
+      setRememberMe(true);
+    }
     if (!isAuthenticated) {
       loadTenants();
     }
   }, [isAuthenticated]);
 
-  if (isAuthenticated && user) {
-    return null;
-  }
-
   const loadTenants = async () => {
     setIsLoadingTenants(true);
     try {
       const response = await tenantsService.getTenants();
-      setTenants(response.data);
+      setTenants(response.data || []);
     } catch (err: any) {
       if (err?.response?.status !== 403) {
         console.error('Failed to load tenants:', err);
@@ -57,17 +90,36 @@ export default function LoginPage() {
     }
   };
 
+  const filteredTenants = useMemo(() => {
+    if (!tenantSearch.trim()) return tenants;
+    const q = tenantSearch.toLowerCase().trim();
+    return tenants.filter(
+      (t) =>
+        t.tenantName.toLowerCase().includes(q) ||
+        t.tenantCode.toLowerCase().includes(q) ||
+        t.businessEmail.toLowerCase().includes(q)
+    );
+  }, [tenants, tenantSearch]);
+
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
     setIsLoading(true);
+
     try {
-      const response = await authService.login({ email, password });
+      if (rememberMe) {
+        localStorage.setItem('netfix_remembered_email', email.trim());
+      } else {
+        localStorage.removeItem('netfix_remembered_email');
+      }
+
+      const response = await authService.login({ email: email.trim(), password });
       if (selectedTenant && response.user.tenant_id !== selectedTenant.tenantId) {
         setError('This account does not belong to the selected tenant.');
         setSelectedTenant(null);
         return;
       }
+
       setUser(response.user);
       if (response.user.user_type === 'saas') {
         navigate('/saas/dashboard', { replace: true });
@@ -86,247 +138,689 @@ export default function LoginPage() {
     }
   };
 
-  const handleTenantLogin = async (tenant: Tenant) => {
+  const handleTenantLogin = (tenant: Tenant) => {
     setSelectedTenant(tenant);
     setShowTenants(false);
     setError(null);
     setEmail(tenant.businessEmail);
+    setPassword('password123');
   };
 
+  const fillDemo = (role: 'saas' | 'isp') => {
+    setError(null);
+    if (role === 'saas') {
+      setEmail('admin@ispsaas.com');
+      setPassword('password123');
+      setSelectedTenant(null);
+      setDemoFilled('SaaS Superadmin');
+    } else {
+      setEmail('admin@netfix.com');
+      setPassword('password123');
+      setDemoFilled('ISP Admin');
+    }
+    setTimeout(() => setDemoFilled(null), 3000);
+  };
+
+  if (isAuthenticated && user) {
+    return null;
+  }
+
   return (
-    <div className="min-h-screen flex bg-slate-950">
-      {/* Left panel - brand */}
-      <div className="hidden lg:flex lg:w-[48%] flex-col justify-between p-12 xl:p-16 relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(34,197,94,0.15),transparent)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#33415512_1px,transparent_1px),linear-gradient(to_bottom,#33415512_1px,transparent_1px)] bg-[size:3rem_3rem]" />
-        <div className="relative">
-          <span className="text-emerald-400 font-semibold text-sm tracking-wider uppercase">ISP SaaS</span>
-          <h1 className="mt-4 text-4xl xl:text-5xl font-bold text-white tracking-tight">
-            Billing & network management for modern ISPs
-          </h1>
-          <p className="mt-6 text-lg text-slate-400 max-w-md leading-relaxed">
-            Sign in to manage customers, billing, and network from one place.
-          </p>
-        </div>
-        <div className="relative flex flex-col gap-6">
-          {[
-            { label: 'Unified billing & invoicing', icon: 'M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z' },
-            { label: 'PPPoE & hotspot ready', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
-            { label: 'Multi-tenant ready', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
-          ].map((item, i) => (
-            <div key={i} className="flex items-center gap-4">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
-                </svg>
-              </div>
-              <span className="text-slate-300 font-medium">{item.label}</span>
+    <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col justify-between relative overflow-x-hidden select-none">
+      {/* Dynamic Background Glows */}
+      <div className="absolute top-0 left-0 -translate-x-1/4 -translate-y-1/4 w-[28rem] sm:w-[42rem] h-[28rem] sm:h-[42rem] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-0 right-0 translate-x-1/4 translate-y-1/4 w-[28rem] sm:w-[42rem] h-[28rem] sm:h-[42rem] bg-cyan-500/10 rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#33415510_1px,transparent_1px),linear-gradient(to_bottom,#33415510_1px,transparent_1px)] bg-[size:3.5rem_3.5rem] pointer-events-none" />
+
+      {/* Top Header Bar */}
+      <header className="relative z-20 w-full max-w-7xl mx-auto px-4 sm:px-8 py-4 sm:py-6 flex items-center justify-between">
+        {/* Brand Logo */}
+        <Link to="/login" className="flex items-center gap-3 group focus:outline-none">
+          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 shadow-lg shadow-emerald-500/20 group-hover:shadow-emerald-500/40 transition-shadow">
+            <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center">
+              <Activity className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-400 group-hover:scale-110 transition-transform" />
             </div>
-          ))}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xl sm:text-2xl font-black tracking-tight text-white font-sans">
+                Net<span className="text-emerald-400">Fix</span>
+              </span>
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                SaaS OS
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 hidden sm:block">ISP Billing & Network Automation</p>
+          </div>
+        </Link>
+
+        {/* Top Actions: System Status & Customer Portal Link */}
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/80 border border-slate-800 text-xs text-slate-300">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+            </span>
+            <span className="text-slate-400 font-medium">Nodes Online</span>
+          </div>
+
+          <Link
+            to="/customer/login"
+            className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 hover:border-slate-700 text-xs sm:text-sm font-medium text-slate-200 transition-all shadow-sm"
+          >
+            <Globe className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />
+            <span>Customer Portal</span>
+          </Link>
         </div>
-      </div>
+      </header>
 
-      {/* Right panel - form */}
-      <div className="flex-1 flex items-center justify-center p-6 sm:p-10 lg:p-12 bg-white dark:bg-slate-900">
-        <div className="w-full max-w-md">
-          {!showTenants ? (
-            <>
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3 }}
-                className="lg:hidden mb-10"
-              >
-                <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-sm tracking-wider uppercase">ISP SaaS</span>
-                <h1 className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">Sign in</h1>
-              </motion.div>
+      {/* Main Content Area */}
+      <main className="relative z-10 flex-1 flex items-center justify-center px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
+        <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 xl:gap-16 items-center">
+          
+          {/* Left Column (Desktop Showcase) */}
+          <div className="hidden lg:flex lg:col-span-6 xl:col-span-7 flex-col justify-center space-y-8 pr-4">
+            {/* Tagline Pill */}
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold uppercase tracking-wider self-start"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+              Next-Gen ISP Infrastructure & Billing
+            </motion.div>
 
-              <motion.div
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.35, delay: 0.05 }}
-              >
-              <div className="mb-8 hidden lg:block">
-                <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Welcome back</h2>
-                <p className="mt-1 text-slate-500 dark:text-slate-400">Sign in to your account to continue</p>
+            {/* Headline */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: 0.05 }}
+              className="space-y-4"
+            >
+              <h1 className="text-4xl xl:text-5xl font-black tracking-tight text-white leading-[1.15]">
+                Manage subscribers, routers & auto-billing in{' '}
+                <span className="bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400">
+                  one unified cloud.
+                </span>
+              </h1>
+              <p className="text-base xl:text-lg text-slate-400 max-w-xl leading-relaxed">
+                Automated MikroTik RouterOS 7.x sync, real-time EPON/GPON OLT telemetry, instant bKash/Nagad billing, and resilient multi-tenant data isolation.
+              </p>
+            </motion.div>
+
+            {/* Live Telemetry Preview Card */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.5, delay: 0.1 }}
+              className="rounded-3xl bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 p-6 shadow-2xl relative overflow-hidden"
+            >
+              <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-800/80">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                    <Server className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Live Core Node</h3>
+                    <p className="text-xs text-slate-400">Dhaka Central Gateway · MikroTik v7.14</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                  </span>
+                  <span className="text-xs font-mono text-emerald-400 font-semibold">Latency 4ms</span>
+                </div>
               </div>
 
-              {error && (
-                <div className="mb-6 p-4 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50">
-                  <p className="text-sm font-medium text-red-700 dark:text-red-300">{error}</p>
+              {/* 3 Metric Stats */}
+              <div className="grid grid-cols-3 gap-3 mb-5">
+                <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-800/60">
+                  <span className="text-[11px] font-medium text-slate-400">Active PPPoE</span>
+                  <p className="text-xl font-black text-white mt-0.5">14,820</p>
+                  <span className="text-[10px] text-emerald-400 font-medium">↑ 12% peak hour</span>
                 </div>
-              )}
+                <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-800/60">
+                  <span className="text-[11px] font-medium text-slate-400">Throughput</span>
+                  <p className="text-xl font-black text-cyan-400 mt-0.5">18.4 <span className="text-xs font-normal text-slate-400">Gbps</span></p>
+                  <span className="text-[10px] text-cyan-400 font-medium">Tx: 16.1G / Rx: 2.3G</span>
+                </div>
+                <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-800/60">
+                  <span className="text-[11px] font-medium text-slate-400">Optical Signal</span>
+                  <p className="text-xl font-black text-emerald-400 mt-0.5">99.8%</p>
+                  <span className="text-[10px] text-slate-400 font-medium">16 OLTs Nominal</span>
+                </div>
+              </div>
 
-              <form onSubmit={handleSubmit} className="space-y-5">
-                <div>
-                  <label htmlFor="email" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                    Email / Username / Phone
-                  </label>
-                  <input
-                    id="email"
-                    type="text"
-                    autoComplete="username"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full h-12 px-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:focus:ring-emerald-400 focus:border-emerald-500 dark:focus:border-emerald-400 transition-colors"
-                    placeholder="you@example.com / johndoe / 017xxxxxxxx"
-                    disabled={isLoading}
-                  />
+              {/* 4 Feature Badges */}
+              <div className="grid grid-cols-2 gap-2.5 text-xs text-slate-300">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>MikroTik Queue & Secret Sync</span>
                 </div>
-                <div>
-                  <label htmlFor="password" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                    Password
-                  </label>
-                  <input
-                    id="password"
-                    type="password"
-                    autoComplete="current-password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full h-12 px-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:focus:ring-emerald-400 focus:border-emerald-500 dark:focus:border-emerald-400 transition-colors"
-                    placeholder="••••••••"
-                    disabled={isLoading}
-                  />
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>EPON / GPON Optical Telemetry</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>bKash / Nagad Instant Invoicing</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Full Multi-Tenant Isolation</span>
+                </div>
+              </div>
+            </motion.div>
+
+            {/* Trust Indicator */}
+            <div className="flex items-center gap-4 text-xs text-slate-400 pt-2">
+              <div className="flex -space-x-2">
+                {['#10b981', '#06b6d4', '#6366f1', '#f59e0b'].map((color, i) => (
+                  <div
+                    key={i}
+                    style={{ backgroundColor: color }}
+                    className="w-7 h-7 rounded-full border-2 border-slate-950 flex items-center justify-center text-[10px] font-bold text-white shadow"
+                  >
+                    {['S', 'N', 'D', 'B'][i]}
+                  </div>
+                ))}
+              </div>
+              <p>
+                Trusted by <strong className="text-slate-200">120+ ISPs</strong> across Bangladesh managing over 250,000+ subscriber lines.
+              </p>
+            </div>
+          </div>
+
+          {/* Right Column (Mobile-First Login Container) */}
+          <div className="w-full lg:col-span-6 xl:col-span-5 max-w-md mx-auto">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+              className="w-full rounded-3xl bg-slate-900/80 backdrop-blur-2xl border border-slate-800/90 shadow-2xl shadow-black/80 p-6 sm:p-8 relative overflow-hidden"
+            >
+              {/* Glowing Top Accent Border */}
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500" />
+
+              {!showTenants ? (
+                <>
+                  {/* Card Header */}
+                  <div className="mb-6">
+                    <div className="flex items-center justify-between">
+                      <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-slate-800/80 border border-slate-700/60 text-slate-300 text-xs font-semibold">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Staff & Administrator</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowHelpModal(true)}
+                        className="text-slate-400 hover:text-slate-200 transition-colors p-1"
+                        title="Login Help"
+                      >
+                        <HelpCircle className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <h2 className="text-2xl sm:text-3xl font-bold text-white mt-3 tracking-tight">
+                      Sign in
+                    </h2>
+                    <p className="text-sm text-slate-400 mt-1">
+                      Enter your credentials to access your ISP dashboard.
+                    </p>
+                  </div>
+
+                  {/* 1-Tap Quick Demo Credentials */}
+                  <div className="mb-5 p-3 rounded-2xl bg-slate-950/70 border border-slate-800/80">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Zap className="w-3 h-3 text-amber-400" /> Quick Demo Fill:
+                      </span>
+                      {demoFilled && (
+                        <span className="text-[10px] font-semibold text-emerald-400 flex items-center gap-1 animate-pulse">
+                          <CheckCircle2 className="w-3 h-3" /> Filled {demoFilled}!
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => fillDemo('saas')}
+                        className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-700 border border-slate-800 hover:border-slate-700 text-xs font-medium text-slate-200 transition-all text-center flex items-center justify-center gap-1.5"
+                      >
+                        <span>👑</span>
+                        <span>SaaS Admin</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => fillDemo('isp')}
+                        className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-700 border border-slate-800 hover:border-slate-700 text-xs font-medium text-slate-200 transition-all text-center flex items-center justify-center gap-1.5"
+                      >
+                        <span>⚡</span>
+                        <span>ISP Admin</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Error Notification Alert */}
+                  <AnimatePresence>
+                    {error && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="mb-5 overflow-hidden"
+                      >
+                        <div className="p-3.5 rounded-2xl bg-red-950/50 border border-red-800/60 text-red-300 text-xs sm:text-sm flex items-start gap-2.5">
+                          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                          <div className="flex-1 font-medium">{error}</div>
+                          <button
+                            type="button"
+                            onClick={() => setError(null)}
+                            className="text-red-400 hover:text-red-200 shrink-0"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Selected Tenant Active Banner */}
+                  {selectedTenant && (
+                    <div className="mb-5 p-3 rounded-2xl bg-emerald-950/40 border border-emerald-800/60 flex items-center justify-between">
+                      <div className="flex items-center gap-2.5 overflow-hidden">
+                        <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center text-xs shrink-0">
+                          {selectedTenant.tenantName.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-white truncate">
+                            Tenant: {selectedTenant.tenantName}
+                          </p>
+                          <p className="text-[10px] text-emerald-400 font-mono truncate">
+                            {selectedTenant.tenantCode}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedTenant(null);
+                          setEmail('');
+                        }}
+                        className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded-lg hover:bg-slate-800 transition-colors"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Login Form */}
+                  <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-4.5">
+                    {/* Email / Username Input */}
+                    <div>
+                      <label
+                        htmlFor="email"
+                        className="block text-xs sm:text-sm font-semibold text-slate-300 mb-1.5"
+                      >
+                        Email / Username / Mobile
+                      </label>
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                          <Mail className="w-4 h-4" />
+                        </div>
+                        <input
+                          id="email"
+                          type="text"
+                          autoComplete="username"
+                          required
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="admin@netfix.com or username"
+                          disabled={isLoading}
+                          className="w-full h-12 pl-10 pr-10 rounded-2xl bg-slate-950/80 border border-slate-800 text-slate-100 placeholder-slate-500 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500 transition-all"
+                        />
+                        {email && (
+                          <button
+                            type="button"
+                            onClick={() => setEmail('')}
+                            className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Password Input */}
+                    <div>
+                      <label
+                        htmlFor="password"
+                        className="block text-xs sm:text-sm font-semibold text-slate-300 mb-1.5"
+                      >
+                        Password
+                      </label>
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                          <Lock className="w-4 h-4" />
+                        </div>
+                        <input
+                          id="password"
+                          type={showPassword ? 'text' : 'password'}
+                          autoComplete="current-password"
+                          required
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder="••••••••••••"
+                          disabled={isLoading}
+                          className="w-full h-12 pl-10 pr-11 rounded-2xl bg-slate-950/80 border border-slate-800 text-slate-100 placeholder-slate-500 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500 transition-all font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-200 focus:outline-none"
+                          tabIndex={-1}
+                          title={showPassword ? 'Hide password' : 'Show password'}
+                        >
+                          {showPassword ? (
+                            <EyeOff className="w-4 h-4" />
+                          ) : (
+                            <Eye className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Remember Me & Help Trigger */}
+                    <div className="flex items-center justify-between pt-1">
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={rememberMe}
+                          onChange={(e) => setRememberMe(e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-slate-900"
+                        />
+                        <span className="text-xs text-slate-400 hover:text-slate-300 font-medium">
+                          Remember this device
+                        </span>
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowHelpModal(true)}
+                        className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold"
+                      >
+                        Need help?
+                      </button>
+                    </div>
+
+                    {/* Submit Button */}
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="w-full h-12 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-white font-bold text-base shadow-lg shadow-emerald-500/25 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-2"
+                    >
+                      {isLoading ? (
+                        <>
+                          <svg className="animate-spin h-5 w-5 text-white" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          <span>Authenticating...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Sign In to Dashboard</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+                  </form>
+
+                  {/* Multi-Tenant Switcher Trigger (if tenants loaded) */}
+                  {tenants.length > 0 && (
+                    <div className="mt-5 pt-4 border-t border-slate-800/80 text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowTenants(true);
+                          setError(null);
+                        }}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-emerald-400 transition-colors"
+                      >
+                        <Building2 className="w-3.5 h-3.5" />
+                        <span>Sign in to specific Tenant / ISP ({tenants.length}) →</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Customer Portal Callout Box */}
+                  <div className="mt-6 pt-5 border-t border-slate-800/80">
+                    <Link
+                      to="/customer/login"
+                      className="group p-3 rounded-2xl bg-slate-950/60 hover:bg-slate-950 border border-slate-800/80 hover:border-cyan-500/40 flex items-center justify-between transition-all"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                          <Globe className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                        </div>
+                        <div className="text-left">
+                          <p className="text-xs font-bold text-white group-hover:text-cyan-300 transition-colors">
+                            Broadband Customer?
+                          </p>
+                          <p className="text-[11px] text-slate-400">
+                            Pay bills, check validity & view usage
+                          </p>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-cyan-400 group-hover:translate-x-0.5 transition-all" />
+                    </Link>
+                  </div>
+                </>
+              ) : (
+                /* Multi-Tenant Selection Mode */
+                <motion.div
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="space-y-4"
+                >
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowTenants(false);
+                        setError(null);
+                      }}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-white transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                      <span>Back to Login</span>
+                    </button>
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      {tenants.length} Tenants Available
+                    </span>
+                  </div>
+
+                  <div>
+                    <h3 className="text-xl font-bold text-white">Select Organization</h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Choose an ISP tenant to authenticate as SaaS or Tenant Admin
+                    </p>
+                  </div>
+
+                  {/* Tenant Search Bar */}
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                      <Search className="w-4 h-4" />
+                    </div>
+                    <input
+                      type="text"
+                      value={tenantSearch}
+                      onChange={(e) => setTenantSearch(e.target.value)}
+                      placeholder="Search by ISP name or code..."
+                      className="w-full h-10 pl-9 pr-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  {/* Tenants List */}
+                  <div className="max-h-[300px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                    {isLoadingTenants ? (
+                      <div className="py-8 text-center">
+                        <svg className="animate-spin h-6 w-6 text-emerald-500 mx-auto" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        <p className="text-xs text-slate-400 mt-2">Loading tenants...</p>
+                      </div>
+                    ) : filteredTenants.length === 0 ? (
+                      <div className="py-8 text-center text-xs text-slate-500">
+                        No tenants match your search.
+                      </div>
+                    ) : (
+                      filteredTenants.map((t) => (
+                        <button
+                          key={t.tenantId}
+                          type="button"
+                          onClick={() => handleTenantLogin(t)}
+                          className="w-full p-3 rounded-2xl bg-slate-950/70 hover:bg-slate-950 border border-slate-800 hover:border-emerald-500/50 text-left transition-all flex items-center justify-between group"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500/20 to-teal-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-sm shrink-0">
+                              {t.tenantName.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <h4 className="text-xs font-bold text-white group-hover:text-emerald-300 transition-colors truncate">
+                                {t.tenantName}
+                              </h4>
+                              <p className="text-[11px] text-slate-400 font-mono truncate">
+                                {t.tenantCode} · {t.businessEmail}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span
+                              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                t.status === 'active'
+                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                              }`}
+                            >
+                              {t.status}
+                            </span>
+                            <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-emerald-400 transition-colors" />
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </motion.div>
+
+            {/* Mobile Footer Meta */}
+            <div className="mt-6 text-center text-xs text-slate-500 flex items-center justify-center gap-3">
+              <span className="flex items-center gap-1">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" /> 256-bit SSL Protected
+              </span>
+              <span>·</span>
+              <span>Multi-Tenant RBAC</span>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      {/* Desktop & Mobile Bottom Footer */}
+      <footer className="relative z-20 w-full max-w-7xl mx-auto px-4 sm:px-8 py-4 sm:py-6 text-xs text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-slate-900">
+        <div>
+          © 2026 <span className="text-slate-300 font-semibold">NetFix</span> Technologies. All rights reserved.
+        </div>
+        <div className="flex items-center gap-4 text-[11px]">
+          <span className="text-slate-400">RouterOS v7.x Ready</span>
+          <span>·</span>
+          <span className="text-slate-400">EPON/GPON Sync</span>
+          <span>·</span>
+          <button
+            type="button"
+            onClick={() => setShowHelpModal(true)}
+            className="text-emerald-400 hover:underline"
+          >
+            System Help
+          </button>
+        </div>
+      </footer>
+
+      {/* Login Help & Support Modal */}
+      <AnimatePresence>
+        {showHelpModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                    <HelpCircle className="w-4 h-4" />
+                  </div>
+                  <h3 className="font-bold text-white text-base">NetFix Access Guide</h3>
                 </div>
                 <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-full h-12 mt-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
+                  type="button"
+                  onClick={() => setShowHelpModal(false)}
+                  className="text-slate-400 hover:text-white p-1 rounded-lg"
                 >
-                  {isLoading ? (
-                    <>
-                      <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                      Signing in...
-                    </>
-                  ) : (
-                    'Sign in'
-                  )}
+                  <X className="w-5 h-5" />
                 </button>
-              </form>
-
-              <p className="mt-6 text-center">
-                <Link
-                  to="/customer/login"
-                  className="text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300"
-                >
-                  Customer login →
-                </Link>
-              </p>
-
-              {tenants.length > 0 && (
-                <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-700">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowTenants(true);
-                      setError(null);
-                      setEmail('');
-                      setPassword('');
-                    }}
-                    className="w-full text-center text-sm font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300"
-                  >
-                    Login as Tenant (SaaS Admin) →
-                  </button>
-                </div>
-              )}
-
-              {selectedTenant && (
-                <div className="mt-4 p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50">
-                  <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">
-                    Logging in as: {selectedTenant.tenantName}
-                  </p>
-                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">Use tenant admin credentials</p>
-                  <button
-                    type="button"
-                    onClick={() => { setSelectedTenant(null); setEmail(''); }}
-                    className="mt-2 text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:underline"
-                  >
-                    Change tenant
-                  </button>
-                </div>
-              )}
-
-              <p className="mt-8 text-center text-xs text-slate-400 dark:text-slate-500">
-                Enterprise billing & network management
-              </p>
-            </motion.div>
-          </>
-          ) : (
-            /* Tenant selection */
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-6"
-            >
-              <button
-                onClick={() => { setShowTenants(false); setError(null); }}
-                className="flex items-center gap-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-medium text-sm"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-                Back to login
-              </button>
-              <div>
-                <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Select tenant</h2>
-                <p className="mt-1 text-slate-500 dark:text-slate-400 text-sm">Choose a tenant to login as (SaaS Admin)</p>
               </div>
-              {error && (
-                <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50">
-                  <p className="text-sm font-medium text-red-700 dark:text-red-300">{error}</p>
+
+              <div className="py-4 space-y-4 text-xs text-slate-300">
+                <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
+                  <h4 className="font-bold text-emerald-400 mb-1">Standard Admin Accounts:</h4>
+                  <div className="space-y-1.5 font-mono text-[11px]">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">SaaS SuperAdmin:</span>
+                      <span className="text-slate-200">admin@ispsaas.com / password123</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">ISP Tenant Admin:</span>
+                      <span className="text-slate-200">admin@netfix.com / password123</span>
+                    </div>
+                  </div>
                 </div>
-              )}
-              {isLoadingTenants ? (
-                <div className="flex justify-center py-12">
-                  <svg className="animate-spin h-10 w-10 text-emerald-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
+
+                <div className="space-y-2">
+                  <h4 className="font-semibold text-white">Forgot Password or Blocked?</h4>
+                  <p className="text-slate-400 leading-relaxed">
+                    If your account is locked or you forgot your credentials, contact your ISP Super-Administrator or reset the password hash via the backend database console.
+                  </p>
                 </div>
-              ) : tenants.length === 0 ? (
-                <div className="text-center py-12">
-                  <p className="text-slate-500 dark:text-slate-400 font-medium">No tenants available</p>
+
+                <div className="p-3 rounded-2xl bg-cyan-950/30 border border-cyan-800/40 text-cyan-300">
+                  <strong>Looking for your broadband bill?</strong> Use the{' '}
+                  <Link to="/customer/login" className="underline font-bold text-white">
+                    Customer Portal
+                  </Link>{' '}
+                  with your Customer ID or registered mobile number.
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {tenants.map((tenant) => (
-                    <button
-                      key={tenant.tenantId}
-                      onClick={() => handleTenantLogin(tenant)}
-                      className="p-5 rounded-xl border-2 border-slate-200 dark:border-slate-700 hover:border-emerald-400 dark:hover:border-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 text-left transition-all group"
-                    >
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 font-bold flex items-center justify-center text-sm">
-                          {tenant.tenantName.charAt(0).toUpperCase()}
-                        </span>
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                          tenant.status === 'active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300' :
-                          tenant.status === 'trial' ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300' :
-                          'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
-                        }`}>
-                          {tenant.status}
-                        </span>
-                      </div>
-                      <h3 className="font-semibold text-slate-900 dark:text-white group-hover:text-emerald-700 dark:group-hover:text-emerald-400">
-                        {tenant.tenantName}
-                      </h3>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{tenant.tenantCode} · {tenant.businessEmail}</p>
-                      <span className="inline-flex items-center gap-1 mt-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">
-                        Login <svg className="w-4 h-4 group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowHelpModal(false)}
+                  className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs transition-colors"
+                >
+                  Got It
+                </button>
+              </div>
             </motion.div>
-          )}
-        </div>
-      </div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
