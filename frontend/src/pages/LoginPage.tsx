@@ -9,7 +9,10 @@ import {
   ArrowRight,
   CheckCircle2,
   Sparkles,
-  Server,
+  Router,
+  Receipt,
+  Network,
+  Users,
   Activity,
   Building2,
   ChevronRight,
@@ -194,16 +197,8 @@ export default function LoginPage() {
           </div>
         </Link>
 
-        {/* Top Actions: System Status & Customer Portal Link */}
+        {/* Top Actions: Customer Portal Link */}
         <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/80 border border-slate-800 text-xs text-slate-300">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-            </span>
-            <span className="text-slate-400 font-medium">Nodes Online</span>
-          </div>
-
           <Link
             to="/customer/login"
             className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 hover:border-slate-700 text-xs sm:text-sm font-medium text-slate-200 transition-all shadow-sm"
@@ -249,88 +244,65 @@ export default function LoginPage() {
               </p>
             </motion.div>
 
-            {/* Live Telemetry Preview Card */}
+            {/* Feature Capabilities Grid (Replacing mock telemetry card) */}
             <motion.div
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.1 }}
-              className="rounded-3xl bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 p-6 shadow-2xl relative overflow-hidden"
+              className="grid grid-cols-1 sm:grid-cols-2 gap-4"
             >
-              <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-800/80">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                    <Server className="w-4 h-4" />
+              {[
+                {
+                  icon: Router,
+                  color: 'from-emerald-500/20 to-teal-500/10 text-emerald-400 border-emerald-500/30',
+                  title: 'MikroTik RouterOS 7.x',
+                  desc: 'Auto PPPoE secret sync, speed limit queues, and instant expire lock.',
+                },
+                {
+                  icon: Receipt,
+                  color: 'from-cyan-500/20 to-blue-500/10 text-cyan-400 border-cyan-500/30',
+                  title: 'Automated Billing & MFS',
+                  desc: 'Monthly invoice cycles, SMS reminders & bKash / Nagad online auto-recharge.',
+                },
+                {
+                  icon: Network,
+                  color: 'from-indigo-500/20 to-purple-500/10 text-indigo-400 border-indigo-500/30',
+                  title: 'EPON & GPON OLT Sync',
+                  desc: 'Real-time PON optical metrics, ONU auto-discovery, and power alarms.',
+                },
+                {
+                  icon: Users,
+                  color: 'from-amber-500/20 to-orange-500/10 text-amber-400 border-amber-500/30',
+                  title: 'Resellers & Multi-Tenant',
+                  desc: 'Complete sub-reseller commissions, isolated tenant spaces & custom RBAC.',
+                },
+              ].map((feat, i) => (
+                <div
+                  key={i}
+                  className="p-4 rounded-2xl bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 hover:border-slate-700 transition-all flex flex-col justify-between"
+                >
+                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-tr ${feat.color} border flex items-center justify-center mb-3`}>
+                    <feat.icon className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-white">Live Core Node</h3>
-                    <p className="text-xs text-slate-400">Dhaka Central Gateway · MikroTik v7.14</p>
+                    <h3 className="text-sm font-bold text-white mb-1">{feat.title}</h3>
+                    <p className="text-xs text-slate-400 leading-relaxed">{feat.desc}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                  </span>
-                  <span className="text-xs font-mono text-emerald-400 font-semibold">Latency 4ms</span>
-                </div>
-              </div>
-
-              {/* 3 Metric Stats */}
-              <div className="grid grid-cols-3 gap-3 mb-5">
-                <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-800/60">
-                  <span className="text-[11px] font-medium text-slate-400">Active PPPoE</span>
-                  <p className="text-xl font-black text-white mt-0.5">14,820</p>
-                  <span className="text-[10px] text-emerald-400 font-medium">↑ 12% peak hour</span>
-                </div>
-                <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-800/60">
-                  <span className="text-[11px] font-medium text-slate-400">Throughput</span>
-                  <p className="text-xl font-black text-cyan-400 mt-0.5">18.4 <span className="text-xs font-normal text-slate-400">Gbps</span></p>
-                  <span className="text-[10px] text-cyan-400 font-medium">Tx: 16.1G / Rx: 2.3G</span>
-                </div>
-                <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-800/60">
-                  <span className="text-[11px] font-medium text-slate-400">Optical Signal</span>
-                  <p className="text-xl font-black text-emerald-400 mt-0.5">99.8%</p>
-                  <span className="text-[10px] text-slate-400 font-medium">16 OLTs Nominal</span>
-                </div>
-              </div>
-
-              {/* 4 Feature Badges */}
-              <div className="grid grid-cols-2 gap-2.5 text-xs text-slate-300">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>MikroTik Queue & Secret Sync</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>EPON / GPON Optical Telemetry</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>bKash / Nagad Instant Invoicing</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>Full Multi-Tenant Isolation</span>
-                </div>
-              </div>
+              ))}
             </motion.div>
 
-            {/* Trust Indicator */}
-            <div className="flex items-center gap-4 text-xs text-slate-400 pt-2">
-              <div className="flex -space-x-2">
-                {['#10b981', '#06b6d4', '#6366f1', '#f59e0b'].map((color, i) => (
-                  <div
-                    key={i}
-                    style={{ backgroundColor: color }}
-                    className="w-7 h-7 rounded-full border-2 border-slate-950 flex items-center justify-center text-[10px] font-bold text-white shadow"
-                  >
-                    {['S', 'N', 'D', 'B'][i]}
-                  </div>
-                ))}
-              </div>
-              <p>
-                Trusted by <strong className="text-slate-200">120+ ISPs</strong> across Bangladesh managing over 250,000+ subscriber lines.
-              </p>
+            {/* Platform Badges */}
+            <div className="flex flex-wrap items-center gap-2.5 pt-1 text-xs text-slate-400">
+              <span className="px-3 py-1.5 rounded-full bg-slate-900/70 border border-slate-800 text-slate-300 font-medium flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> Enterprise Multi-Tenant
+              </span>
+              <span className="px-3 py-1.5 rounded-full bg-slate-900/70 border border-slate-800 text-slate-300 font-medium flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-cyan-400" /> High Availability
+              </span>
+              <span className="px-3 py-1.5 rounded-full bg-slate-900/70 border border-slate-800 text-slate-300 font-medium flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5 text-indigo-400" /> 24/7 Automation
+              </span>
             </div>
           </div>
 
