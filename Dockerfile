@@ -16,9 +16,18 @@ RUN npm run build
 # Stage 2: Production Latest Patched PHP 8.3 + Nginx Web Server
 FROM php:8.3-fpm-alpine
 
-# Install Nginx, supervisor, curl and required PHP extensions
-RUN apk add --no-cache nginx supervisor curl tzdata \
-    && docker-php-ext-install pdo pdo_mysql bcmath sockets
+# Install Nginx, supervisor, curl, tzdata, and compile required PHP extensions
+RUN apk add --no-cache \
+        nginx \
+        supervisor \
+        curl \
+        tzdata \
+        bash \
+        linux-headers \
+    && apk add --no-cache --virtual .build-deps \
+        $PHPIZE_DEPS \
+    && docker-php-ext-install -j$(nproc) pdo_mysql bcmath sockets \
+    && apk del .build-deps
 
 WORKDIR /var/www/html
 
