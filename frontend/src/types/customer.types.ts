@@ -121,6 +121,7 @@ export interface CustomerDetailResponse {
     onu: {
       olt: string | null;
       onuMac: string | null;
+      onuVendor?: string | null;
       routerMac?: string | null;
       ponId: string | null;
       vlan: string | null;

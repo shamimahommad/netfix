@@ -288,6 +288,29 @@ class CustomersController {
             }
         } catch (\Throwable $e) {}
 
+        // Resolve Device / Router Vendor via MACVendors.com API with local DB caching
+        require_once __DIR__ . '/../lib/MacVendorService.php';
+        $deviceVendor = !empty($net['device_vendor']) ? $net['device_vendor'] : null;
+        $vendorSource = !empty($net['vendor_source']) ? $net['vendor_source'] : 'macvendors.com';
+        $effectiveMac = $net['mac_address'] ?? $targetMac ?: ($onuData['routerMac'] ?? null);
+
+        if ((empty($deviceVendor) || $deviceVendor === 'Unknown') && !empty($effectiveMac)) {
+            $resolved = MacVendorService::resolveVendor($effectiveMac, $db);
+            if ($resolved && $resolved !== 'Unknown') {
+                $deviceVendor = $resolved;
+                $vendorSource = 'macvendors.com';
+                try {
+                    $db->prepare("UPDATE customer_network_accounts SET device_vendor = :dv, vendor_source = :vs WHERE customer_id = :cid")
+                       ->execute(['dv' => $deviceVendor, 'vs' => $vendorSource, 'cid' => $realCid]);
+                } catch (\Throwable $e) {}
+            }
+        }
+
+        // Also resolve physical ONU hardware vendor if ONU MAC is present
+        if (!empty($onuData['onuMac'])) {
+            $onuData['onuVendor'] = MacVendorService::resolveVendor($onuData['onuMac'], $db);
+        }
+
         Response::json([
             'success' => true,
             'data' => [
@@ -337,10 +360,10 @@ class CustomersController {
                     'username' => $net['username'] ?? '',
                     'password' => $net['password'] ?? '',
                     'ipAddress' => $net['current_ip'] ?? $net['remote_address'] ?? null,
-                    'macAddress' => $net['mac_address'] ?? $targetMac ?: null,
-                    'activeMacAddress' => $net['mac_address'] ?? $targetMac ?: null,
-                    'deviceVendor' => null,
-                    'vendorSource' => null,
+                    'macAddress' => $effectiveMac,
+                    'activeMacAddress' => $effectiveMac,
+                    'deviceVendor' => $deviceVendor ?: ($effectiveMac ? 'Unknown' : '—'),
+                    'vendorSource' => $vendorSource,
                     'uptime' => (!empty($net['is_online']) && !empty($net['uptime_seconds'])) ? (int)$net['uptime_seconds'] : 0,
                     'onlineStatus' => (bool)($net['is_online'] ?? false),
                     'lastLogoutTime' => $net['last_offline_at'] ?? null,

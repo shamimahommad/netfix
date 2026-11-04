@@ -1500,13 +1500,19 @@ export default function CustomerDetailPage() {
               <InfoRow label="Username" value={network.username || '—'} />
               <InfoRow label="Password" value={network.password || '—'} />
               <InfoRow label="Save Mac" value={network.macAddress || '—'} />
-              {network.macAddress && (
-                <InfoRow 
-                  label="Device/Vendor" 
-                  value={network.deviceVendor || 'Unknown'} 
-                />
-              )}
-              {!network.macAddress && <InfoRow label="Device/Vendor" value="—" />}
+              <InfoRow 
+                label="Device/Vendor" 
+                value={
+                  network.deviceVendor && network.deviceVendor !== '—' && network.deviceVendor !== 'Unknown' ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-semibold text-xs border border-indigo-200 dark:border-indigo-800/60 shadow-2xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 inline-block" />
+                      {network.deviceVendor}
+                    </span>
+                  ) : (
+                    network.deviceVendor || (network.macAddress ? 'Unknown' : '—')
+                  )
+                } 
+              />
               <InfoRow label="Active Mac" value={network.activeMacAddress || '—'} />
               
               {/* Grouped Status Info - Compact */}
@@ -1711,20 +1717,27 @@ export default function CustomerDetailPage() {
               label="ONU MAC" 
               value={
                 onu?.onuMac ? (
-                  <div className="flex items-center gap-1.5 font-mono">
-                    <span>{onu.onuMac}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleCopy(onu.onuMac!)}
-                      className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
-                      title="Copy ONU MAC"
-                    >
-                      {copiedMac === onu.onuMac ? (
-                        <CheckIcon className="w-3.5 h-3.5 text-emerald-500" />
-                      ) : (
-                        <CopyIcon className="w-3.5 h-3.5" />
-                      )}
-                    </button>
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex items-center gap-1.5 font-mono">
+                      <span>{onu.onuMac}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(onu.onuMac!)}
+                        className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
+                        title="Copy ONU MAC"
+                      >
+                        {copiedMac === onu.onuMac ? (
+                          <CheckIcon className="w-3.5 h-3.5 text-emerald-500" />
+                        ) : (
+                          <CopyIcon className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
+                    {onu.onuVendor && onu.onuVendor !== 'Unknown' && (
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                        {onu.onuVendor}
+                      </span>
+                    )}
                   </div>
                 ) : '—'
               } 
@@ -1733,20 +1746,28 @@ export default function CustomerDetailPage() {
               label="Router MAC" 
               value={
                 (onu?.routerMac || network.macAddress || network.activeMacAddress) ? (
-                  <div className="flex items-center gap-1.5 font-mono font-semibold text-slate-800 dark:text-slate-200">
-                    <span>{onu?.routerMac || network.macAddress || network.activeMacAddress}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleCopy((onu?.routerMac || network.macAddress || network.activeMacAddress)!)}
-                      className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
-                      title="Copy Router MAC"
-                    >
-                      {copiedMac === (onu?.routerMac || network.macAddress || network.activeMacAddress) ? (
-                        <CheckIcon className="w-3.5 h-3.5 text-emerald-500" />
-                      ) : (
-                        <CopyIcon className="w-3.5 h-3.5" />
-                      )}
-                    </button>
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex items-center gap-1.5 font-mono font-semibold text-slate-800 dark:text-slate-200">
+                      <span>{onu?.routerMac || network.macAddress || network.activeMacAddress}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy((onu?.routerMac || network.macAddress || network.activeMacAddress)!)}
+                        className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
+                        title="Copy Router MAC"
+                      >
+                        {copiedMac === (onu?.routerMac || network.macAddress || network.activeMacAddress) ? (
+                          <CheckIcon className="w-3.5 h-3.5 text-emerald-500" />
+                        ) : (
+                          <CopyIcon className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
+                    {network.deviceVendor && network.deviceVendor !== '—' && network.deviceVendor !== 'Unknown' && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-600 dark:text-indigo-400">
+                        <span className="w-1 h-1 rounded-full bg-indigo-500 inline-block" />
+                        {network.deviceVendor}
+                      </span>
+                    )}
                   </div>
                 ) : '—'
               } 
