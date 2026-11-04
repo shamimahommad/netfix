@@ -218,43 +218,75 @@ class CustomersController {
 
         $metadata = json_decode($customer['metadata'] ?? '{}', true) ?: [];
 
-        // Resolve ONU Information by matching Customer's MAC with stored OLT Connected ONUs
+        // Resolve ONU Information by matching Customer's Router MAC or PPPoE Username with stored OLT Connected ONUs (Option 2)
         $onuData = [
             'olt' => null,
             'onuMac' => null,
+            'routerMac' => null,
             'ponId' => null,
             'vlan' => null,
             'power' => null,
+            'rxPower' => null,
             'distance' => null,
+            'status' => null,
             'lastUpdate' => null,
         ];
 
         $targetMac = !empty($net['mac_address']) ? trim($net['mac_address']) : '';
+        $targetUser = !empty($net['username']) ? trim($net['username']) : '';
 
-        // Match MAC with fast stored OLT connected ONUs (instant local SQL match, 0 network lag)
-        if (!empty($targetMac)) {
-            try {
-                $cleanMac = strtoupper(str_replace(['-', '.', ' '], ':', trim($targetMac)));
-                $onuStmt = $db->prepare("SELECT o.*, nd.device_name 
-                    FROM olt_onus o 
-                    JOIN network_devices nd ON nd.network_device_id = o.network_device_id 
-                    WHERE (o.tenant_id = :tid OR o.tenant_id = :ctid) AND o.mac_address = :mac 
-                    LIMIT 1");
-                $onuStmt->execute(['tid' => $tenantId, 'ctid' => $customerTenantId, 'mac' => $cleanMac]);
+        try {
+            $cleanMac = !empty($targetMac) ? strtoupper(str_replace(['-', '.', ' '], ':', trim($targetMac))) : '';
+            
+            $sql = "SELECT o.*, nd.device_name 
+                FROM olt_onus o 
+                JOIN network_devices nd ON nd.network_device_id = o.network_device_id 
+                WHERE (o.tenant_id = :tid OR o.tenant_id = :ctid) ";
+            
+            $clauses = [];
+            $params = ['tid' => $tenantId, 'ctid' => $customerTenantId];
+
+            if ($cleanMac) {
+                $clauses[] = "(o.router_mac = :cleanMac OR o.mac_address = :cleanMac)";
+                $params['cleanMac'] = $cleanMac;
+            }
+            if ($targetUser) {
+                $clauses[] = "(o.pppoe_username IS NOT NULL AND LOWER(o.pppoe_username) = LOWER(:uName))";
+                $params['uName'] = $targetUser;
+            }
+
+            if (!empty($clauses)) {
+                $sql .= " AND (" . implode(" OR ", $clauses) . ") LIMIT 1";
+                $onuStmt = $db->prepare($sql);
+                $onuStmt->execute($params);
                 $matchedOnu = $onuStmt->fetch();
+
                 if ($matchedOnu) {
+                    $onuIdFormatted = str_contains($matchedOnu['onu_id'], ':') ? explode(':', $matchedOnu['onu_id'])[1] : $matchedOnu['onu_id'];
                     $onuData = [
                         'olt' => $matchedOnu['device_name'],
                         'onuMac' => $matchedOnu['mac_address'],
-                        'ponId' => $matchedOnu['pon_port_name'] . ' (' . $matchedOnu['onu_id'] . ')',
-                        'vlan' => '100',
-                        'power' => $matchedOnu['rx_power_dbm'] . ' dBm',
-                        'distance' => 'Online',
+                        'routerMac' => $matchedOnu['router_mac'],
+                        'ponId' => $matchedOnu['pon_port_name'] . ' (#' . $onuIdFormatted . ')',
+                        'vlan' => !empty($matchedOnu['vlan_id']) ? (string)$matchedOnu['vlan_id'] : '—',
+                        'power' => $matchedOnu['rx_power_dbm'] !== null ? $matchedOnu['rx_power_dbm'] . ' dBm' : '—',
+                        'rxPower' => $matchedOnu['rx_power_dbm'] !== null ? (float)$matchedOnu['rx_power_dbm'] : null,
+                        'status' => $matchedOnu['status'],
+                        'distance' => ucfirst($matchedOnu['status']),
                         'lastUpdate' => $matchedOnu['last_sync_at'],
                     ];
+
+                    // If customer network account was missing router_mac, backfill it
+                    if (empty($net['mac_address']) && !empty($matchedOnu['router_mac'])) {
+                        $net['mac_address'] = $matchedOnu['router_mac'];
+                        try {
+                            $db->prepare("UPDATE customer_network_accounts SET mac_address = :rmac WHERE customer_id = :cid")
+                               ->execute(['rmac' => $matchedOnu['router_mac'], 'cid' => $realCid]);
+                        } catch (\Throwable $e) {}
+                    }
                 }
-            } catch (\Throwable $e) {}
-        }
+            }
+        } catch (\Throwable $e) {}
 
         Response::json([
             'success' => true,

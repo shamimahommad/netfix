@@ -121,6 +121,22 @@ function XMarkIcon({ className = 'w-4 h-4' }: { className?: string }) {
   );
 }
 
+function CopyIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+    </svg>
+  );
+}
+
+function CheckIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+    </svg>
+  );
+}
+
 function ArrowLeftIcon({ className = 'w-4 h-4' }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -349,6 +365,14 @@ export default function CustomerDetailPage() {
   const [syncResult, setSyncResult] = useState<{ username?: string; mikrotikDetailLines?: string[]; message?: string; error?: string; secretExists?: boolean } | null>(null);
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [slowLoad, setSlowLoad] = useState(false);
+  const [copiedMac, setCopiedMac] = useState<string | null>(null);
+
+  const handleCopy = (text: string) => {
+    if (!text || text === '—') return;
+    navigator.clipboard.writeText(text);
+    setCopiedMac(text);
+    setTimeout(() => setCopiedMac(null), 2000);
+  };
 
   useEffect(() => {
     if (id) {
@@ -1525,9 +1549,25 @@ export default function CustomerDetailPage() {
                     </div>
                   </>
                 )}
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
                   <p className="text-sm text-gray-600 dark:text-gray-400 w-20 font-medium">MAC:</p>
-                  <p className="text-base font-semibold text-slate-900 dark:text-slate-100 font-mono">{network.activeMacAddress || '—'}</p>
+                  <p className="text-base font-semibold text-slate-900 dark:text-slate-100 font-mono flex items-center gap-1.5">
+                    <span>{network.activeMacAddress || network.macAddress || onu?.routerMac || '—'}</span>
+                    {(network.activeMacAddress || network.macAddress || onu?.routerMac) && (
+                      <button
+                        type="button"
+                        onClick={() => handleCopy((network.activeMacAddress || network.macAddress || onu?.routerMac)!)}
+                        className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
+                        title="Copy MAC"
+                      >
+                        {copiedMac === (network.activeMacAddress || network.macAddress || onu?.routerMac) ? (
+                          <CheckIcon className="w-3.5 h-3.5 text-emerald-500" />
+                        ) : (
+                          <CopyIcon className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    )}
+                  </p>
                 </div>
                 <div className="flex gap-2">
                   <p className="text-sm text-gray-600 dark:text-gray-400 w-20 font-medium">Last Logout:</p>
@@ -1637,21 +1677,118 @@ export default function CustomerDetailPage() {
           </div>
         </div>
 
-        {/* BOTTOM: ONU Information */}
+        {/* BOTTOM: ONU & Optical Link Information */}
         <div className="rounded-xl sm:rounded-2xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-sky-200/60 dark:border-slate-600/80 shadow-xl shadow-sky-500/5 p-3 sm:p-5 transition-all duration-300 hover:shadow-lg hover:shadow-sky-500/10">
-          <h2 className="text-base sm:text-lg font-semibold text-slate-900 dark:text-slate-100 mb-3 sm:mb-4 flex items-center gap-2">
-            <span className="p-1.5 rounded-lg bg-sky-100 dark:bg-sky-900/40">
-              <WifiIcon className="w-5 h-5 text-sky-600 dark:text-teal-400" />
-            </span>
-            ONU Information
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <InfoRow label="OLT" value={onu?.olt || '—'} />
-            <InfoRow label="Update" value={onu?.lastUpdate ? formatDate(onu.lastUpdate) : '—'} />
-            <InfoRow label="Mac" value={onu?.onuMac || '—'} />
-            <InfoRow label="Power" value={onu?.power || '—'} />
-            <InfoRow label="PON ID/Vlan" value={onu?.ponId ? `${onu.ponId}, V-${onu?.vlan || ''}` : '-, V-'} />
-            <InfoRow label="Distance" value={onu?.distance || '—'} />
+          <div className="flex items-center justify-between mb-3 sm:mb-4">
+            <h2 className="text-base sm:text-lg font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-sky-100 dark:bg-sky-900/40">
+                <WifiIcon className="w-5 h-5 text-sky-600 dark:text-teal-400" />
+              </span>
+              <span>ONU & Optical Link Details</span>
+            </h2>
+            {onu?.olt && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+                <ServerIcon className="w-3.5 h-3.5" />
+                {onu.olt}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5">
+            <InfoRow label="OLT Device" value={onu?.olt || '—'} />
+            <InfoRow label="PON Port" value={onu?.ponId || '—'} />
+            <InfoRow 
+              label="VLAN ID" 
+              value={
+                onu?.vlan && onu.vlan !== '—' ? (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-mono text-xs font-semibold border border-blue-200 dark:border-blue-800">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />
+                    VLAN {onu.vlan}
+                  </span>
+                ) : '—'
+              } 
+            />
+            <InfoRow 
+              label="ONU MAC" 
+              value={
+                onu?.onuMac ? (
+                  <div className="flex items-center gap-1.5 font-mono">
+                    <span>{onu.onuMac}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(onu.onuMac!)}
+                      className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
+                      title="Copy ONU MAC"
+                    >
+                      {copiedMac === onu.onuMac ? (
+                        <CheckIcon className="w-3.5 h-3.5 text-emerald-500" />
+                      ) : (
+                        <CopyIcon className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
+                ) : '—'
+              } 
+            />
+            <InfoRow 
+              label="Router MAC" 
+              value={
+                (onu?.routerMac || network.macAddress || network.activeMacAddress) ? (
+                  <div className="flex items-center gap-1.5 font-mono font-semibold text-slate-800 dark:text-slate-200">
+                    <span>{onu?.routerMac || network.macAddress || network.activeMacAddress}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy((onu?.routerMac || network.macAddress || network.activeMacAddress)!)}
+                      className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
+                      title="Copy Router MAC"
+                    >
+                      {copiedMac === (onu?.routerMac || network.macAddress || network.activeMacAddress) ? (
+                        <CheckIcon className="w-3.5 h-3.5 text-emerald-500" />
+                      ) : (
+                        <CopyIcon className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
+                ) : '—'
+              } 
+            />
+            <InfoRow 
+              label="Rx Power" 
+              value={
+                onu?.rxPower != null ? (
+                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs border font-medium ${
+                    onu.rxPower >= -24
+                      ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60'
+                      : onu.rxPower >= -27
+                      ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800/60'
+                      : 'bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-800/60'
+                  }`}>
+                    <span className="font-bold">{onu.power}</span>
+                    <span className="text-[10px] opacity-80">
+                      ({onu.rxPower >= -24 ? 'Optimal' : onu.rxPower >= -27 ? 'Fair' : 'Critical Low'})
+                    </span>
+                  </span>
+                ) : (
+                  onu?.power || '—'
+                )
+              } 
+            />
+            <InfoRow 
+              label="Link Status" 
+              value={
+                onu?.status ? (
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                    onu.status.toLowerCase() === 'online'
+                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60'
+                      : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60'
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${onu.status.toLowerCase() === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                    {onu.status.toUpperCase()}
+                  </span>
+                ) : '—'
+              } 
+            />
+            <InfoRow label="Optical Link" value={onu?.distance || (onu?.status ? onu.status.charAt(0).toUpperCase() + onu.status.slice(1) : '—')} />
+            <InfoRow label="Last Synced" value={onu?.lastUpdate ? formatDateTime(onu.lastUpdate) : '—'} />
           </div>
         </div>
       </div>

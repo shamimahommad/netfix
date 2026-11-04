@@ -11,3 +11,4 @@ if ($check->rowCount() === 0) {
 } else {
     echo "vlan_id already exists in olt_onus table.\n";
 }
+
