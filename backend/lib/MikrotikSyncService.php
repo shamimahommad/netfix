@@ -13,14 +13,37 @@ class MikrotikSyncService {
      */
     public static function parseUptime(?string $uptime): int {
         if (empty($uptime)) return 0;
+        $uptime = trim($uptime);
+        if (is_numeric($uptime)) return (int)$uptime;
+        
         $seconds = 0;
-        if (preg_match('/(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/', $uptime, $m)) {
-            $w = !empty($m[1]) ? (int)$m[1] : 0;
-            $d = !empty($m[2]) ? (int)$m[2] : 0;
-            $h = !empty($m[3]) ? (int)$m[3] : 0;
-            $i = !empty($m[4]) ? (int)$m[4] : 0;
-            $s = !empty($m[5]) ? (int)$m[5] : 0;
-            $seconds = ($w * 7 * 86400) + ($d * 86400) + ($h * 3600) + ($i * 60) + $s;
+        // Check for "Xw" (weeks)
+        if (preg_match('/(\d+)\s*w/i', $uptime, $m)) {
+            $seconds += (int)$m[1] * 7 * 86400;
+        }
+        // Check for "Xd" (days)
+        if (preg_match('/(\d+)\s*d/i', $uptime, $m)) {
+            $seconds += (int)$m[1] * 86400;
+        }
+        // Check for "Xh" (hours)
+        if (preg_match('/(\d+)\s*h/i', $uptime, $m)) {
+            $seconds += (int)$m[1] * 3600;
+        }
+        // Check for "Xm" (minutes)
+        if (preg_match('/(\d+)\s*m/i', $uptime, $m)) {
+            $seconds += (int)$m[1] * 60;
+        }
+        // Check for "Xs" (seconds)
+        if (preg_match('/(\d+)\s*s/i', $uptime, $m)) {
+            $seconds += (int)$m[1];
+        }
+        // Check for HH:MM:SS or HH:MM format (e.g. "14d 06:22:15" or alone "06:22:15")
+        if (preg_match('/(?:^|\s+|d)(\d{1,2}):(\d{2})(?::(\d{2}))?/', $uptime, $m)) {
+            $seconds += (int)$m[1] * 3600;
+            $seconds += (int)$m[2] * 60;
+            if (!empty($m[3])) {
+                $seconds += (int)$m[3];
+            }
         }
         return $seconds;
     }

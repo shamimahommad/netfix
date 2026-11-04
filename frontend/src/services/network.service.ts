@@ -100,6 +100,32 @@ export const networkService = {
     return response.data;
   },
 
+  async getRouterDetails(deviceId: string): Promise<{
+    success: boolean;
+    status: 'online' | 'offline' | 'error';
+    message?: string;
+    target?: string;
+    data?: {
+      identity: string;
+      model: string;
+      version: string;
+      uptime: string;
+      cpu_load: number;
+      cpu_cores: number;
+      cpu_arch?: string;
+      total_ram: string;
+      free_ram: string;
+      ram_usage_percent: number;
+      total_hdd: string;
+      free_hdd: string;
+      hdd_usage_percent: number;
+      active_pppoe_users: number;
+    };
+  }> {
+    const response = await api.get(`/network/devices/${deviceId}/details`);
+    return response.data;
+  },
+
   async getOltOnus(deviceId: string, pon?: number): Promise<{ success: boolean; data: { total: number; onus: any[] } }> {
     const response = await api.get<{ success: boolean; data: { total: number; onus: any[] } }>(`/network/devices/${deviceId}/onus`, {
       params: pon ? { pon } : undefined,

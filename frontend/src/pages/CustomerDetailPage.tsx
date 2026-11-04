@@ -252,8 +252,15 @@ const formatDateTime = (dateString: string | null | undefined): string => {
   return `${day}-${month}-${year} ${displayHours}:${minutes} ${ampm}`;
 };
 
-const formatUptime = (seconds: number | null | undefined): string => {
-  if (!seconds || seconds <= 0) return '—';
+const formatUptime = (seconds: number | string | null | undefined): string => {
+  if (seconds === null || seconds === undefined || seconds === '') return '—';
+  if (typeof seconds === 'string') {
+    if (isNaN(Number(seconds))) {
+      return seconds;
+    }
+    seconds = Number(seconds);
+  }
+  if (seconds <= 0) return '—';
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
@@ -379,7 +386,11 @@ export default function CustomerDetailPage() {
     if (!id) return;
     try {
       const response = await customersService.getMacStatus(id);
-      setMacBindingStatus(response.data);
+      const d = response?.data || response;
+      setMacBindingStatus({
+        hasCallerId: Boolean(d?.hasCallerId),
+        callerId: d?.callerId || null,
+      });
     } catch (err) {
       // If API fails, assume no caller-id
       setMacBindingStatus({ hasCallerId: false, callerId: null });

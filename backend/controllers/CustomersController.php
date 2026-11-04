@@ -878,10 +878,10 @@ class CustomersController {
         require_once __DIR__ . '/../lib/MikrotikSyncService.php';
         $res = MikrotikSyncService::pingCustomer($db, $realCid, $tenantId);
 
-        Response::json([
-            'success' => $res['success'],
+        Response::json(array_merge([
+            'success' => $res['success'] ?? false,
             'data' => $res,
-        ]);
+        ], $res));
     }
 
     public static function markLeft(string $id): void {

@@ -8,7 +8,7 @@ import { ActionDropdown } from '@/components/ui/ActionDropdown';
 import { usePingStatus } from '@/hooks/usePingStatus';
 import { usePingStatusStore } from '@/stores/pingStatusStore';
 import { PageHeader } from '@/components/common';
-import { Lock } from 'lucide-react';
+import { Lock, Activity, Server, Cpu, HardDrive, RefreshCw, X, Users, Clock, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 const getStatusBadgeClass = (status: NetworkDevice['status']): string => {
   const classes: Record<NetworkDevice['status'], string> = {
@@ -103,6 +103,57 @@ export default function MikroTikPage() {
     isProduction: false,
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  // Diagnostics Modal State
+  const [selectedRouterForDiag, setSelectedRouterForDiag] = useState<NetworkDevice | null>(null);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagData, setDiagData] = useState<any | null>(null);
+  const [diagStatus, setDiagStatus] = useState<'online' | 'offline' | 'error' | null>(null);
+  const [diagError, setDiagError] = useState<string | null>(null);
+
+  const handleOpenDiagnostics = async (device: NetworkDevice) => {
+    setSelectedRouterForDiag(device);
+    setDiagLoading(true);
+    setDiagData(null);
+    setDiagError(null);
+    setDiagStatus(null);
+    try {
+      const res = await networkService.getRouterDetails(device.networkDeviceId);
+      if (res.success && res.data) {
+        setDiagData(res.data);
+        setDiagStatus('online');
+      } else {
+        setDiagStatus('offline');
+        setDiagError(res.message || 'Router unreachable or API disabled');
+      }
+    } catch (err: any) {
+      setDiagStatus('offline');
+      setDiagError(err?.response?.data?.message || err?.message || 'Failed to connect to router');
+    } finally {
+      setDiagLoading(false);
+    }
+  };
+
+  const handleRefreshDiagnostics = async () => {
+    if (!selectedRouterForDiag) return;
+    setDiagLoading(true);
+    setDiagError(null);
+    try {
+      const res = await networkService.getRouterDetails(selectedRouterForDiag.networkDeviceId);
+      if (res.success && res.data) {
+        setDiagData(res.data);
+        setDiagStatus('online');
+      } else {
+        setDiagStatus('offline');
+        setDiagError(res.message || 'Router unreachable or API disabled');
+      }
+    } catch (err: any) {
+      setDiagStatus('offline');
+      setDiagError(err?.response?.data?.message || err?.message || 'Failed to connect to router');
+    } finally {
+      setDiagLoading(false);
+    }
+  };
 
   useEffect(() => {
     loadDevices();
@@ -1063,6 +1114,279 @@ export default function MikroTikPage() {
           </div>
         )}
 
+        {/* Router Diagnostics Modal */}
+        {selectedRouterForDiag && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+              {/* Header */}
+              <div className="p-5 border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-emerald-500/20 border border-emerald-500/30 rounded-xl text-emerald-400">
+                    <Activity className="w-6 h-6 animate-pulse" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-xl font-bold tracking-tight">
+                        {diagData?.identity || selectedRouterForDiag.deviceName}
+                      </h2>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700/80 text-slate-300 font-mono">
+                        {diagData?.model || selectedRouterForDiag.vendor.toUpperCase()}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 font-mono mt-0.5">
+                      {selectedRouterForDiag.managementIp}:{selectedRouterForDiag.managementPort}
+                      {selectedRouterForDiag.winboxPort ? ` • Winbox: ${selectedRouterForDiag.winboxPort}` : ''}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleRefreshDiagnostics}
+                    disabled={diagLoading}
+                    className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all disabled:opacity-50 flex items-center gap-1.5 text-xs font-medium"
+                    title="Refresh live stats"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${diagLoading ? 'animate-spin' : ''}`} />
+                    <span className="hidden sm:inline">Refresh</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedRouterForDiag(null);
+                      setDiagData(null);
+                      setDiagError(null);
+                    }}
+                    className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-xl transition-all"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-6 overflow-y-auto space-y-6">
+                {/* Status Bar */}
+                <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                      Connection State:
+                    </span>
+                    {diagLoading && !diagData ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-600 dark:text-amber-400">
+                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                        Connecting to RouterOS API...
+                      </span>
+                    ) : diagStatus === 'online' ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        ONLINE (API Connected)
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300 border border-red-300 dark:border-red-700">
+                        <span className="w-2 h-2 rounded-full bg-red-500" />
+                        OFFLINE
+                      </span>
+                    )}
+                  </div>
+
+                  {diagData && (
+                    <div className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+                      ROS {diagData.version}
+                    </div>
+                  )}
+                </div>
+
+                {/* Offline Warning Banner */}
+                {diagStatus === 'offline' && !diagLoading && (
+                  <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm">
+                      <p className="font-semibold text-red-800 dark:text-red-300">
+                        {diagError || 'Router unreachable or API disabled'}
+                      </p>
+                      <p className="mt-1 text-xs text-red-700 dark:text-red-400/90 leading-relaxed">
+                        Unable to establish connection to <strong>{selectedRouterForDiag.managementIp}:{selectedRouterForDiag.managementPort}</strong>.
+                        Please ensure the <code>api</code> service is enabled in MikroTik (<em>IP → Services</em>) and API port matches the configured management port.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Loading State Spinner */}
+                {diagLoading && !diagData && (
+                  <div className="py-16 text-center space-y-3">
+                    <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto" />
+                    <p className="text-sm font-medium text-slate-600 dark:text-slate-400">
+                      Reading system resource counters & active sessions...
+                    </p>
+                  </div>
+                )}
+
+                {/* Live Diagnostic Data */}
+                {diagData && (
+                  <>
+                    {/* Top 4 Stat Cards */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+                      {/* Active PPPoE Users */}
+                      <div className="p-4 rounded-xl bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-indigo-950/30 dark:to-blue-950/30 border border-indigo-100 dark:border-indigo-900/40 shadow-sm">
+                        <div className="flex items-center justify-between text-indigo-600 dark:text-indigo-400 mb-2">
+                          <Users className="w-5 h-5" />
+                          <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-indigo-200/60 dark:bg-indigo-900/60">Live</span>
+                        </div>
+                        <div className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">
+                          {diagData.active_pppoe_users}
+                        </div>
+                        <div className="text-xs text-slate-600 dark:text-slate-400 font-medium mt-0.5">
+                          Active PPPoE Users
+                        </div>
+                      </div>
+
+                      {/* System Uptime */}
+                      <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 border border-emerald-100 dark:border-emerald-900/40 shadow-sm">
+                        <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 mb-2">
+                          <Clock className="w-5 h-5" />
+                          <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-emerald-200/60 dark:bg-emerald-900/60">Uptime</span>
+                        </div>
+                        <div className="text-lg font-bold text-slate-900 dark:text-slate-100 truncate" title={diagData.uptime}>
+                          {diagData.uptime}
+                        </div>
+                        <div className="text-xs text-slate-600 dark:text-slate-400 font-medium mt-0.5">
+                          Continuous Running
+                        </div>
+                      </div>
+
+                      {/* RouterOS Version */}
+                      <div className="p-4 rounded-xl bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-950/30 dark:to-pink-950/30 border border-purple-100 dark:border-purple-900/40 shadow-sm">
+                        <div className="flex items-center justify-between text-purple-600 dark:text-purple-400 mb-2">
+                          <Server className="w-5 h-5" />
+                          <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-purple-200/60 dark:bg-purple-900/60">OS</span>
+                        </div>
+                        <div className="text-lg font-bold text-slate-900 dark:text-slate-100 truncate" title={diagData.version}>
+                          {diagData.version}
+                        </div>
+                        <div className="text-xs text-slate-600 dark:text-slate-400 font-medium mt-0.5">
+                          RouterOS Version
+                        </div>
+                      </div>
+
+                      {/* CPU Architecture */}
+                      <div className="p-4 rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 border border-amber-100 dark:border-amber-900/40 shadow-sm">
+                        <div className="flex items-center justify-between text-amber-600 dark:text-amber-400 mb-2">
+                          <Cpu className="w-5 h-5" />
+                          <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-200/60 dark:bg-amber-900/60">CPU</span>
+                        </div>
+                        <div className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                          {diagData.cpu_cores} Cores
+                        </div>
+                        <div className="text-xs text-slate-600 dark:text-slate-400 font-medium mt-0.5">
+                          {diagData.cpu_arch || 'Hardware Cores'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Hardware Utilization Bars */}
+                    <div className="space-y-4 p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/80 shadow-sm">
+                      <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                        <Activity className="w-4 h-4 text-blue-500" />
+                        Hardware Resource Utilization
+                      </h3>
+
+                      {/* CPU Load Progress */}
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-xs font-semibold">
+                          <span className="text-slate-700 dark:text-slate-300">CPU Load</span>
+                          <span className={diagData.cpu_load > 80 ? 'text-red-500' : diagData.cpu_load > 50 ? 'text-amber-500' : 'text-emerald-500'}>
+                            {diagData.cpu_load}%
+                          </span>
+                        </div>
+                        <div className="w-full h-3 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-500 rounded-full ${
+                              diagData.cpu_load > 80 ? 'bg-red-500' : diagData.cpu_load > 50 ? 'bg-amber-500' : 'bg-emerald-500'
+                            }`}
+                            style={{ width: `${Math.min(100, Math.max(0, diagData.cpu_load))}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* RAM Usage Progress */}
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-xs font-semibold">
+                          <span className="text-slate-700 dark:text-slate-300">Memory (RAM)</span>
+                          <span className="text-slate-500 dark:text-slate-400 font-normal">
+                            {diagData.free_ram} free / {diagData.total_ram} ({diagData.ram_usage_percent}% used)
+                          </span>
+                        </div>
+                        <div className="w-full h-3 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-500 rounded-full ${
+                              diagData.ram_usage_percent > 85 ? 'bg-red-500' : diagData.ram_usage_percent > 65 ? 'bg-amber-500' : 'bg-blue-500'
+                            }`}
+                            style={{ width: `${Math.min(100, Math.max(0, diagData.ram_usage_percent))}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* HDD Usage Progress */}
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-xs font-semibold">
+                          <span className="text-slate-700 dark:text-slate-300">Storage (HDD)</span>
+                          <span className="text-slate-500 dark:text-slate-400 font-normal">
+                            {diagData.free_hdd} free / {diagData.total_hdd} ({diagData.hdd_usage_percent}% used)
+                          </span>
+                        </div>
+                        <div className="w-full h-3 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-500 rounded-full ${
+                              diagData.hdd_usage_percent > 90 ? 'bg-red-500' : diagData.hdd_usage_percent > 75 ? 'bg-amber-500' : 'bg-purple-500'
+                            }`}
+                            style={{ width: `${Math.min(100, Math.max(0, diagData.hdd_usage_percent))}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Router Identity & Specs Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                      <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                        <span className="text-slate-400 font-medium">Board Model</span>
+                        <p className="font-semibold text-slate-800 dark:text-slate-200 mt-0.5">{diagData.model}</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                        <span className="text-slate-400 font-medium">Identity Name</span>
+                        <p className="font-semibold text-slate-800 dark:text-slate-200 mt-0.5">{diagData.identity}</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                        <span className="text-slate-400 font-medium">API Port</span>
+                        <p className="font-semibold text-slate-800 dark:text-slate-200 mt-0.5 font-mono">{selectedRouterForDiag.managementPort}</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                        <span className="text-slate-400 font-medium">Winbox Port</span>
+                        <p className="font-semibold text-slate-800 dark:text-slate-200 mt-0.5 font-mono">{selectedRouterForDiag.winboxPort || '8291'}</p>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRouterForDiag(null);
+                    setDiagData(null);
+                    setDiagError(null);
+                  }}
+                  className="px-5 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-semibold rounded-xl text-sm transition-all"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Loading State */}
         {isLoading && (
           <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-lg rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-xl p-12">
@@ -1109,7 +1433,14 @@ export default function MikroTikPage() {
                         {device.deviceCode}
                       </td>
                       <td className="px-3 py-4 text-sm font-medium text-slate-900 dark:text-slate-100 truncate" title={device.deviceName}>
-                        {device.deviceName}
+                        <button
+                          onClick={() => handleOpenDiagnostics(device)}
+                          className="hover:text-blue-600 dark:hover:text-blue-400 font-semibold text-left transition-colors flex items-center gap-1.5 group"
+                          title="Click to view real-time diagnostics"
+                        >
+                          <span>{device.deviceName}</span>
+                          <span className="opacity-0 group-hover:opacity-100 text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-normal transition-opacity">Stats</span>
+                        </button>
                       </td>
                       <td className="px-3 py-4">
                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border ${getStatusBadgeClass(device.status)}`}>
@@ -1140,8 +1471,18 @@ export default function MikroTikPage() {
                       <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400 font-mono truncate">
                         {device.apiPassword || '******'}
                       </td>
-                      <td className="px-3 py-4 text-sm" style={{ width: '12%', minWidth: '120px' }}>
+                      <td className="px-3 py-4 text-sm" style={{ width: '14%', minWidth: '150px' }}>
                         <div className="flex items-center gap-2">
+                          {/* Live Diagnostics Button */}
+                          <button
+                            onClick={() => handleOpenDiagnostics(device)}
+                            className="p-1.5 px-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 rounded-lg transition-all flex items-center gap-1 text-xs font-semibold shadow-sm hover:scale-105"
+                            title="View Real-Time Hardware & Session Status"
+                          >
+                            <Activity className="w-3.5 h-3.5 text-emerald-500" />
+                            <span>Details</span>
+                          </button>
+
                           {/* Edit Button */}
                           <button
                             onClick={() => handleEdit(device)}
@@ -1171,6 +1512,18 @@ export default function MikroTikPage() {
                               onClose={() => setOpenPingMenuId(null)}
                               triggerButton={pingMenuRefs.current[device.networkDeviceId]}
                             >
+                              {/* Live Diagnostics Action */}
+                              <button
+                                onClick={() => {
+                                  setOpenPingMenuId(null);
+                                  handleOpenDiagnostics(device);
+                                }}
+                                className="w-full px-3 py-1.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors flex items-center gap-2 font-medium border-b border-slate-100 dark:border-slate-700"
+                              >
+                                <Activity className="w-4 h-4 text-emerald-500" />
+                                <span>View Live Stats</span>
+                              </button>
+
                               {/* Ping Controls Section */}
                               <div className="px-2 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                                 Ping Controls

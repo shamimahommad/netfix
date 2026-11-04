@@ -221,8 +221,16 @@ export const customersService = {
   },
 
   async getMacStatus(customerId: string): Promise<{ success: boolean; data: { hasCallerId: boolean; callerId: string | null } }> {
-    const response = await api.get<{ success: boolean; data: { hasCallerId: boolean; callerId: string | null } }>(`/customers/${customerId}/mac-status`);
-    return response.data;
+    const response = await api.get<any>(`/customers/${customerId}/mac-status`);
+    const res = response.data;
+    const inner = (res && res.data) ? res.data : res;
+    return {
+      success: res?.success ?? true,
+      data: {
+        hasCallerId: Boolean(inner?.hasCallerId),
+        callerId: inner?.callerId || null
+      }
+    };
   },
 
   async syncSession(customerId: string): Promise<{ success: boolean; data: any; message?: string }> {
@@ -268,15 +276,17 @@ export const customersService = {
     bandwidthLines: string[];
     error?: string;
   }> {
-    const response = await api.post<{
-      success: boolean;
-      address?: string;
-      uptime?: string;
-      lines: string[];
-      bandwidthLines: string[];
-      error?: string;
-    }>(`/customers/${customerId}/ping`);
-    return response.data;
+    const response = await api.post<any>(`/customers/${customerId}/ping`);
+    const res = response.data;
+    const inner = (res && res.data && Array.isArray(res.data.lines)) ? res.data : res;
+    return {
+      success: Boolean(res?.success ?? inner?.success),
+      address: inner?.address || '',
+      uptime: inner?.uptime || '',
+      lines: Array.isArray(inner?.lines) ? inner.lines : [],
+      bandwidthLines: Array.isArray(inner?.bandwidthLines) ? inner.bandwidthLines : [],
+      error: inner?.error || res?.error || '',
+    };
   },
 
   async getUsageStatistics(customerId: string, startDate?: string, endDate?: string): Promise<{ success: boolean; data: any }> {

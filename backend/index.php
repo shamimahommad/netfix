@@ -316,6 +316,18 @@ if ($method === 'DELETE' && preg_match('#^/(access-profiles|network/packages)/([
 // ---------------------------------------------------------------------
 // NETWORK & MIKROTIK & OLT
 // ---------------------------------------------------------------------
+if ($method === 'GET' && (
+    $uri === '/routers/details.php' || 
+    $uri === '/routers/details' || 
+    $rawUri === '/api/routers/details.php' || 
+    preg_match('#^/network/devices/([^/]+)/details$#', $uri, $m)
+)) {
+    if (!empty($m[1])) {
+        $_GET['id'] = $m[1];
+    }
+    require __DIR__ . '/api/routers/details.php';
+    exit;
+}
 if ($method === 'GET' && $uri === '/network/devices') {
     NetworkController::index();
 }
