@@ -42,6 +42,12 @@ class OltSyncService {
         $ponPorts = $client->getPonPorts();
         $onus = $client->getOnus(null, true);
 
+        // Option 2: Live MAC Address Table from OLT (includes Router MAC, VLAN ID, Port ID)
+        $macTable = [];
+        try {
+            $macTable = $client->getMacTable();
+        } catch (\Throwable $e) {}
+
         if (!$sysInfo && empty($onus)) {
             // If connection failed, return honest error so user knows hardware was unreachable
             $local = self::getLocalData($db, $tenantId, $deviceId, $oltDev);
@@ -73,14 +79,31 @@ class OltSyncService {
             'did' => $deviceId,
         ]);
 
-        // Upsert ONUs into olt_onus table
+        // Upsert ONUs into olt_onus table with Router MAC and VLAN ID from Option 2
         if (!empty($onus)) {
-            $sql = "INSERT INTO olt_onus (tenant_id, network_device_id, pon_port, pon_port_name, onu_id, mac_address, rx_power_dbm, status, last_sync_at) 
-                    VALUES (:tid, :did, :pon, :pname, :onuid, :mac, :rx, 'online', NOW())
+            // Pre-load customer accounts to resolve PPPoE username by Router MAC
+            $custMap = [];
+            try {
+                $cStmt = $db->prepare("SELECT na.username, na.mac_address 
+                    FROM customer_network_accounts na
+                    WHERE (na.tenant_id = :tid OR na.tenant_id = :ctid) AND na.mac_address IS NOT NULL AND na.mac_address != ''");
+                $cStmt->execute(['tid' => $tenantId, 'ctid' => $oltDev['tenant_id'] ?? $tenantId]);
+                $cRows = $cStmt->fetchAll();
+                foreach ($cRows as $cr) {
+                    $m = strtoupper(str_replace(['-', '.', ' '], ':', trim($cr['mac_address'])));
+                    $custMap[$m] = trim($cr['username']);
+                }
+            } catch (\Throwable $e) {}
+
+            $sql = "INSERT INTO olt_onus (tenant_id, network_device_id, pon_port, pon_port_name, onu_id, mac_address, router_mac, vlan_id, pppoe_username, rx_power_dbm, status, last_sync_at) 
+                    VALUES (:tid, :did, :pon, :pname, :onuid, :mac, :rmac, :vlan, :pppoe, :rx, 'online', NOW())
                     ON DUPLICATE KEY UPDATE 
                         pon_port = VALUES(pon_port),
                         pon_port_name = VALUES(pon_port_name),
                         onu_id = VALUES(onu_id),
+                        router_mac = COALESCE(VALUES(router_mac), router_mac),
+                        vlan_id = COALESCE(VALUES(vlan_id), vlan_id),
+                        pppoe_username = COALESCE(VALUES(pppoe_username), pppoe_username),
                         rx_power_dbm = VALUES(rx_power_dbm),
                         status = 'online',
                         last_sync_at = NOW()";
@@ -89,6 +112,16 @@ class OltSyncService {
             $db->beginTransaction();
             try {
                 foreach ($onus as $onu) {
+                    $onuId = $onu['onuId'];
+                    $macEntry = $macTable[$onuId] ?? null;
+                    $routerMac = $macEntry['routerMac'] ?? null;
+                    $vlanId = $macEntry['vlanId'] ?? null;
+                    $pppoeUser = null;
+
+                    if ($routerMac && isset($custMap[$routerMac])) {
+                        $pppoeUser = $custMap[$routerMac];
+                    }
+
                     $insStmt->execute([
                         'tid' => $tenantId,
                         'did' => $deviceId,
@@ -96,6 +129,9 @@ class OltSyncService {
                         'pname' => $onu['ponPortName'],
                         'onuid' => $onu['onuId'],
                         'mac' => $onu['macAddress'],
+                        'rmac' => $routerMac,
+                        'vlan' => $vlanId,
+                        'pppoe' => $pppoeUser,
                         'rx' => $onu['rxPowerDbm'],
                     ]);
                 }

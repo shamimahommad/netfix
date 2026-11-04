@@ -320,4 +320,79 @@ class VsolOltClient {
         }
         return null;
     }
+
+    /**
+     * Retrieve MAC Address Table (Option 2) from macinfo.html
+     * Extracts Router MAC, VLAN ID, and Port ID (e.g. EPON0/1:9)
+     * 
+     * @return array Map indexed by portId (e.g. 'EPON0/1:9' => ['vlanId' => 100, 'routerMac' => '50:0F:F5:D4:7E:58', 'type' => 'Dynamic'])
+     */
+    public function getMacTable(?int $targetPon = null): array {
+        // Step 1: Initial GET to acquire SessionKey
+        $html = $this->request('macinfo.html');
+        if (!$html) {
+            return [];
+        }
+
+        $sessionKey = '';
+        if (preg_match('/SessionKey\.value\s*=\s*[\'"]([^\'"]+)[\'"]/i', $html, $skMatch)) {
+            $sessionKey = $skMatch[1];
+        }
+
+        // Port codes in VSOL web management:
+        // 9 = EPON0/1, 10 = EPON0/2, 11 = EPON0/3, 12 = EPON0/4
+        $portCodes = [
+            1 => 9,
+            2 => 10,
+            3 => 11,
+            4 => 12,
+        ];
+
+        if ($targetPon !== null && isset($portCodes[$targetPon])) {
+            $portsToQuery = [$targetPon => $portCodes[$targetPon]];
+        } else {
+            $portsToQuery = $portCodes;
+        }
+
+        $entries = [];
+
+        foreach ($portsToQuery as $ponNum => $code) {
+            $postData = [
+                'macport' => (string)$code,
+                'who' => '100',
+            ];
+            if ($sessionKey) {
+                $postData['SessionKey'] = $sessionKey;
+            }
+
+            $res = $this->request('macinfo.html', $postData, true);
+            if (!$res) continue;
+
+            // Update SessionKey for next port request
+            if (preg_match('/SessionKey\.value\s*=\s*[\'"]([^\'"]+)[\'"]/i', $res, $nextSk)) {
+                $sessionKey = $nextSk[1];
+            }
+
+            if (preg_match_all('/<tr>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<\/tr>/is', $res, $rows, PREG_SET_ORDER)) {
+                foreach ($rows as $r) {
+                    $vlan = trim(strip_tags($r[1]));
+                    $mac = trim(strip_tags($r[2]));
+                    $type = trim(strip_tags($r[3]));
+                    $port = trim(strip_tags($r[4]));
+
+                    if (is_numeric($vlan) && preg_match('/^[0-9A-Fa-f:]{17}$/', $mac)) {
+                        $cleanMac = strtoupper(str_replace(['-', '.', ' '], ':', $mac));
+                        $entries[$port] = [
+                            'vlanId' => (int)$vlan,
+                            'routerMac' => $cleanMac,
+                            'type' => $type,
+                            'portId' => $port,
+                        ];
+                    }
+                }
+            }
+        }
+
+        return $entries;
+    }
 }

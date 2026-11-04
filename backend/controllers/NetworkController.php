@@ -590,6 +590,7 @@ class NetworkController {
                 'onuId' => $r['onu_id'],
                 'macAddress' => $onuMac,
                 'routerMac' => $routerMac,
+                'vlanId' => !empty($r['vlan_id']) ? (int)$r['vlan_id'] : null,
                 'pppoe' => $pppoeUsername,
                 'rxPowerDbm' => (float)$r['rx_power_dbm'],
                 'status' => $r['status'],

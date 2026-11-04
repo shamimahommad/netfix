@@ -27,6 +27,7 @@ interface OnuRecord {
   onuId: string;
   macAddress: string;
   routerMac?: string | null;
+  vlanId?: number | null;
   pppoe?: string | null;
   rxPowerDbm: number;
   status: string;
@@ -141,13 +142,14 @@ export default function OltDetailPage() {
       const q = searchQuery.toLowerCase().trim();
       const macMatches = onu.macAddress.toLowerCase().includes(q);
       const routerMacMatches = onu.routerMac ? onu.routerMac.toLowerCase().includes(q) : false;
+      const vlanMatches = onu.vlanId ? (onu.vlanId.toString().includes(q) || `vlan ${onu.vlanId}`.includes(q)) : false;
       const pppoeMatches = onu.pppoe ? onu.pppoe.toLowerCase().includes(q) : false;
       const onuIdMatches = onu.onuId.toLowerCase().includes(q);
       const custNameMatches = onu.customer?.customerName.toLowerCase().includes(q);
       const custUserMatches = onu.customer?.username.toLowerCase().includes(q);
       const custCodeMatches = onu.customer?.customerCode.toLowerCase().includes(q);
 
-      return macMatches || routerMacMatches || pppoeMatches || onuIdMatches || custNameMatches || custUserMatches || custCodeMatches;
+      return macMatches || routerMacMatches || vlanMatches || pppoeMatches || onuIdMatches || custNameMatches || custUserMatches || custCodeMatches;
     });
   }, [onus, selectedPon, signalFilter, searchQuery]);
 
@@ -596,22 +598,30 @@ export default function OltDetailPage() {
                         </span>
                       </td>
 
-                      {/* Router MAC */}
-                      <td className="px-4 py-3 font-mono font-semibold text-slate-800 dark:text-slate-200">
+                      {/* Router MAC & VLAN */}
+                      <td className="px-4 py-3">
                         {onu.routerMac ? (
-                          <div className="flex items-center gap-1.5">
-                            <span>{onu.routerMac}</span>
-                            <button
-                              onClick={() => handleCopyMac(onu.routerMac!)}
-                              className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
-                              title="Copy Router MAC"
-                            >
-                              {copiedMac === onu.routerMac ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-500" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5" />
-                              )}
-                            </button>
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5 font-mono font-semibold text-slate-800 dark:text-slate-200">
+                              <span>{onu.routerMac}</span>
+                              <button
+                                onClick={() => handleCopyMac(onu.routerMac!)}
+                                className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
+                                title="Copy Router MAC"
+                              >
+                                {copiedMac === onu.routerMac ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+                            {onu.vlanId && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-mono font-medium text-blue-600 dark:text-blue-400">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />
+                                VLAN {onu.vlanId}
+                              </span>
+                            )}
                           </div>
                         ) : (
                           <span className="text-slate-400 dark:text-slate-500 font-mono">—</span>
