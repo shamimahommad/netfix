@@ -85,7 +85,7 @@ export default function InvoicesReportPage() {
 
   useEffect(() => {
     resellerService.list().then((r) => setResellers(r.data ?? [])).catch(() => setResellers([]));
-    networkService.getDevicesDropdown().then((r) => setServers((r.data ?? []).map((x) => ({ id: x.id, name: x.name })))).catch(() => setServers([]));
+    networkService.getDevicesDropdown('router').then((r) => setServers((r.data ?? []).filter((x) => x.type !== 'olt').map((x) => ({ id: x.id, name: x.name })))).catch(() => setServers([]));
   }, []);
 
   const fetchInvoices = async () => {

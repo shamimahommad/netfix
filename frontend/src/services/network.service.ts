@@ -78,11 +78,13 @@ export const networkService = {
     return response.data;
   },
 
-  async getDevicesDropdown(): Promise<{
+  async getDevicesDropdown(type: string = 'router'): Promise<{
     success: boolean;
     data: Array<{ id: string; name: string; type?: string; vendor?: string; status?: string }>;
   }> {
-    const response = await api.get('/network/devices/dropdown');
+    const response = await api.get('/network/devices/dropdown', {
+      params: type ? { type } : undefined,
+    });
     return response.data;
   },
 

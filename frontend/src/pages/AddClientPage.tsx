@@ -224,14 +224,22 @@ export default function AddClientPage() {
 
   const loadServers = async () => {
     try {
-      const res = await networkService.getDevicesDropdown();
-      const list = (res.data || []).map((d) => ({
-        networkDeviceId: d.id,
-        deviceName: d.name,
-      })) as NetworkDevice[];
+      const res = await networkService.getDevicesDropdown('router');
+      // Strictly only keep routers / MikroTik and exclude OLT devices
+      const list = (res.data || [])
+        .filter((d) => d.type !== 'olt' && d.vendor?.toLowerCase() !== 'vsol')
+        .map((d) => ({
+          networkDeviceId: d.id,
+          deviceName: d.name,
+        })) as NetworkDevice[];
       setServers(list);
-      if (list.length > 0 && !form.serverId) {
-        setForm((prev) => ({ ...prev, serverId: list[0].networkDeviceId }));
+      if (list.length > 0) {
+        setForm((prev) => {
+          const isValidCurrent = prev.serverId && list.some((s) => s.networkDeviceId === prev.serverId);
+          return isValidCurrent ? prev : { ...prev, serverId: list[0].networkDeviceId };
+        });
+      } else {
+        setForm((prev) => ({ ...prev, serverId: '' }));
       }
     } catch (err: any) {
       console.warn('Failed to load servers:', err);

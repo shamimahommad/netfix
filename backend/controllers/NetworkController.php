@@ -124,9 +124,23 @@ class NetworkController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT network_device_id as id, device_name as name, device_type as type, vendor, status 
-            FROM network_devices WHERE tenant_id = :tid ORDER BY device_name ASC");
-        $stmt->execute(['tid' => $tenantId]);
+        $type = !empty($_GET['type']) ? strtolower(trim($_GET['type'])) : 'router';
+        $sql = "SELECT network_device_id as id, device_name as name, device_type as type, vendor, status 
+            FROM network_devices WHERE tenant_id = :tid";
+        $params = ['tid' => $tenantId];
+
+        if ($type === 'router' || $type === 'mikrotik') {
+            $sql .= " AND (device_type = 'router' OR vendor = 'mikrotik') AND device_type != 'olt'";
+        } elseif ($type === 'olt') {
+            $sql .= " AND (device_type = 'olt' OR vendor = 'vsol' OR vendor = 'huawei' OR vendor = 'zte')";
+        } elseif ($type !== 'all') {
+            $sql .= " AND device_type = :dtype";
+            $params['dtype'] = $type;
+        }
+
+        $sql .= " ORDER BY device_name ASC";
+        $stmt = $db->prepare($sql);
+        $stmt->execute($params);
         $rows = $stmt->fetchAll();
 
         $data = array_map(function($r) {

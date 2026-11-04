@@ -343,8 +343,8 @@ export default function ResellerPage() {
 
   const loadServers = async () => {
     try {
-      const res = await networkService.getDevicesDropdown();
-      setServers(Array.isArray(res?.data) ? res.data : []);
+      const res = await networkService.getDevicesDropdown('router');
+      setServers(Array.isArray(res?.data) ? res.data.filter((d: any) => d.type !== 'olt') : []);
     } catch {
       setServers([]);
     }
