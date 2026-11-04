@@ -977,7 +977,12 @@ export default function CustomerDetailPage() {
             message: d.message,
           });
         }
-        // No page reload: only show result in modal
+        await loadCustomerDetail();
+        if (customerData.network.protocolType === 'pppoe') {
+          await loadMacStatus();
+        }
+      } else {
+        setSyncResult({ error: response.message || 'Sync failed.' });
       }
     } catch (err: any) {
       setSyncResult({ error: err?.message || 'Failed to sync session data.' });
@@ -989,25 +994,24 @@ export default function CustomerDetailPage() {
   const handleDisconnect = async () => {
     if (!id || !customerData) return;
 
-    if (!customerData.network.onlineStatus) {
-      toast.error('Customer is not online. No active session to disconnect.');
-      return;
-    }
-
-    const confirmMessage = `Are you sure you want to disconnect the active PPPoE session for "${customerData.customer.fullName}"? This will force disconnect the user immediately.`;
+    const confirmMessage = customerData.network.onlineStatus
+      ? `Are you sure you want to disconnect the active PPPoE session for "${customerData.customer.fullName}"? This will force disconnect the user immediately.`
+      : `Customer is marked offline in cache. Attempt to force disconnect any orphan session for "${customerData.customer.fullName}" from MikroTik?`;
     
     if (window.confirm(confirmMessage)) {
       setIsDisconnecting(true);
       try {
         const response = await customersService.disconnectSession(id);
         if (response.success) {
-          toast.success('Session disconnected successfully.');
+          toast.success(response.message || 'Session disconnected successfully.');
           // Reload customer data to show updated status
           await loadCustomerDetail();
           // Reload MAC status if PPPoE
           if (customerData.network.protocolType === 'pppoe') {
             await loadMacStatus();
           }
+        } else {
+          toast.error(response.message || 'Failed to disconnect session.');
         }
       } catch (err: any) {
         toast.error(err.message || 'Failed to disconnect session.');

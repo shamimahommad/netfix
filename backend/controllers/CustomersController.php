@@ -204,6 +204,13 @@ class CustomersController {
         $stmtNet->execute(['cid' => $realCid]);
         $net = $stmtNet->fetch();
 
+        // Check MikroTik live connection status in real-time
+        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+        if ($net && !empty($net['username'])) {
+            $net['tenant_id'] = $customerTenantId;
+            MikrotikSyncService::checkCustomerLiveStatus($db, $realCid, $net);
+        }
+
         // Get last invoice/payment
         $stmtBilling = $db->prepare("SELECT * FROM invoices WHERE customer_id = :cid ORDER BY invoice_id DESC LIMIT 1");
         $stmtBilling->execute(['cid' => $realCid]);
@@ -742,8 +749,13 @@ class CustomersController {
     public static function macStatus(string $id): void {
         AuthMiddleware::requireAuth();
         $db = Database::getConnection();
+
+        $cidStmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
+        $cidStmt->execute(['id' => $id, 'code' => $id]);
+        $realCid = $cidStmt->fetchColumn() ?: $id;
+
         $stmt = $db->prepare("SELECT mac_address FROM customer_network_accounts WHERE customer_id = :cid LIMIT 1");
-        $stmt->execute(['cid' => $id]);
+        $stmt->execute(['cid' => $realCid]);
         $mac = $stmt->fetchColumn();
 
         Response::json([
@@ -757,58 +769,65 @@ class CustomersController {
 
     public static function syncSession(string $id): void {
         AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
-        $stmt = $db->prepare("SELECT username FROM customer_network_accounts WHERE customer_id = :cid LIMIT 1");
-        $stmt->execute(['cid' => $id]);
-        $username = $stmt->fetchColumn() ?: 'customer';
 
-        Response::json([
-            'success' => true,
-            'data' => [
-                'username' => $username,
-                'message' => 'MikroTik session state synchronized',
-            ],
-        ]);
+        $cidStmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
+        $cidStmt->execute(['id' => $id, 'code' => $id]);
+        $realCid = $cidStmt->fetchColumn() ?: $id;
+
+        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+        $res = MikrotikSyncService::syncCustomer($db, $realCid, $tenantId);
+
+        Response::json($res);
     }
 
     public static function disconnectSession(string $id): void {
         AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
-        $stmt = $db->prepare("UPDATE customer_network_accounts SET is_online = 0 WHERE customer_id = :cid");
-        $stmt->execute(['cid' => $id]);
 
-        Response::json([
-            'success' => true,
-            'message' => 'Session terminated from router',
-        ]);
+        $cidStmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
+        $cidStmt->execute(['id' => $id, 'code' => $id]);
+        $realCid = $cidStmt->fetchColumn() ?: $id;
+
+        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+        $res = MikrotikSyncService::disconnect($db, $realCid, $tenantId);
+
+        Response::json($res);
     }
 
     public static function toggleSuspend(string $id): void {
         AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
-        $stmt = $db->prepare("SELECT status FROM customers WHERE customer_id = :cid LIMIT 1");
-        $stmt->execute(['cid' => $id]);
-        $status = $stmt->fetchColumn();
 
-        $newStatus = ($status === 'suspended') ? 'active' : 'suspended';
-        $stmtUpd = $db->prepare("UPDATE customers SET status = :st WHERE customer_id = :cid");
-        $stmtUpd->execute(['st' => $newStatus, 'cid' => $id]);
+        $cidStmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
+        $cidStmt->execute(['id' => $id, 'code' => $id]);
+        $realCid = $cidStmt->fetchColumn() ?: $id;
 
-        Response::json([
-            'success' => true,
-            'data' => [
-                'status' => $newStatus,
-                'isSuspended' => ($newStatus === 'suspended'),
-            ],
-        ]);
+        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+        $res = MikrotikSyncService::toggleSuspend($db, $realCid, $tenantId);
+
+        Response::json($res);
     }
 
     public static function bindMac(string $id): void {
         AuthMiddleware::requireAuth();
-        Response::json([
-            'success' => true,
-            'message' => 'MAC address caller-id bound successfully',
-        ]);
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $cidStmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
+        $cidStmt->execute(['id' => $id, 'code' => $id]);
+        $realCid = $cidStmt->fetchColumn() ?: $id;
+
+        $body = json_decode(file_get_contents('php://input'), true) ?: [];
+        $mac = !empty($body['mac']) ? trim($body['mac']) : null;
+
+        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+        $res = MikrotikSyncService::bindMac($db, $realCid, $mac, $tenantId);
+
+        Response::json($res);
     }
 
     public static function getRouter(string $id): void {

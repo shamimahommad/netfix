@@ -208,9 +208,21 @@ class BillingController {
 
             $db->commit();
 
+            // Real-time synchronization with MikroTik Router
+            $mtMsg = '';
+            try {
+                require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+                $mtRes = MikrotikSyncService::renewCustomer($db, $customerId, (int)$planId);
+                if (!empty($mtRes['message'])) {
+                    $mtMsg = ' • ' . $mtRes['message'];
+                }
+            } catch (\Throwable $mtErr) {
+                error_log("Mikrotik renew sync notice: " . $mtErr->getMessage());
+            }
+
             Response::json([
                 'success' => true,
-                'message' => 'Service renewed successfully',
+                'message' => 'Service renewed successfully' . $mtMsg,
                 'data' => [
                     'new_expire_date' => $newExpireDate,
                     'bill_amount' => $totalAmount,
