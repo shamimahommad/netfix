@@ -117,25 +117,36 @@ export default function LoginPage() {
       }
 
       const response = await authService.login({ email: email.trim(), password });
-      if (selectedTenant && response.user.tenant_id !== selectedTenant.tenantId) {
+      const userObj = response?.user || (response as any)?.data?.user;
+
+      if (!userObj) {
+        setError(
+          (response as any)?.message ||
+          'Authentication failed. Invalid response from server.'
+        );
+        return;
+      }
+
+      if (selectedTenant && userObj.tenant_id !== selectedTenant.tenantId) {
         setError('This account does not belong to the selected tenant.');
         setSelectedTenant(null);
         return;
       }
 
-      setUser(response.user);
-      if (response.user.user_type === 'saas') {
+      setUser(userObj);
+      if (userObj.user_type === 'saas') {
         navigate('/saas/dashboard', { replace: true });
-      } else if (response.user.user_type === 'isp') {
+      } else if (userObj.user_type === 'isp') {
         navigate('/dashboard', { replace: true });
-      } else if (response.user.user_type === 'customer' || response.user.role_code === 'customer') {
+      } else if (userObj.user_type === 'customer' || userObj.role_code === 'customer') {
         navigate('/customer/dashboard', { replace: true });
       } else {
         navigate('/dashboard', { replace: true });
       }
-    } catch (err) {
+    } catch (err: any) {
       const authError = err as AuthError;
-      setError(authError.message || 'Invalid email or password. Please try again.');
+      const msg = authError?.message || (err?.response?.data?.message) || 'Invalid email or password. Please try again.';
+      setError(msg);
     } finally {
       setIsLoading(false);
     }

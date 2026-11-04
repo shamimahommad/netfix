@@ -43,8 +43,10 @@ class Database {
                 PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                 PDO::ATTR_EMULATE_PREPARES   => true,
+                PDO::MYSQL_ATTR_MULTI_STATEMENTS => true,
             ];
             self::$instance = new PDO($dsn, $user, $pass, $options);
+            self::ensureTables(self::$instance);
             return self::$instance;
         } catch (Throwable $e) {
             // Log and exit with JSON error
@@ -55,6 +57,58 @@ class Database {
                 'message' => 'Database connection failed: ' . $e->getMessage(),
             ]);
             exit;
+        }
+    }
+
+    public static function ensureTables(PDO $pdo): void {
+        static $checked = false;
+        if ($checked) return;
+        $checked = true;
+
+        try {
+            // Check if users table exists in the current database
+            $stmt = $pdo->query("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'users' LIMIT 1");
+            if ($stmt && $stmt->fetchColumn()) {
+                return; // Tables already exist!
+            }
+
+            // Tables missing - locate schema.sql
+            $paths = [
+                __DIR__ . '/../database/schema.sql',
+                '/var/www/html/backend/database/schema.sql',
+                dirname(__DIR__, 2) . '/backend/database/schema.sql',
+            ];
+            $schemaFile = null;
+            foreach ($paths as $p) {
+                if (file_exists($p)) {
+                    $schemaFile = $p;
+                    break;
+                }
+            }
+
+            if ($schemaFile && file_exists($schemaFile)) {
+                $sql = file_get_contents($schemaFile);
+                if ($sql) {
+                    $pdo->exec("SET FOREIGN_KEY_CHECKS=0;");
+                    try {
+                        $pdo->exec($sql);
+                    } catch (Throwable $multiErr) {
+                        // Split queries if multi-statement execution throws
+                        $queries = preg_split('/;\s*[\r\n]+/', $sql);
+                        foreach ($queries as $query) {
+                            $query = trim($query);
+                            if ($query !== '' && !str_starts_with($query, '--') && !str_starts_with($query, '/*')) {
+                                try {
+                                    $pdo->exec($query);
+                                } catch (Throwable $ignored) {}
+                            }
+                        }
+                    }
+                    $pdo->exec("SET FOREIGN_KEY_CHECKS=1;");
+                }
+            }
+        } catch (Throwable $e) {
+            error_log('Database auto-migration warning: ' . $e->getMessage());
         }
     }
 }

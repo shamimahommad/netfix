@@ -33,15 +33,20 @@ export default function CustomerLoginPage() {
     setIsLoading(true);
     try {
       const response = await authService.customerLogin(login.trim(), phone.trim());
-      setUser(response.user);
-      if (response.user.role_code === 'customer' || response.user.user_type === 'customer') {
+      const userObj = response?.user || (response as any)?.data?.user;
+      if (!userObj) {
+        setError((response as any)?.message || 'Customer authentication failed.');
+        return;
+      }
+      setUser(userObj);
+      if (userObj.role_code === 'customer' || userObj.user_type === 'customer') {
         navigate('/customer/dashboard', { replace: true });
       } else {
         setError('This login is for customer accounts only. Use the main login for staff.');
       }
-    } catch (err) {
+    } catch (err: any) {
       const authError = err as AuthError & { message?: string | string[] };
-      const msg = authError?.message;
+      const msg = authError?.message || (err?.response?.data?.message);
       setError(
         Array.isArray(msg) ? msg[0] : (msg as string) || 'Invalid email/ID or phone.',
       );

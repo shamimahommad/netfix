@@ -18,10 +18,14 @@ class AuthController {
             Response::error('Email/username and password are required', 400);
         }
 
-        $db = Database::getConnection();
-        $stmt = $db->prepare("SELECT * FROM users WHERE (email = :login1 OR username = :login2) AND status = 'active' LIMIT 1");
-        $stmt->execute(['login1' => $login, 'login2' => $login]);
-        $user = $stmt->fetch();
+        try {
+            $db = Database::getConnection();
+            $stmt = $db->prepare("SELECT * FROM users WHERE (email = :login1 OR username = :login2) AND status = 'active' LIMIT 1");
+            $stmt->execute(['login1' => $login, 'login2' => $login]);
+            $user = $stmt->fetch();
+        } catch (Throwable $e) {
+            Response::error('Database error: ' . $e->getMessage(), 500);
+        }
 
         if (!$user) {
             Response::error('Invalid login credentials', 401);

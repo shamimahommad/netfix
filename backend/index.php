@@ -13,6 +13,11 @@ require_once __DIR__ . '/lib/Response.php';
 require_once __DIR__ . '/lib/JWT.php';
 require_once __DIR__ . '/lib/AuthMiddleware.php';
 
+// Global Exception Handler for Clean JSON Responses
+set_exception_handler(function (Throwable $e) {
+    Response::error($e->getMessage(), 500);
+});
+
 // Controllers
 require_once __DIR__ . '/controllers/AuthController.php';
 require_once __DIR__ . '/controllers/DashboardController.php';
@@ -44,17 +49,41 @@ if ($uri === '') {
 }
 
 // ---------------------------------------------------------------------
-// HEALTH CHECK
+// HEALTH CHECK & SYSTEM INIT
 // ---------------------------------------------------------------------
 if ($uri === '/' || $uri === '/health') {
+    $dbStatus = 'disconnected';
+    try {
+        $db = Database::getConnection();
+        $count = (int)$db->query("SELECT COUNT(*) FROM users")->fetchColumn();
+        $dbStatus = "Connected to MySQL netfix_db ({$count} users)";
+    } catch (Throwable $e) {
+        $dbStatus = "Database error: " . $e->getMessage();
+    }
+
     Response::json([
         'status' => 'healthy',
         'service' => 'NetFix ISP SaaS Pure PHP REST API Engine',
         'version' => '1.0.0',
         'php_version' => PHP_VERSION,
-        'database' => 'Connected to MySQL netfix_db',
+        'database' => $dbStatus,
         'timestamp' => date('c'),
     ]);
+}
+
+if ($uri === '/system/init-db') {
+    try {
+        $db = Database::getConnection();
+        Database::ensureTables($db);
+        $count = (int)$db->query("SELECT COUNT(*) FROM users")->fetchColumn();
+        Response::json([
+            'success' => true,
+            'message' => "Database auto-migrated successfully. Found {$count} registered users.",
+            'users_count' => $count,
+        ]);
+    } catch (Throwable $e) {
+        Response::error('Failed to initialize database: ' . $e->getMessage(), 500);
+    }
 }
 
 // ---------------------------------------------------------------------
