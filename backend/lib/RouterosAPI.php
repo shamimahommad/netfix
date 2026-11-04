@@ -97,7 +97,16 @@ class RouterosAPI {
             return $this->getSimulatedResponse($command, $params);
         }
 
-        $words = array_merge([$command], $params);
+        $words = [$command];
+        foreach ($params as $k => $v) {
+            if (is_int($k)) {
+                $words[] = (string)$v;
+            } elseif (strpos($k, '?') === 0 || strpos($k, '=') === 0) {
+                $words[] = $k . '=' . (string)$v;
+            } else {
+                $words[] = '=' . $k . '=' . (string)$v;
+            }
+        }
         $this->writeSentence($words);
 
         $sentences = $this->readSentences();

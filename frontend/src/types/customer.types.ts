@@ -102,6 +102,7 @@ export interface CustomerDetailResponse {
       uptime: number | null;
       onlineStatus: boolean;
       lastLogoutTime: string | null;
+      lastDisconnectReason?: string | null;
       uploadBytes: number | null;
       downloadBytes: number | null;
       totalDataUsed: number | null;

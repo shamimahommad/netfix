@@ -309,9 +309,10 @@ class CustomersController {
                     'activeMacAddress' => $net['mac_address'] ?? $targetMac ?: null,
                     'deviceVendor' => null,
                     'vendorSource' => null,
-                    'uptime' => (int)($net['uptime_seconds'] ?? 0),
+                    'uptime' => (!empty($net['is_online']) && !empty($net['uptime_seconds'])) ? (int)$net['uptime_seconds'] : 0,
                     'onlineStatus' => (bool)($net['is_online'] ?? false),
-                    'lastLogoutTime' => null,
+                    'lastLogoutTime' => $net['last_offline_at'] ?? null,
+                    'lastDisconnectReason' => $net['last_disconnect_reason'] ?? null,
                     'uploadBytes' => 0,
                     'downloadBytes' => 0,
                     'totalDataUsed' => 0,
@@ -748,22 +749,19 @@ class CustomersController {
 
     public static function macStatus(string $id): void {
         AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
         $cidStmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
         $cidStmt->execute(['id' => $id, 'code' => $id]);
         $realCid = $cidStmt->fetchColumn() ?: $id;
 
-        $stmt = $db->prepare("SELECT mac_address FROM customer_network_accounts WHERE customer_id = :cid LIMIT 1");
-        $stmt->execute(['cid' => $realCid]);
-        $mac = $stmt->fetchColumn();
+        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+        $status = MikrotikSyncService::getMacBindingStatus($db, $realCid, $tenantId);
 
         Response::json([
             'success' => true,
-            'data' => [
-                'hasCallerId' => !empty($mac),
-                'callerId' => $mac ?: null,
-            ],
+            'data' => $status,
         ]);
     }
 
@@ -853,30 +851,19 @@ class CustomersController {
 
     public static function ping(string $id): void {
         AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
-        $stmt = $db->prepare("SELECT current_ip, username FROM customer_network_accounts WHERE customer_id = :cid LIMIT 1");
-        $stmt->execute(['cid' => $id]);
-        $net = $stmt->fetch();
-        $ip = $net['current_ip'] ?? '10.10.10.25';
+
+        $cidStmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
+        $cidStmt->execute(['id' => $id, 'code' => $id]);
+        $realCid = $cidStmt->fetchColumn() ?: $id;
+
+        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+        $res = MikrotikSyncService::pingCustomer($db, $realCid, $tenantId);
 
         Response::json([
-            'success' => true,
-            'data' => [
-                'success' => true,
-                'address' => $ip,
-                'uptime' => '2d 18h',
-                'lines' => [
-                    "PING {$ip} 56 data bytes",
-                    "64 bytes from {$ip}: icmp_seq=1 ttl=64 time=1.8 ms",
-                    "64 bytes from {$ip}: icmp_seq=2 ttl=64 time=2.1 ms",
-                    "64 bytes from {$ip}: icmp_seq=3 ttl=64 time=1.9 ms",
-                    "3 packets transmitted, 3 packets received, 0% packet loss",
-                ],
-                'bandwidthLines' => [
-                    "Rate-Limit: Unlimited / 30M",
-                    "Current Rate: Tx: 820 kbps / Rx: 3.4 Mbps",
-                ],
-            ],
+            'success' => $res['success'],
+            'data' => $res,
         ]);
     }
 

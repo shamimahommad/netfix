@@ -231,9 +231,14 @@ const formatDate = (dateString: string | null): string => {
   return `${day}/${month}/${year}`;
 };
 
-const formatDateTime = (dateString: string | null): string => {
-  if (!dateString) return '';
-  const date = new Date(dateString);
+const formatDateTime = (dateString: string | null | undefined): string => {
+  if (!dateString) return '—';
+  const cleanStr = String(dateString).trim();
+  const date = new Date(cleanStr.replace(' ', 'T'));
+  if (isNaN(date.getTime())) {
+    // Return raw RouterOS date string if standard parsing fails
+    return cleanStr;
+  }
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const year = String(date.getFullYear()).slice(-2);
@@ -244,14 +249,18 @@ const formatDateTime = (dateString: string | null): string => {
   return `${day}-${month}-${year} ${displayHours}:${minutes} ${ampm}`;
 };
 
-const formatUptime = (seconds: number | null): string => {
-  if (seconds === null || seconds === undefined) return '';
+const formatUptime = (seconds: number | null | undefined): string => {
+  if (!seconds || seconds <= 0) return '—';
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const secs = seconds % 60;
-  if (days > 0) return `${days}d ${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-  return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0 || days > 0) parts.push(`${hours}h`);
+  if (minutes > 0 || hours > 0 || days > 0) parts.push(`${minutes}m`);
+  parts.push(`${secs}s`);
+  return parts.join(' ');
 };
 
 const formatTraffic = (bytes: number | null): string => {
@@ -288,6 +297,7 @@ export default function CustomerDetailPage() {
   const [macBindingStatus, setMacBindingStatus] = useState<{ hasCallerId: boolean; callerId: string | null } | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [isDisconnectModalOpen, setIsDisconnectModalOpen] = useState(false);
   const [isRenewModalOpen, setIsRenewModalOpen] = useState(false);
   const [isCashReceivedModalOpen, setIsCashReceivedModalOpen] = useState(false);
   const [cashReceivedForm, setCashReceivedForm] = useState({
@@ -991,33 +1001,28 @@ export default function CustomerDetailPage() {
     }
   };
 
-  const handleDisconnect = async () => {
+  const confirmDisconnectSession = async () => {
     if (!id || !customerData) return;
 
-    const confirmMessage = customerData.network.onlineStatus
-      ? `Are you sure you want to disconnect the active PPPoE session for "${customerData.customer.fullName}"? This will force disconnect the user immediately.`
-      : `Customer is marked offline in cache. Attempt to force disconnect any orphan session for "${customerData.customer.fullName}" from MikroTik?`;
-    
-    if (window.confirm(confirmMessage)) {
-      setIsDisconnecting(true);
-      try {
-        const response = await customersService.disconnectSession(id);
-        if (response.success) {
-          toast.success(response.message || 'Session disconnected successfully.');
-          // Reload customer data to show updated status
-          await loadCustomerDetail();
-          // Reload MAC status if PPPoE
-          if (customerData.network.protocolType === 'pppoe') {
-            await loadMacStatus();
-          }
-        } else {
-          toast.error(response.message || 'Failed to disconnect session.');
+    setIsDisconnecting(true);
+    try {
+      const response = await customersService.disconnectSession(id);
+      if (response.success) {
+        toast.success(response.message || 'Session disconnected successfully.');
+        setIsDisconnectModalOpen(false);
+        // Reload customer data to show updated status
+        await loadCustomerDetail();
+        // Reload MAC status if PPPoE
+        if (customerData.network.protocolType === 'pppoe') {
+          await loadMacStatus();
         }
-      } catch (err: any) {
-        toast.error(err.message || 'Failed to disconnect session.');
-      } finally {
-        setIsDisconnecting(false);
+      } else {
+        toast.error(response.message || 'Failed to disconnect session.');
       }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Failed to disconnect session.');
+    } finally {
+      setIsDisconnecting(false);
     }
   };
 
@@ -1480,7 +1485,14 @@ export default function CustomerDetailPage() {
                 </div>
                 <div className="flex gap-2">
                   <p className="text-sm text-gray-600 dark:text-gray-400 w-20 font-medium">Last Logout:</p>
-                  <p className="text-base font-semibold text-slate-900 dark:text-slate-100">{formatDateTime(network.lastLogoutTime) || '—'}</p>
+                  <p className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                    {formatDateTime(network.lastLogoutTime) || '—'}
+                    {network.lastDisconnectReason ? (
+                      <span className="ml-2 text-xs font-normal text-slate-500 dark:text-slate-400">
+                        ({network.lastDisconnectReason})
+                      </span>
+                    ) : null}
+                  </p>
                 </div>
                 <div className="flex gap-2">
                   <p className="text-sm text-gray-600 dark:text-gray-400 w-20 font-medium">Traffic:</p>
@@ -1565,7 +1577,8 @@ export default function CustomerDetailPage() {
                   <span className="truncate">{isSyncing ? '...' : 'Sync'}</span>
                 </button>
                 <button
-                  onClick={handleDisconnect}
+                  type="button"
+                  onClick={() => setIsDisconnectModalOpen(true)}
                   disabled={isDisconnecting || !customerData || customerData.network.protocolType !== 'pppoe' || !network.onlineStatus}
                   title={!network.onlineStatus ? 'Customer is already offline' : undefined}
                   className="flex items-center justify-center gap-1 sm:gap-2 px-1.5 py-1.5 sm:px-3 sm:py-2.5 bg-red-500 hover:bg-red-600 dark:bg-red-600 dark:hover:bg-red-500 text-white rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 min-w-0"
@@ -1958,6 +1971,102 @@ export default function CustomerDetailPage() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Disconnect PPPoE Session Modal */}
+      {isDisconnectModalOpen && customerData && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="rounded-2xl bg-white/95 dark:bg-slate-800/95 backdrop-blur-lg shadow-2xl max-w-lg w-full border border-red-200/80 dark:border-red-900/50 overflow-hidden">
+            <div className="bg-gradient-to-r from-red-600 to-rose-600 px-5 py-4 flex justify-between items-center text-white">
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <span className="p-1.5 bg-white/20 rounded-lg">
+                  <XMarkIcon className="w-5 h-5 text-white" />
+                </span>
+                Disconnect PPPoE Session
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsDisconnectModalOpen(false)}
+                disabled={isDisconnecting}
+                className="p-1.5 hover:bg-white/20 rounded-lg transition-all disabled:opacity-50"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 sm:p-6 space-y-4">
+              <div className="rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 p-3.5 text-xs sm:text-sm text-amber-800 dark:text-amber-300 flex items-start gap-2.5">
+                <ExclamationTriangleIcon className="w-5 h-5 flex-shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-sm">Force Disconnect from MikroTik</p>
+                  <p className="mt-1 text-amber-700 dark:text-amber-300/90 leading-relaxed text-xs sm:text-sm">
+                    This will forcibly terminate the active PPPoE session directly on MikroTik router <strong>{customerData.network.serverName || 'Core Router'}</strong>. The client router will drop offline immediately.
+                  </p>
+                </div>
+              </div>
+
+              {/* Session Overview Table */}
+              <div className="rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-700/80 p-3.5 space-y-2 text-xs sm:text-sm">
+                <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-800">
+                  <span className="text-slate-500 dark:text-slate-400">Customer:</span>
+                  <span className="font-semibold text-slate-900 dark:text-slate-100">{customerData.customer.fullName} ({customerData.customer.customerCode})</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-800">
+                  <span className="text-slate-500 dark:text-slate-400">PPPoE User:</span>
+                  <span className="font-mono font-semibold text-sky-600 dark:text-teal-400">{customerData.network.username}</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-800">
+                  <span className="text-slate-500 dark:text-slate-400">IP Address:</span>
+                  <span className="font-mono text-slate-800 dark:text-slate-200">{customerData.network.ipAddress || '—'}</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-800">
+                  <span className="text-slate-500 dark:text-slate-400">MAC Address:</span>
+                  <span className="font-mono text-slate-800 dark:text-slate-200">{customerData.network.activeMacAddress || customerData.network.macAddress || '—'}</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-800">
+                  <span className="text-slate-500 dark:text-slate-400">Active Uptime:</span>
+                  <span className="font-semibold text-emerald-600 dark:text-emerald-400">{formatUptime(customerData.network.uptime)}</span>
+                </div>
+                <div className="flex justify-between py-1">
+                  <span className="text-slate-500 dark:text-slate-400">Current Status:</span>
+                  <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-600 dark:text-emerald-400">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Online (Active Session)
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-3 border-t border-slate-200/80 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/40 flex justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsDisconnectModalOpen(false)}
+                disabled={isDisconnecting}
+                className="px-4 py-2 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-xl font-medium text-xs sm:text-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDisconnectSession}
+                disabled={isDisconnecting}
+                className="flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold text-xs sm:text-sm shadow-md transition-all disabled:opacity-50"
+              >
+                {isDisconnecting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Disconnecting...</span>
+                  </>
+                ) : (
+                  <>
+                    <XMarkIcon className="w-4 h-4" />
+                    <span>Disconnect Now</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
