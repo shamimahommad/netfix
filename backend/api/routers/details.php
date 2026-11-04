@@ -3,6 +3,7 @@
  * NetFix ISP SaaS - Router Real-Time Diagnostics API
  * Endpoint: GET /api/routers/details.php?id={router_id}
  * Compatible with RouterOS v6 and v7
+ * Supports persistent single-login session via background live telemetry worker
  */
 
 header('Content-Type: application/json; charset=utf-8');
@@ -19,7 +20,7 @@ try {
     exit;
 }
 
-$routerId = $_GET['id'] ?? $_GET['router_id'] ?? $_GET['device_id'] ?? null;
+$routerId = (int)($_GET['id'] ?? $_GET['router_id'] ?? $_GET['device_id'] ?? 0);
 if (!$routerId) {
     http_response_code(400);
     echo json_encode(['success' => false, 'status' => 'error', 'message' => 'Router ID is required']);
@@ -56,6 +57,63 @@ if (empty($ip)) {
     exit;
 }
 
+// -----------------------------------------------------------------
+// PERSISTENT LIVE SESSION MANAGER
+// Holds 1 single login session to MikroTik while modal is being viewed.
+// -----------------------------------------------------------------
+$cacheDir = __DIR__ . '/../../cache';
+if (!is_dir($cacheDir)) {
+    @mkdir($cacheDir, 0777, true);
+}
+
+$touchFile = $cacheDir . '/router_' . $routerId . '_touch.json';
+$cacheFile = $cacheDir . '/router_' . $routerId . '_live.json';
+$hbFile    = $cacheDir . '/router_' . $routerId . '_worker_hb.txt';
+
+// 1. Record frontend heartbeat touch
+file_put_contents($touchFile, json_encode([
+    'last_touched' => time(),
+    'requested_by' => $user['user_id'] ?? 0
+]));
+
+// 2. Check if background persistent session worker is alive
+$isWorkerAlive = file_exists($hbFile) && ((time() - filemtime($hbFile)) < 6);
+
+if (!$isWorkerAlive) {
+    // Launch persistent worker in background (single login session)
+    $phpBin = PHP_BINARY;
+    $workerScript = __DIR__ . '/../../services/RouterLiveSessionWorker.php';
+    if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+        pclose(popen("start /B \"\" \"$phpBin\" \"$workerScript\" " . (int)$routerId, "r"));
+    } else {
+        exec("nohup \"$phpBin\" \"$workerScript\" " . (int)$routerId . " > /dev/null 2>&1 &");
+    }
+}
+
+// 3. If fresh live data exists (< 4 seconds old), return instantly without logging in again
+if (file_exists($cacheFile) && (time() - filemtime($cacheFile) <= 4)) {
+    $content = @file_get_contents($cacheFile);
+    if (!empty($content)) {
+        header('X-MikroTik-Session: Persistent-Cached');
+        echo $content;
+        exit;
+    }
+}
+
+// 4. If worker just spawned, wait briefly (up to 800ms) for first live frame
+for ($i = 0; $i < 8; $i++) {
+    usleep(100000); // 100ms
+    if (file_exists($cacheFile) && (time() - filemtime($cacheFile) <= 4)) {
+        $content = @file_get_contents($cacheFile);
+        if (!empty($content)) {
+            header('X-MikroTik-Session: Persistent-Live');
+            echo $content;
+            exit;
+        }
+    }
+}
+
+// 5. Fallback: Direct query if worker hasn't written yet
 $api = new RouterosAPI();
 $api->timeout = 4;
 $api->attempts = 1;
@@ -68,7 +126,6 @@ try {
 }
 
 if (!$connected) {
-    // Graceful offline response
     echo json_encode([
         'success' => false,
         'status'  => 'offline',
@@ -79,33 +136,27 @@ if (!$connected) {
 }
 
 try {
-    // 1. Identity
     $identResult = $api->comm('/system/identity/print');
     $identity = $identResult[0]['name'] ?? ($router['device_name'] ?? 'MikroTik');
 
-    // 2. Resource Stats
     $resResult = $api->comm('/system/resource/print');
     $res = $resResult[0] ?? [];
 
-    // 3. Count Active PPPoE Sessions
     $activeSessions = $api->comm('/ppp/active/print');
     $activeCount = count($activeSessions);
 
-    // RAM calculation
     $totalRamBytes = (int)($res['total-memory'] ?? 0);
     $freeRamBytes = (int)($res['free-memory'] ?? 0);
     $ramUsagePercent = $totalRamBytes > 0 
         ? (int)round((($totalRamBytes - $freeRamBytes) / $totalRamBytes) * 100) 
         : 0;
 
-    // HDD calculation
     $totalHddBytes = (int)($res['total-hdd-space'] ?? 0);
     $freeHddBytes = (int)($res['free-hdd-space'] ?? 0);
     $hddUsagePercent = $totalHddBytes > 0 
         ? (int)round((($totalHddBytes - $freeHddBytes) / $totalHddBytes) * 100) 
         : 0;
 
-    // Format bytes helper
     $formatBytes = function (int $bytes): string {
         if ($bytes >= 1073741824) {
             return round($bytes / 1073741824, 1) . ' GB';
@@ -120,9 +171,10 @@ try {
     $cpuCores = (int)($res['cpu-count'] ?? 1);
     $cpuArch = $res['cpu'] ?? ($res['architecture-name'] ?? 'Generic');
 
-    echo json_encode([
+    $outData = [
         'success' => true,
         'status'  => 'online',
+        'session' => 'direct_fallback',
         'data'    => [
             'identity'           => $identity,
             'model'              => $model,
@@ -138,9 +190,10 @@ try {
             'free_hdd'           => $formatBytes($freeHddBytes),
             'hdd_usage_percent'  => $hddUsagePercent,
             'active_pppoe_users' => $activeCount,
-            'latency_ms'         => null
         ]
-    ]);
+    ];
+
+    echo json_encode($outData);
 } catch (\Throwable $e) {
     echo json_encode([
         'success' => false,
@@ -148,5 +201,7 @@ try {
         'message' => 'Failed to query diagnostic data: ' . $e->getMessage()
     ]);
 } finally {
-    $api->disconnect();
+    try {
+        $api->disconnect();
+    } catch (\Throwable $e) {}
 }

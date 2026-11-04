@@ -104,12 +104,65 @@ export default function MikroTikPage() {
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
-  // Diagnostics Modal State
+  // Diagnostics Modal State with Persistent Live Stream & 5-minute Auto-Pause
   const [selectedRouterForDiag, setSelectedRouterForDiag] = useState<NetworkDevice | null>(null);
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagData, setDiagData] = useState<any | null>(null);
   const [diagStatus, setDiagStatus] = useState<'online' | 'offline' | 'error' | null>(null);
   const [diagError, setDiagError] = useState<string | null>(null);
+  const [diagSecondsLeft, setDiagSecondsLeft] = useState<number>(300); // 5 minutes max
+  const [diagIsPaused, setDiagIsPaused] = useState<boolean>(false);
+
+  const pollingIntervalRef = useRef<any>(null);
+  const countdownIntervalRef = useRef<any>(null);
+
+  const stopLiveStream = () => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+  };
+
+  const formatCountdown = (totalSeconds: number): string => {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
+
+  const startLiveStream = (deviceId: string) => {
+    stopLiveStream();
+    setDiagSecondsLeft(300); // Reset to 5 minutes
+    setDiagIsPaused(false);
+
+    // 1-second countdown timer
+    countdownIntervalRef.current = setInterval(() => {
+      setDiagSecondsLeft((prev) => {
+        if (prev <= 1) {
+          stopLiveStream();
+          setDiagIsPaused(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    // 2.5-second silent live telemetry polling (reusing persistent MikroTik API socket)
+    pollingIntervalRef.current = setInterval(async () => {
+      try {
+        const res = await networkService.getRouterDetails(deviceId);
+        if (res.success && res.data) {
+          setDiagData(res.data);
+          setDiagStatus('online');
+        }
+      } catch (err) {
+        // Silently preserve current frame on momentary network glitch
+      }
+    }, 2500);
+  };
 
   const handleOpenDiagnostics = async (device: NetworkDevice) => {
     setSelectedRouterForDiag(device);
@@ -117,18 +170,24 @@ export default function MikroTikPage() {
     setDiagData(null);
     setDiagError(null);
     setDiagStatus(null);
+    stopLiveStream();
+
     try {
       const res = await networkService.getRouterDetails(device.networkDeviceId);
       if (res.success && res.data) {
         setDiagData(res.data);
         setDiagStatus('online');
+        // Start 5-minute continuous live stream
+        startLiveStream(device.networkDeviceId);
       } else {
         setDiagStatus('offline');
         setDiagError(res.message || 'Router unreachable or API disabled');
+        stopLiveStream();
       }
     } catch (err: any) {
       setDiagStatus('offline');
       setDiagError(err?.response?.data?.message || err?.message || 'Failed to connect to router');
+      stopLiveStream();
     } finally {
       setDiagLoading(false);
     }
@@ -138,22 +197,42 @@ export default function MikroTikPage() {
     if (!selectedRouterForDiag) return;
     setDiagLoading(true);
     setDiagError(null);
+
     try {
       const res = await networkService.getRouterDetails(selectedRouterForDiag.networkDeviceId);
       if (res.success && res.data) {
         setDiagData(res.data);
         setDiagStatus('online');
+        // Restart 5-minute continuous live stream
+        startLiveStream(selectedRouterForDiag.networkDeviceId);
       } else {
         setDiagStatus('offline');
         setDiagError(res.message || 'Router unreachable or API disabled');
+        stopLiveStream();
       }
     } catch (err: any) {
       setDiagStatus('offline');
       setDiagError(err?.response?.data?.message || err?.message || 'Failed to connect to router');
+      stopLiveStream();
     } finally {
       setDiagLoading(false);
     }
   };
+
+  const handleCloseDiagnostics = () => {
+    stopLiveStream();
+    setSelectedRouterForDiag(null);
+    setDiagData(null);
+    setDiagError(null);
+    setDiagIsPaused(false);
+  };
+
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      stopLiveStream();
+    };
+  }, []);
 
   useEffect(() => {
     loadDevices();
@@ -1125,13 +1204,25 @@ export default function MikroTikPage() {
                     <Activity className="w-6 h-6 animate-pulse" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <h2 className="text-xl font-bold tracking-tight">
                         {diagData?.identity || selectedRouterForDiag.deviceName}
                       </h2>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700/80 text-slate-300 font-mono">
                         {diagData?.model || selectedRouterForDiag.vendor.toUpperCase()}
                       </span>
+                      {diagStatus === 'online' && !diagIsPaused && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                          Live Stream ({formatCountdown(diagSecondsLeft)})
+                        </span>
+                      )}
+                      {diagIsPaused && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          <span className="w-2 h-2 rounded-full bg-amber-400" />
+                          Auto-Paused (5m reached)
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-slate-400 font-mono mt-0.5">
                       {selectedRouterForDiag.managementIp}:{selectedRouterForDiag.managementPort}
@@ -1144,18 +1235,14 @@ export default function MikroTikPage() {
                   <button
                     onClick={handleRefreshDiagnostics}
                     disabled={diagLoading}
-                    className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all disabled:opacity-50 flex items-center gap-1.5 text-xs font-medium"
-                    title="Refresh live stats"
+                    className="p-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition-all disabled:opacity-50 flex items-center gap-1.5 text-xs font-semibold shadow-md active:scale-95"
+                    title={diagIsPaused ? "Click to restart 5-minute live stream" : "Refresh live stats"}
                   >
                     <RefreshCw className={`w-4 h-4 ${diagLoading ? 'animate-spin' : ''}`} />
-                    <span className="hidden sm:inline">Refresh</span>
+                    <span>{diagIsPaused ? 'Resume Live' : 'Refresh'}</span>
                   </button>
                   <button
-                    onClick={() => {
-                      setSelectedRouterForDiag(null);
-                      setDiagData(null);
-                      setDiagError(null);
-                    }}
+                    onClick={handleCloseDiagnostics}
                     className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-xl transition-all"
                   >
                     <X className="w-5 h-5" />
@@ -1165,6 +1252,24 @@ export default function MikroTikPage() {
 
               {/* Modal Body */}
               <div className="p-6 overflow-y-auto space-y-6">
+                {/* 5-Minute Auto-Pause Notice Banner */}
+                {diagIsPaused && (
+                  <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-wrap items-center justify-between gap-3 text-xs text-amber-800 dark:text-amber-300">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                      <span>
+                        <strong>Auto-refresh paused:</strong> 5-minute live monitoring limit reached to preserve router CPU. Click <strong>Resume Live</strong> to start another 5 minutes.
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleRefreshDiagnostics}
+                      className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold rounded-lg text-xs transition-all shadow-sm active:scale-95 flex-shrink-0"
+                    >
+                      Resume Live
+                    </button>
+                  </div>
+                )}
+
                 {/* Status Bar */}
                 <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
                   <div className="flex items-center gap-2">
@@ -1179,7 +1284,7 @@ export default function MikroTikPage() {
                     ) : diagStatus === 'online' ? (
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                        ONLINE (API Connected)
+                        ONLINE (1 Persistent API Session)
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300 border border-red-300 dark:border-red-700">
@@ -1190,8 +1295,10 @@ export default function MikroTikPage() {
                   </div>
 
                   {diagData && (
-                    <div className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                      ROS {diagData.version}
+                    <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono">
+                      <span>ROS {diagData.version}</span>
+                      <span className="text-slate-300 dark:text-slate-600">•</span>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-sans font-semibold">1 Active Session</span>
                     </div>
                   )}
                 </div>
