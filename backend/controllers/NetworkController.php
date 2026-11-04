@@ -520,18 +520,24 @@ class NetworkController {
         $realDeviceId = (int)$device['network_device_id'];
         $pon = !empty($_GET['pon']) ? (int)$_GET['pon'] : null;
 
-        // Fetch customer network accounts for this tenant to match by MAC address
-        $custMap = [];
+        // Fetch customer network accounts for this tenant to match by router MAC or username
+        $custMap = ['mac' => [], 'user' => []];
         try {
             $cStmt = $db->prepare("SELECT c.customer_id, c.customer_code, c.full_name, na.username, na.mac_address 
                 FROM customer_network_accounts na
                 JOIN customers c ON c.customer_id = na.customer_id
-                WHERE (na.tenant_id = :tid OR na.tenant_id = :ctid) AND na.mac_address IS NOT NULL AND na.mac_address != ''");
+                WHERE (na.tenant_id = :tid OR na.tenant_id = :ctid)");
             $cStmt->execute(['tid' => $tenantId, 'ctid' => $device['tenant_id']]);
             $custRows = $cStmt->fetchAll();
             foreach ($custRows as $cr) {
-                $m = strtoupper(str_replace(['-', '.', ' '], ':', trim($cr['mac_address'])));
-                $custMap[$m] = $cr;
+                if (!empty($cr['mac_address'])) {
+                    $m = strtoupper(str_replace(['-', '.', ' '], ':', trim($cr['mac_address'])));
+                    $custMap['mac'][$m] = $cr;
+                }
+                if (!empty($cr['username'])) {
+                    $u = strtolower(trim($cr['username']));
+                    $custMap['user'][$u] = $cr;
+                }
             }
         } catch (\Throwable $e) {}
 
@@ -550,22 +556,41 @@ class NetworkController {
 
         $onus = [];
         foreach ($rows as $r) {
-            $m = strtoupper($r['mac_address']);
+            $onuMac = strtoupper($r['mac_address']);
+            $routerMac = !empty($r['router_mac']) ? strtoupper($r['router_mac']) : null;
+            $pppoeUsername = !empty($r['pppoe_username']) ? trim($r['pppoe_username']) : null;
+
+            // Match customer via router_mac or pppoe_username
             $matchedCustomer = null;
-            if (isset($custMap[$m])) {
+            if ($routerMac && isset($custMap['mac'][$routerMac])) {
+                $cr = $custMap['mac'][$routerMac];
                 $matchedCustomer = [
-                    'customerId' => (string)$custMap[$m]['customer_id'],
-                    'customerCode' => (string)$custMap[$m]['customer_code'],
-                    'customerName' => (string)$custMap[$m]['full_name'],
-                    'username' => (string)$custMap[$m]['username'],
+                    'customerId' => (string)$cr['customer_id'],
+                    'customerCode' => (string)$cr['customer_code'],
+                    'customerName' => (string)$cr['full_name'],
+                    'username' => (string)$cr['username'],
                 ];
+                if (!$pppoeUsername) $pppoeUsername = $cr['username'];
+            } elseif ($pppoeUsername && isset($custMap['user'][strtolower($pppoeUsername)])) {
+                $cr = $custMap['user'][strtolower($pppoeUsername)];
+                $matchedCustomer = [
+                    'customerId' => (string)$cr['customer_id'],
+                    'customerCode' => (string)$cr['customer_code'],
+                    'customerName' => (string)$cr['full_name'],
+                    'username' => (string)$cr['username'],
+                ];
+                if (!$routerMac && !empty($cr['mac_address'])) {
+                    $routerMac = strtoupper(str_replace(['-', '.', ' '], ':', trim($cr['mac_address'])));
+                }
             }
 
             $onus[] = [
                 'ponPort' => (int)$r['pon_port'],
                 'ponPortName' => $r['pon_port_name'],
                 'onuId' => $r['onu_id'],
-                'macAddress' => $m,
+                'macAddress' => $onuMac,
+                'routerMac' => $routerMac,
+                'pppoe' => $pppoeUsername,
                 'rxPowerDbm' => (float)$r['rx_power_dbm'],
                 'status' => $r['status'],
                 'lastSyncAt' => $r['last_sync_at'],

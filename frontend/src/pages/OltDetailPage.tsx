@@ -26,6 +26,8 @@ interface OnuRecord {
   ponPortName: string;
   onuId: string;
   macAddress: string;
+  routerMac?: string | null;
+  pppoe?: string | null;
   rxPowerDbm: number;
   status: string;
   lastSyncAt: string;
@@ -138,12 +140,14 @@ export default function OltDetailPage() {
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase().trim();
       const macMatches = onu.macAddress.toLowerCase().includes(q);
+      const routerMacMatches = onu.routerMac ? onu.routerMac.toLowerCase().includes(q) : false;
+      const pppoeMatches = onu.pppoe ? onu.pppoe.toLowerCase().includes(q) : false;
       const onuIdMatches = onu.onuId.toLowerCase().includes(q);
       const custNameMatches = onu.customer?.customerName.toLowerCase().includes(q);
       const custUserMatches = onu.customer?.username.toLowerCase().includes(q);
       const custCodeMatches = onu.customer?.customerCode.toLowerCase().includes(q);
 
-      return macMatches || onuIdMatches || custNameMatches || custUserMatches || custCodeMatches;
+      return macMatches || routerMacMatches || pppoeMatches || onuIdMatches || custNameMatches || custUserMatches || custCodeMatches;
     });
   }, [onus, selectedPon, signalFilter, searchQuery]);
 
@@ -495,20 +499,23 @@ export default function OltDetailPage() {
           <table className="w-full text-left text-xs" style={{ tableLayout: 'fixed' }}>
             <thead className="bg-slate-50/80 dark:bg-slate-900/70 border-b border-slate-200/80 dark:border-slate-700/80 text-slate-600 dark:text-slate-400 font-semibold uppercase tracking-wider">
               <tr>
-                <th className="px-4 py-3.5 font-bold" style={{ width: '14%' }}>
+                <th className="px-4 py-3.5 font-bold" style={{ width: '12%' }}>
                   Port & ONU ID
                 </th>
-                <th className="px-4 py-3.5 font-bold" style={{ width: '18%' }}>
-                  MAC Address
+                <th className="px-4 py-3.5 font-bold" style={{ width: '15%' }}>
+                  ONU MAC
                 </th>
-                <th className="px-4 py-3.5 font-bold" style={{ width: '16%' }}>
+                <th className="px-4 py-3.5 font-bold" style={{ width: '14%' }}>
                   Optical Rx Power
                 </th>
-                <th className="px-4 py-3.5 font-bold" style={{ width: '12%' }}>
+                <th className="px-4 py-3.5 font-bold" style={{ width: '9%' }}>
                   Status
                 </th>
-                <th className="px-4 py-3.5 font-bold" style={{ width: '28%' }}>
-                  Matched MikroTik Customer
+                <th className="px-4 py-3.5 font-bold" style={{ width: '15%' }}>
+                  Router MAC
+                </th>
+                <th className="px-4 py-3.5 font-bold" style={{ width: '23%' }}>
+                  PPPoE
                 </th>
                 <th className="px-4 py-3.5 font-bold" style={{ width: '12%' }}>
                   Last Synced
@@ -518,14 +525,14 @@ export default function OltDetailPage() {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60 bg-white dark:bg-slate-800">
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-16 text-slate-400">
+                  <td colSpan={7} className="text-center py-16 text-slate-400">
                     <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-500" />
                     <span className="font-medium text-xs">Loading device records...</span>
                   </td>
                 </tr>
               ) : filteredOnus.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-16 text-slate-400">
+                  <td colSpan={7} className="text-center py-16 text-slate-400">
                     <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto mb-2">
                       <Search className="w-5 h-5 text-slate-400" />
                     </div>
@@ -555,14 +562,14 @@ export default function OltDetailPage() {
                         </div>
                       </td>
 
-                      {/* MAC Address */}
+                      {/* ONU MAC */}
                       <td className="px-4 py-3 font-mono font-semibold text-slate-800 dark:text-slate-200">
                         <div className="flex items-center gap-1.5">
                           <span>{onu.macAddress}</span>
                           <button
                             onClick={() => handleCopyMac(onu.macAddress)}
                             className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
-                            title="Copy MAC address"
+                            title="Copy ONU MAC address"
                           >
                             {copiedMac === onu.macAddress ? (
                               <Check className="w-3.5 h-3.5 text-emerald-500" />
@@ -589,7 +596,29 @@ export default function OltDetailPage() {
                         </span>
                       </td>
 
-                      {/* Matched Customer */}
+                      {/* Router MAC */}
+                      <td className="px-4 py-3 font-mono font-semibold text-slate-800 dark:text-slate-200">
+                        {onu.routerMac ? (
+                          <div className="flex items-center gap-1.5">
+                            <span>{onu.routerMac}</span>
+                            <button
+                              onClick={() => handleCopyMac(onu.routerMac!)}
+                              className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
+                              title="Copy Router MAC"
+                            >
+                              {copiedMac === onu.routerMac ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-500" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 dark:text-slate-500 font-mono">—</span>
+                        )}
+                      </td>
+
+                      {/* PPPoE */}
                       <td className="px-4 py-3">
                         {isMatched && onu.customer ? (
                           <button
@@ -610,9 +639,14 @@ export default function OltDetailPage() {
                             </div>
                             <ExternalLink className="w-3 h-3 shrink-0 opacity-60 group-hover:opacity-100 ml-auto" />
                           </button>
+                        ) : onu.pppoe ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono text-xs border border-slate-200 dark:border-slate-700">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                            {onu.pppoe}
+                          </span>
                         ) : (
                           <span className="inline-flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500 font-mono italic">
-                            Unassigned ONU
+                            Unassigned
                           </span>
                         )}
                       </td>
