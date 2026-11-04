@@ -180,3 +180,4 @@ class MacVendorService {
         return trim($clean) ?: $raw;
     }
 }
+

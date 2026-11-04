@@ -11,3 +11,4 @@ $db->exec("CREATE TABLE IF NOT EXISTS mac_vendor_cache (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
 echo "Table mac_vendor_cache created or already exists.\n";
+
