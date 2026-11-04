@@ -463,16 +463,16 @@ if ($method === 'GET' && $uri === '/task-logs/check') {
 // ---------------------------------------------------------------------
 // PUBLIC TOPUP & RECHARGE
 // ---------------------------------------------------------------------
-if ($method === 'GET' && $uri === '/public/topup/tenants') {
+if ($method === 'GET' && ($uri === '/public/topup/tenants' || $uri === '/topup/tenants')) {
     PublicTopupController::tenants();
 }
-if ($method === 'GET' && $uri === '/public/topup/lookup') {
+if ($method === 'GET' && ($uri === '/public/topup/lookup' || $uri === '/topup/lookup')) {
     PublicTopupController::lookup();
 }
-if ($method === 'GET' && $uri === '/public/topup/payment-methods') {
+if ($method === 'GET' && ($uri === '/public/topup/payment-methods' || $uri === '/topup/payment-methods')) {
     PublicTopupController::paymentMethods();
 }
-if ($method === 'POST' && $uri === '/public/topup/initiate') {
+if ($method === 'POST' && ($uri === '/public/topup/initiate' || $uri === '/topup/initiate')) {
     PublicTopupController::initiate();
 }
 

@@ -136,7 +136,7 @@ export default function CustomerLoginPage() {
         {/* Top Header Right Actions */}
         <div className="flex items-center gap-3">
           <Link
-            to="/public/topup"
+            to="/topup"
             className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-xs font-semibold text-cyan-300 transition-colors"
           >
             <CreditCard className="w-3.5 h-3.5 text-cyan-400" />
@@ -248,7 +248,7 @@ export default function CustomerLoginPage() {
                 </div>
               </div>
               <Link
-                to="/public/topup"
+                to="/topup"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 font-semibold transition-colors shrink-0"
               >
                 <span>Quick Pay</span>
@@ -502,7 +502,7 @@ export default function CustomerLoginPage() {
           © 2026 <span className="text-slate-300 font-semibold">NetFix</span> Customer Self-Care. All rights reserved.
         </div>
         <div className="flex items-center gap-4 text-[11px]">
-          <Link to="/public/topup" className="text-slate-400 hover:text-cyan-400 transition-colors">
+          <Link to="/topup" className="text-slate-400 hover:text-cyan-400 transition-colors">
             Quick Pay
           </Link>
           <span>·</span>
@@ -570,7 +570,7 @@ export default function CustomerLoginPage() {
 
                 <div className="p-3 rounded-2xl bg-emerald-950/30 border border-emerald-800/40 text-emerald-300 text-[11px]">
                   <strong>Need instant recharge without login?</strong> You can pay directly via bKash/Nagad on the{' '}
-                  <Link to="/public/topup" className="underline font-bold text-white">
+                  <Link to="/topup" className="underline font-bold text-white">
                     Instant Topup
                   </Link>{' '}
                   page.

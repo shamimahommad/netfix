@@ -102,6 +102,7 @@ function AppContent() {
             />
             <Route path="/customer/payment-callback" element={<CustomerPaymentCallbackPage />} />
             <Route path="/topup" element={<PublicTopupPage />} />
+            <Route path="/public/topup" element={<PublicTopupPage />} />
             <Route path="/" element={<Navigate to="/login" replace />} />
 
             {/* Customer portal: layout with sidebar + nested pages */}

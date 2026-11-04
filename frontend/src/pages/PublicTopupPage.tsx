@@ -292,7 +292,7 @@ export default function PublicTopupPage() {
             </Link>
 
             <Link
-              to="/public/topup"
+              to="/topup"
               className="inline-flex items-center gap-2 text-xs sm:text-sm font-medium text-slate-400 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-800 px-3.5 py-1.5 rounded-lg transition-colors"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -366,7 +366,7 @@ export default function PublicTopupPage() {
                   </Link>
 
                   <Link
-                    to="/public/topup"
+                    to="/topup"
                     className="inline-flex items-center justify-center gap-2 w-full py-3.5 px-4 rounded-xl bg-slate-800/90 hover:bg-slate-800 text-white font-semibold text-sm border border-slate-700/80 transition-colors"
                   >
                     Recharge Another
@@ -390,7 +390,7 @@ export default function PublicTopupPage() {
 
                 <div className="space-y-3">
                   <Link
-                    to="/public/topup"
+                    to="/topup"
                     className="inline-flex items-center justify-center gap-2 w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-bold text-sm shadow-lg shadow-cyan-500/20 active:scale-[0.98] transition-all"
                   >
                     <ArrowLeft className="w-4 h-4" />
