@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import {
   CreditCard,
@@ -8,19 +8,12 @@ import {
   ArrowLeft,
   CheckCircle2,
   XCircle,
-  Calendar,
-  Wifi,
-  Building2,
   ShieldCheck,
   Sparkles,
   ArrowRight,
-  Phone,
-  HelpCircle,
-  ChevronDown
+  Wifi,
 } from 'lucide-react';
 import { api } from '@/lib/api';
-
-const DEFAULT_TENANT_ID = import.meta.env.VITE_DEFAULT_TENANT_ID || '';
 
 type PaymentMethodItem = {
   gateway: string;
@@ -28,15 +21,10 @@ type PaymentMethodItem = {
   description: string;
 };
 
-type TenantOption = {
-  tenant_id: string;
-  tenant_code: string;
-  tenant_name: string;
-};
-
 type LookupResultCustomer = {
   type: 'customer';
   tenant_id: string;
+  tenant_name?: string;
   customer_id: string;
   name: string;
   user_id: string;
@@ -52,6 +40,7 @@ type LookupResultCustomer = {
 type LookupResultReseller = {
   type: 'reseller';
   tenant_id: string;
+  tenant_name?: string;
   user_id: string;
   name: string;
   previous_balance: number;
@@ -82,17 +71,6 @@ export default function PublicTopupPage() {
   const amountParam = searchParams.get('amount') || '';
   const gatewayParam = searchParams.get('gateway') || '';
 
-  // Tenants list
-  const [tenants, setTenants] = useState<TenantOption[]>([]);
-  const [selectedTenantId, setSelectedTenantId] = useState<string>('');
-
-  // Tenant ID from URL (?tenant_id= or ?isp=) or fallback
-  const tenantIdFromUrl = useMemo(() => {
-    return (searchParams.get('tenant_id') || searchParams.get('isp') || '').trim();
-  }, [searchParams]);
-
-  const activeTenantId = selectedTenantId || tenantIdFromUrl || DEFAULT_TENANT_ID;
-
   // Search input & state
   const qFromUrl = searchParams.get('q') || '';
   const [query, setQuery] = useState(qFromUrl);
@@ -104,55 +82,20 @@ export default function PublicTopupPage() {
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodItem[]>([]);
   const lastAutoSearchKey = useRef<string>('');
 
-  // Fetch tenants on mount
-  useEffect(() => {
-    api
-      .get<TenantOption[]>('/public/topup/tenants')
-      .then(({ data }) => {
-        const list = Array.isArray(data) ? data : [];
-        setTenants(list);
-        if (!selectedTenantId) {
-          if (tenantIdFromUrl && list.some((t) => t.tenant_id === tenantIdFromUrl)) {
-            setSelectedTenantId(tenantIdFromUrl);
-          } else if (list.length > 0) {
-            setSelectedTenantId(list[0].tenant_id);
-          }
-        }
-      })
-      .catch(() => {
-        // Fallback default list
-        setTenants([
-          { tenant_id: '1', tenant_code: 'ISP001', tenant_name: 'NetFix Cloud Network' },
-          { tenant_id: '2', tenant_code: 'ISP002', tenant_name: 'SpeedNet Fiber Broadband' },
-        ]);
-        if (!selectedTenantId) {
-          setSelectedTenantId('2');
-        }
-      });
-  }, [tenantIdFromUrl]);
-
-  const currentTenant = useMemo(() => {
-    return tenants.find((t) => t.tenant_id === activeTenantId) || null;
-  }, [tenants, activeTenantId]);
-
-  const runLookup = async (q: string, targetTenantId?: string) => {
-    const tid = targetTenantId || activeTenantId;
+  const runLookup = async (q: string) => {
     if (!q.trim()) return;
     setError(null);
     setResult(null);
     setLoading(true);
     try {
       const { data } = await api.get<LookupResult>('/public/topup/lookup', {
-        params: { q: q.trim(), tenant_id: tid || undefined },
+        params: { q: q.trim() },
       });
       setResult(data);
       if (data.type === 'customer') {
         setAmount(String(data.payable_amount || ''));
       } else {
         setAmount('');
-      }
-      if (data.tenant_id && data.tenant_id !== activeTenantId) {
-        setSelectedTenantId(data.tenant_id);
       }
     } catch (err: any) {
       const msg = err?.response?.data?.message || err?.message || 'Subscriber account not found';
@@ -166,12 +109,11 @@ export default function PublicTopupPage() {
   useEffect(() => {
     const q = (qFromUrl || '').trim();
     if (!q) return;
-    const key = `${activeTenantId}:${q}`;
-    if (lastAutoSearchKey.current === key) return;
-    lastAutoSearchKey.current = key;
+    if (lastAutoSearchKey.current === q) return;
+    lastAutoSearchKey.current = q;
     setQuery(q);
-    runLookup(q, activeTenantId);
-  }, [activeTenantId, qFromUrl]);
+    runLookup(q);
+  }, [qFromUrl]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -184,12 +126,11 @@ export default function PublicTopupPage() {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('q', q);
-      if (activeTenantId) next.set('isp', activeTenantId);
       return next;
     });
 
-    lastAutoSearchKey.current = `${activeTenantId}:${q}`;
-    await runLookup(q, activeTenantId);
+    lastAutoSearchKey.current = q;
+    await runLookup(q);
   };
 
   // Load payment methods when result changes
@@ -260,7 +201,7 @@ export default function PublicTopupPage() {
   const fillDemoCustomer = () => {
     setQuery('100001');
     setError(null);
-    runLookup('100001', activeTenantId);
+    runLookup('100001');
   };
 
   // =========================================================================
@@ -495,41 +436,6 @@ export default function PublicTopupPage() {
               <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
 
               <form onSubmit={handleSearch} className="space-y-5">
-                {/* ISP Network Selection */}
-                {tenants.length > 1 && (
-                  <div>
-                    <label className="flex items-center justify-between text-xs font-semibold text-slate-300 mb-2">
-                      <span className="flex items-center gap-1.5">
-                        <Building2 className="w-3.5 h-3.5 text-cyan-400" />
-                        Select Internet Provider (ISP)
-                      </span>
-                      {currentTenant && (
-                        <span className="text-[11px] text-cyan-400 font-mono">
-                          ID: {currentTenant.tenant_code}
-                        </span>
-                      )}
-                    </label>
-
-                    <div className="relative">
-                      <select
-                        value={activeTenantId}
-                        onChange={(e) => {
-                          setSelectedTenantId(e.target.value);
-                          setError(null);
-                        }}
-                        className="w-full appearance-none bg-slate-950/80 border border-slate-700/80 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 rounded-xl px-4 py-3 text-sm text-white font-medium transition-colors cursor-pointer pr-10"
-                      >
-                        {tenants.map((t) => (
-                          <option key={t.tenant_id} value={t.tenant_id} className="bg-slate-900 text-white">
-                            {t.tenant_name} ({t.tenant_code})
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    </div>
-                  </div>
-                )}
-
                 {/* Identifier Input */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
@@ -540,7 +446,7 @@ export default function PublicTopupPage() {
                     <button
                       type="button"
                       onClick={fillDemoCustomer}
-                      className="text-[11px] text-cyan-400 hover:text-cyan-300 font-semibold inline-flex items-center gap-1 transition-colors hover:underline"
+                      className="text-[11px] text-cyan-400 hover:text-cyan-300 font-semibold inline-flex items-center gap-1 transition-colors hover:underline cursor-pointer"
                     >
                       <Sparkles className="w-3 h-3" />
                       ⚡ Fill Demo: 100001
@@ -626,7 +532,7 @@ export default function PublicTopupPage() {
                   setResult(null);
                   setError(null);
                 }}
-                className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors"
+                className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors cursor-pointer"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
                 <span>Search a different account</span>
@@ -651,6 +557,11 @@ export default function PublicTopupPage() {
                         Customer ID: <span className="text-slate-200">{result.user_id}</span>
                         {result.type === 'customer' && result.username && result.username !== result.user_id && (
                           <span className="ml-2 text-slate-500">({result.username})</span>
+                        )}
+                        {result.tenant_name && (
+                          <span className="ml-2 text-cyan-400/90 font-sans text-[11px]">
+                            • {result.tenant_name}
+                          </span>
                         )}
                       </p>
                     </div>

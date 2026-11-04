@@ -95,6 +95,7 @@ class PublicTopupController {
             Response::json([
                 'type' => 'customer',
                 'tenant_id' => $tid,
+                'tenant_name' => $cust['tenant_name'] ?: 'Broadband Network',
                 'customer_id' => (string)$cid,
                 'name' => $cust['full_name'],
                 'user_id' => (string)$cust['customer_code'],
