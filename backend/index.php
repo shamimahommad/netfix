@@ -152,6 +152,36 @@ if ($method === 'POST' && $uri === '/customers/onboard') {
 if ($method === 'POST' && $uri === '/customers') {
     CustomersController::create();
 }
+if ($method === 'GET' && preg_match('#^/customers/([^/]+)/mac-status$#', $uri, $m)) {
+    CustomersController::macStatus($m[1]);
+}
+if ($method === 'POST' && preg_match('#^/customers/([^/]+)/sync$#', $uri, $m)) {
+    CustomersController::syncSession($m[1]);
+}
+if ($method === 'POST' && preg_match('#^/customers/([^/]+)/disconnect$#', $uri, $m)) {
+    CustomersController::disconnectSession($m[1]);
+}
+if ($method === 'POST' && preg_match('#^/customers/([^/]+)/toggle-suspend$#', $uri, $m)) {
+    CustomersController::toggleSuspend($m[1]);
+}
+if ($method === 'POST' && preg_match('#^/customers/([^/]+)/bind-mac$#', $uri, $m)) {
+    CustomersController::bindMac($m[1]);
+}
+if ($method === 'GET' && preg_match('#^/customers/([^/]+)/router$#', $uri, $m)) {
+    CustomersController::getRouter($m[1]);
+}
+if ($method === 'POST' && preg_match('#^/customers/([^/]+)/router$#', $uri, $m)) {
+    CustomersController::saveRouter($m[1]);
+}
+if ($method === 'POST' && preg_match('#^/customers/([^/]+)/ping$#', $uri, $m)) {
+    CustomersController::ping($m[1]);
+}
+if ($method === 'POST' && preg_match('#^/customers/([^/]+)/mark-left$#', $uri, $m)) {
+    CustomersController::markLeft($m[1]);
+}
+if ($method === 'POST' && preg_match('#^/customers/([^/]+)/activate-left$#', $uri, $m)) {
+    CustomersController::activateLeft($m[1]);
+}
 if ($method === 'GET' && preg_match('#^/customers/([^/]+)/services$#', $uri, $m)) {
     CustomersController::services($m[1]);
 }
