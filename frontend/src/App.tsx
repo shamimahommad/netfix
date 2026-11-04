@@ -83,141 +83,141 @@ function AppContent() {
       <div className="h-screen flex flex-col overflow-hidden">
         <main className="flex-1 flex flex-col min-h-0 overflow-auto">
           <Routes>
-        {/* Public routes */}
-        <Route
-          path="/login"
-          element={
-            <PublicRoute>
-              <LoginPage />
-            </PublicRoute>
-          }
-        />
-        <Route
-          path="/customer/login"
-          element={
-            <PublicRoute>
-              <CustomerLoginPage />
-            </PublicRoute>
-          }
-        />
-        <Route path="/customer/payment-callback" element={<CustomerPaymentCallbackPage />} />
-        <Route path="/topup" element={<PublicTopupPage />} />
-        <Route path="/" element={<Navigate to="/login" replace />} />
+            {/* Public routes */}
+            <Route
+              path="/login"
+              element={
+                <PublicRoute>
+                  <LoginPage />
+                </PublicRoute>
+              }
+            />
+            <Route
+              path="/customer/login"
+              element={
+                <PublicRoute>
+                  <CustomerLoginPage />
+                </PublicRoute>
+              }
+            />
+            <Route path="/customer/payment-callback" element={<CustomerPaymentCallbackPage />} />
+            <Route path="/topup" element={<PublicTopupPage />} />
+            <Route path="/" element={<Navigate to="/login" replace />} />
 
-        {/* Customer portal: layout with sidebar + nested pages */}
-        <Route
-          path="/customer"
-          element={
-            <RouteGuard allow={['customer']}>
-              <CustomerPortalProvider>
-                <CustomerPortalLayout />
-              </CustomerPortalProvider>
-            </RouteGuard>
-          }
-        >
-          <Route index element={<Navigate to="/customer/dashboard" replace />} />
-          <Route path="dashboard" element={<CustomerDashboardPage />} />
-          <Route path="pay-bill" element={<CustomerPayBillPage />} />
-          <Route path="payment-history" element={<CustomerPaymentHistoryPage />} />
-          <Route path="ticket" element={<CustomerTicketPage />} />
-          <Route path="report" element={<CustomerReportPage />} />
-        </Route>
+            {/* Customer portal: layout with sidebar + nested pages */}
+            <Route
+              path="/customer"
+              element={
+                <RouteGuard allow={['customer']}>
+                  <CustomerPortalProvider>
+                    <CustomerPortalLayout />
+                  </CustomerPortalProvider>
+                </RouteGuard>
+              }
+            >
+              <Route index element={<Navigate to="/customer/dashboard" replace />} />
+              <Route path="dashboard" element={<CustomerDashboardPage />} />
+              <Route path="pay-bill" element={<CustomerPayBillPage />} />
+              <Route path="payment-history" element={<CustomerPaymentHistoryPage />} />
+              <Route path="ticket" element={<CustomerTicketPage />} />
+              <Route path="report" element={<CustomerReportPage />} />
+            </Route>
 
-        {/* SaaS Admin routes */}
-        <Route
-          path="/saas"
-          element={
-            <RouteGuard allow={['saas']}>
-              <SaaSLayout />
-            </RouteGuard>
-          }
-        >
-          <Route path="dashboard" element={<SaaSDashboard />} />
-          <Route path="tenants" element={<ISPsListPage />} />
-          <Route path="tenants/:tenantId/payment-callback" element={<PaymentCallbackPage />} />
-          <Route path="tenants/:tenantId" element={<ISPProfilePage />} />
-          <Route path="customers" element={<PlaceholderPage title="Global Customers" description="View and manage customer accounts across all ISP tenants." />} />
-          <Route path="billing" element={<PlaceholderPage title="Platform Billing & Subscriptions" description="Manage SaaS subscription packages, tenant billing cycles, and invoice collections." />} />
-          <Route path="network" element={<PlaceholderPage title="Network Infrastructure" description="Global network telemetry, router nodes, and cloud server health." />} />
-          <Route path="settings" element={<PlaceholderPage title="SaaS System Settings" description="Configure global platform preferences, security, API integrations, and maintenance schedules." />} />
-          <Route index element={<Navigate to="/saas/dashboard" replace />} />
-        </Route>
+            {/* SaaS Admin routes */}
+            <Route
+              path="/saas"
+              element={
+                <RouteGuard allow={['saas']}>
+                  <SaaSLayout />
+                </RouteGuard>
+              }
+            >
+              <Route path="dashboard" element={<SaaSDashboard />} />
+              <Route path="tenants" element={<ISPsListPage />} />
+              <Route path="tenants/:tenantId/payment-callback" element={<PaymentCallbackPage />} />
+              <Route path="tenants/:tenantId" element={<ISPProfilePage />} />
+              <Route path="customers" element={<PlaceholderPage title="Global Customers" description="View and manage customer accounts across all ISP tenants." />} />
+              <Route path="billing" element={<PlaceholderPage title="Platform Billing & Subscriptions" description="Manage SaaS subscription packages, tenant billing cycles, and invoice collections." />} />
+              <Route path="network" element={<PlaceholderPage title="Network Infrastructure" description="Global network telemetry, router nodes, and cloud server health." />} />
+              <Route path="settings" element={<PlaceholderPage title="SaaS System Settings" description="Configure global platform preferences, security, API integrations, and maintenance schedules." />} />
+              <Route index element={<Navigate to="/saas/dashboard" replace />} />
+            </Route>
 
-        {/* Tenant routes */}
-        <Route
-          path="/dashboard"
-          element={
-            <RouteGuard allow={['isp']}>
-              <TenantLayout />
-            </RouteGuard>
-          }
-        >
-          <Route index element={<TenantDashboard />} />
-          <Route path="customers" element={<Navigate to="/dashboard/customers/all" replace />} />
-          <Route path="customers/pppoe-logs" element={<PlaceholderPage title="PPPoE Logs" description="View PPPoE connection logs, session history, and authentication records." />} />
-          <Route path="customers/task-logs/:customerId" element={<CustomerTaskLogsPage />} />
-          <Route path="customers/:type" element={<CustomersPage />} />
-          <Route path="customers/view/:id" element={<CustomerDetailPage />} />
-          <Route path="customers/view/:id/invoices" element={<CustomerInvoicesPage />} />
-          <Route path="customers/edit/:id" element={<EditCustomerPage />} />
-          <Route path="billing/bulk-renew" element={<BulkCustomerRenewPage />} />
-          <Route path="billing/:type" element={<BillingPage />} />
-          <Route path="billing" element={<Navigate to="/dashboard/billing/all" replace />} />
-          <Route path="sms/:type" element={<AgentRestrictedGuard><SMSPage /></AgentRestrictedGuard>} />
-          <Route path="sms" element={<AgentRestrictedGuard><Navigate to="/dashboard/sms/send" replace /></AgentRestrictedGuard>} />
-          <Route path="hotspot/card-search" element={<PlaceholderPage title="Card Search" description="Search for hotspot cards by card number, username, or other criteria." />} />
-          <Route path="hotspot/card-generator" element={<PlaceholderPage title="Card Generator" description="Generate new hotspot access cards with customizable validity periods and data limits." />} />
-          <Route path="hotspot/card-print" element={<PlaceholderPage title="Card Print" description="Print hotspot access cards with QR codes and credentials." />} />
-          <Route path="hotspot/online" element={<PlaceholderPage title="Hotspot Online Customers" description="View all currently active hotspot sessions and connected users." />} />
-          <Route path="hotspot/offline" element={<PlaceholderPage title="Hotspot Offline Customers" description="View all disconnected hotspot users and session history." />} />
-          <Route path="area" element={<PlaceholderPage title="Area" description="Manage service areas and coverage zones." />} />
-          <Route path="my-packages" element={<MyPackagesPage />} />
-          <Route path="reseller" element={<AgentRestrictedGuard><ResellerPage /></AgentRestrictedGuard>} />
-          <Route path="topup-balance" element={<TopupBalancePage />} />
-          <Route path="reseller/plan-permission/:userId" element={<AgentRestrictedGuard><PlanPermissionPage /></AgentRestrictedGuard>} />
-          <Route path="reseller/login-log/:userId" element={<AgentRestrictedGuard><LoginLogPage /></AgentRestrictedGuard>} />
-          <Route path="report" element={<Navigate to="/dashboard/report/reseller-wise-customers" replace />} />
-          <Route path="report/reseller-wise-customers" element={<ResellerWiseCustomersPage />} />
-          <Route path="report/area-wise-customers" element={<AreaWiseCustomersPage />} />
-          <Route path="report/server-wise-customers" element={<ServerWiseCustomersPage />} />
-          <Route path="report/online-transactions" element={<OnlineTransactionsPage />} />
-          <Route path="report/merchant-payments" element={<MerchantPaymentsPage />} />
-          <Route path="report/customer-payments" element={<CustomerPaymentsPage />} />
-          <Route path="report/recharge-history" element={<RechargeHistoryPage />} />
-          <Route path="report/invoices" element={<InvoicesReportPage />} />
-          <Route
-            path="map"
-            element={
-              <FeatureGuard feature="map">
-                <MapPage />
-              </FeatureGuard>
-            }
-          />
-          <Route path="support/:type" element={<SupportPage />} />
-          <Route path="support" element={<Navigate to="/dashboard/support/ticket" replace />} />
-          <Route path="network/mikrotik" element={<AdminOnlyGuard><MikroTikPage /></AdminOnlyGuard>} />
-          <Route path="network/package-copy" element={<AdminOnlyGuard><PackageCopyPage /></AdminOnlyGuard>} />
-          <Route path="network/packages" element={<AdminOnlyGuard><PackagePlansPage /></AdminOnlyGuard>} />
-          <Route path="network/monitoring/live-traffic" element={<AdminOnlyGuard><LiveTrafficPage /></AdminOnlyGuard>} />
-          <Route path="network/olt" element={<AdminOnlyGuard><OltPage /></AdminOnlyGuard>} />
-          <Route path="network/olt/:id" element={<AdminOnlyGuard><OltDetailPage /></AdminOnlyGuard>} />
-          <Route path="network/olt/view/:id" element={<AdminOnlyGuard><OltDetailPage /></AdminOnlyGuard>} />
-          <Route path="network/:type" element={<AdminOnlyGuard><NetworkPage /></AdminOnlyGuard>} />
-          <Route path="network" element={<Navigate to="/dashboard/network/mikrotik" replace />} />
-          <Route path="service-area/areas" element={<ServiceAreasPage />} />
-          <Route path="service-area/sub-areas" element={<SubAreasPage />} />
-          <Route path="settings" element={<PlaceholderPage title="Settings" description="Configure system settings and preferences." />} />
-          <Route path="profile" element={<ProfilePage />} />
-          <Route path="change-password" element={<ChangePasswordPage />} />
-          {/* Dashboard catch-all: 404 for unknown paths under /dashboard */}
-          <Route path="*" element={<ErrorPage status={404} />} />
-        </Route>
+            {/* Tenant routes */}
+            <Route
+              path="/dashboard"
+              element={
+                <RouteGuard allow={['isp']}>
+                  <TenantLayout />
+                </RouteGuard>
+              }
+            >
+              <Route index element={<TenantDashboard />} />
+              <Route path="customers" element={<Navigate to="/dashboard/customers/all" replace />} />
+              <Route path="customers/pppoe-logs" element={<PlaceholderPage title="PPPoE Logs" description="View PPPoE connection logs, session history, and authentication records." />} />
+              <Route path="customers/task-logs/:customerId" element={<CustomerTaskLogsPage />} />
+              <Route path="customers/:type" element={<CustomersPage />} />
+              <Route path="customers/view/:id" element={<CustomerDetailPage />} />
+              <Route path="customers/view/:id/invoices" element={<CustomerInvoicesPage />} />
+              <Route path="customers/edit/:id" element={<EditCustomerPage />} />
+              <Route path="billing/bulk-renew" element={<BulkCustomerRenewPage />} />
+              <Route path="billing/:type" element={<BillingPage />} />
+              <Route path="billing" element={<Navigate to="/dashboard/billing/all" replace />} />
+              <Route path="sms/:type" element={<AgentRestrictedGuard><SMSPage /></AgentRestrictedGuard>} />
+              <Route path="sms" element={<AgentRestrictedGuard><Navigate to="/dashboard/sms/send" replace /></AgentRestrictedGuard>} />
+              <Route path="hotspot/card-search" element={<PlaceholderPage title="Card Search" description="Search for hotspot cards by card number, username, or other criteria." />} />
+              <Route path="hotspot/card-generator" element={<PlaceholderPage title="Card Generator" description="Generate new hotspot access cards with customizable validity periods and data limits." />} />
+              <Route path="hotspot/card-print" element={<PlaceholderPage title="Card Print" description="Print hotspot access cards with QR codes and credentials." />} />
+              <Route path="hotspot/online" element={<PlaceholderPage title="Hotspot Online Customers" description="View all currently active hotspot sessions and connected users." />} />
+              <Route path="hotspot/offline" element={<PlaceholderPage title="Hotspot Offline Customers" description="View all disconnected hotspot users and session history." />} />
+              <Route path="area" element={<PlaceholderPage title="Area" description="Manage service areas and coverage zones." />} />
+              <Route path="my-packages" element={<MyPackagesPage />} />
+              <Route path="reseller" element={<AgentRestrictedGuard><ResellerPage /></AgentRestrictedGuard>} />
+              <Route path="topup-balance" element={<TopupBalancePage />} />
+              <Route path="reseller/plan-permission/:userId" element={<AgentRestrictedGuard><PlanPermissionPage /></AgentRestrictedGuard>} />
+              <Route path="reseller/login-log/:userId" element={<AgentRestrictedGuard><LoginLogPage /></AgentRestrictedGuard>} />
+              <Route path="report" element={<Navigate to="/dashboard/report/reseller-wise-customers" replace />} />
+              <Route path="report/reseller-wise-customers" element={<ResellerWiseCustomersPage />} />
+              <Route path="report/area-wise-customers" element={<AreaWiseCustomersPage />} />
+              <Route path="report/server-wise-customers" element={<ServerWiseCustomersPage />} />
+              <Route path="report/online-transactions" element={<OnlineTransactionsPage />} />
+              <Route path="report/merchant-payments" element={<MerchantPaymentsPage />} />
+              <Route path="report/customer-payments" element={<CustomerPaymentsPage />} />
+              <Route path="report/recharge-history" element={<RechargeHistoryPage />} />
+              <Route path="report/invoices" element={<InvoicesReportPage />} />
+              <Route
+                path="map"
+                element={
+                  <FeatureGuard feature="map">
+                    <MapPage />
+                  </FeatureGuard>
+                }
+              />
+              <Route path="support/:type" element={<SupportPage />} />
+              <Route path="support" element={<Navigate to="/dashboard/support/ticket" replace />} />
+              <Route path="network/mikrotik" element={<AdminOnlyGuard><MikroTikPage /></AdminOnlyGuard>} />
+              <Route path="network/package-copy" element={<AdminOnlyGuard><PackageCopyPage /></AdminOnlyGuard>} />
+              <Route path="network/packages" element={<AdminOnlyGuard><PackagePlansPage /></AdminOnlyGuard>} />
+              <Route path="network/monitoring/live-traffic" element={<AdminOnlyGuard><LiveTrafficPage /></AdminOnlyGuard>} />
+              <Route path="network/olt" element={<AdminOnlyGuard><OltPage /></AdminOnlyGuard>} />
+              <Route path="network/olt/:id" element={<AdminOnlyGuard><OltDetailPage /></AdminOnlyGuard>} />
+              <Route path="network/olt/view/:id" element={<AdminOnlyGuard><OltDetailPage /></AdminOnlyGuard>} />
+              <Route path="network/:type" element={<AdminOnlyGuard><NetworkPage /></AdminOnlyGuard>} />
+              <Route path="network" element={<Navigate to="/dashboard/network/mikrotik" replace />} />
+              <Route path="service-area/areas" element={<ServiceAreasPage />} />
+              <Route path="service-area/sub-areas" element={<SubAreasPage />} />
+              <Route path="settings" element={<PlaceholderPage title="Settings" description="Configure system settings and preferences." />} />
+              <Route path="profile" element={<ProfilePage />} />
+              <Route path="change-password" element={<ChangePasswordPage />} />
+              {/* Dashboard catch-all: 404 for unknown paths under /dashboard */}
+              <Route path="*" element={<ErrorPage status={404} />} />
+            </Route>
 
-        {/* Explicit error route: use navigate('/error', { state: { status: 403, message: '...' } }) to show error */}
-        <Route path="/error" element={<ErrorPageFromLocation />} />
+            {/* Explicit error route: use navigate('/error', { state: { status: 403, message: '...' } }) to show error */}
+            <Route path="/error" element={<ErrorPageFromLocation />} />
 
-        {/* Catch-all: 404 for unknown routes */}
-        <Route path="*" element={<ErrorPage status={404} />} />
+            {/* Catch-all: 404 for unknown routes */}
+            <Route path="*" element={<ErrorPage status={404} />} />
           </Routes>
         </main>
       </div>
