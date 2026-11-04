@@ -135,9 +135,9 @@ class BillingController {
         $db->beginTransaction();
 
         try {
-            $months = max(1, (int)($data['no_of_month'] ?? 1));
+            $months = max(1, (int)($data['billing_cycle_months'] ?? $data['no_of_month'] ?? 1));
             $days = isset($data['selected_days']) ? (int)$data['selected_days'] : ($months * 30);
-            $planId = $data['plan_id'] ?? 1;
+            $planId = $data['package_id'] ?? $data['plan_id'] ?? 1;
 
             // Fetch plan price
             $stmtPkg = $db->prepare("SELECT * FROM access_profiles WHERE access_profile_id = :pid");
@@ -222,9 +222,11 @@ class BillingController {
 
             Response::json([
                 'success' => true,
-                'message' => 'Service renewed successfully' . $mtMsg,
+                'message' => 'Service renewed and secret synchronized' . $mtMsg,
+                'expire_at' => $newExpireDate,
                 'data' => [
                     'new_expire_date' => $newExpireDate,
+                    'expire_at' => $newExpireDate,
                     'bill_amount' => $totalAmount,
                 ],
             ]);

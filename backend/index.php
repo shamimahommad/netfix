@@ -213,7 +213,7 @@ if ($method === 'GET' && preg_match('#^/billing/accounts/([^/]+)$#', $uri, $m)) 
 if ($method === 'GET' && $uri === '/billing/accounts') {
     BillingController::accounts('all');
 }
-if ($method === 'POST' && $uri === '/billing/renew') {
+if ($method === 'POST' && ($uri === '/billing/renew' || $uri === '/api/renew.php' || $uri === '/api/renew')) {
     BillingController::renew();
 }
 if ($method === 'POST' && $uri === '/billing/change-package') {

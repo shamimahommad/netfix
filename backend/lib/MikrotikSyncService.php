@@ -79,12 +79,7 @@ class MikrotikSyncService {
         $api->timeout = $timeout;
         $api->attempts = 1;
 
-        if ($api->connect($ip, $user, $pass)) {
-            // Verify it is NOT simulation mode
-            if ($api->isSimulation) {
-                $api->disconnect();
-                return null;
-            }
+        if ($api->connect($ip, $user, $pass, $port)) {
             return $api;
         }
 
@@ -282,11 +277,21 @@ class MikrotikSyncService {
                 // User explicitly triggered Provision to Router
                 $lines[] = "PPPoE Secret: Provisioning new secret to router...";
                 $pkgProfile = $cust['profile_name'] ?: 'default';
+                if (!empty($pkgProfile) && strtolower($pkgProfile) !== 'default') {
+                    $allProfs = $api->comm('/ppp/profile/print');
+                    foreach ($allProfs as $p) {
+                        if (isset($p['name']) && strcasecmp($p['name'], $pkgProfile) === 0) {
+                            $pkgProfile = $p['name'];
+                            break;
+                        }
+                    }
+                }
                 $api->comm('/ppp/secret/add', [
                     '=name=' . $username,
                     '=password=' . ($cust['password'] ?: '123456'),
                     '=profile=' . $pkgProfile,
                     '=service=pppoe',
+                    '=disabled=no',
                     '=comment=' . "{$cust['full_name']} | {$cust['customer_code']}",
                 ]);
                 $lines[] = "PPPoE Secret: Successfully created on router with profile '{$pkgProfile}'";
@@ -517,6 +522,28 @@ class MikrotikSyncService {
         }
 
         try {
+            // 1. Verify profile on router, resolve exact casing or auto-create with rate limit if missing
+            if (!empty($profileName) && strtolower($profileName) !== 'default') {
+                $allProfs = $api->comm('/ppp/profile/print');
+                $matchedProf = null;
+                foreach ($allProfs as $p) {
+                    if (isset($p['name']) && strcasecmp($p['name'], $profileName) === 0) {
+                        $matchedProf = $p['name'];
+                        break;
+                    }
+                }
+                if ($matchedProf) {
+                    $profileName = $matchedProf;
+                } else {
+                    $rateLimit = $cust['rate_limit'] ?? ($cust['bandwidth_limit'] ?? '10M/10M');
+                    $api->comm('/ppp/profile/add', [
+                        '=name=' => $profileName,
+                        '=rate-limit=' => $rateLimit,
+                    ]);
+                }
+            }
+
+            // 2. Secret check and set/add with disabled=no
             $secList = $api->comm('/ppp/secret/print', ['?name' => $username]);
             if (empty($secList)) {
                 return ['success' => false, 'message' => "PPPoE secret '{$username}' not found on MikroTik"];
@@ -609,6 +636,28 @@ class MikrotikSyncService {
         $profileName = $cust['profile_name'] ?: 'default';
 
         try {
+            // 1. Verify profile on router, resolve exact casing or auto-create with rate limit if missing
+            if (!empty($profileName) && strtolower($profileName) !== 'default') {
+                $allProfs = $api->comm('/ppp/profile/print');
+                $matchedProf = null;
+                foreach ($allProfs as $p) {
+                    if (isset($p['name']) && strcasecmp($p['name'], $profileName) === 0) {
+                        $matchedProf = $p['name'];
+                        break;
+                    }
+                }
+                if ($matchedProf) {
+                    $profileName = $matchedProf;
+                } else {
+                    $rateLimit = $cust['rate_limit'] ?? ($cust['bandwidth_limit'] ?? '10M/10M');
+                    $api->comm('/ppp/profile/add', [
+                        '=name=' => $profileName,
+                        '=rate-limit=' => $rateLimit,
+                    ]);
+                }
+            }
+
+            // 2. Secret check and set/add with disabled=no
             $secList = $api->comm('/ppp/secret/print', ['?name' => $username]);
             if (!empty($secList)) {
                 $sec = $secList[0];
