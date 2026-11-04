@@ -774,8 +774,25 @@ class CustomersController {
         $cidStmt->execute(['id' => $id, 'code' => $id]);
         $realCid = $cidStmt->fetchColumn() ?: $id;
 
+        $allowProvision = !empty($_GET['provision']);
+
         require_once __DIR__ . '/../lib/MikrotikSyncService.php';
-        $res = MikrotikSyncService::syncCustomer($db, $realCid, $tenantId);
+        $res = MikrotikSyncService::syncCustomer($db, $realCid, $tenantId, $allowProvision);
+
+        Response::json($res);
+    }
+
+    public static function provisionSecret(string $id): void {
+        AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $cidStmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
+        $cidStmt->execute(['id' => $id, 'code' => $id]);
+        $realCid = $cidStmt->fetchColumn() ?: $id;
+
+        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+        $res = MikrotikSyncService::provisionSecret($db, $realCid, $tenantId);
 
         Response::json($res);
     }

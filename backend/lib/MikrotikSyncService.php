@@ -181,7 +181,7 @@ class MikrotikSyncService {
     /**
      * Full Sync of a customer with MikroTik and match with OLT ONU
      */
-    public static function syncCustomer(PDO $db, $customerId, ?int $tenantId = null): array {
+    public static function syncCustomer(PDO $db, $customerId, ?int $tenantId = null, bool $allowProvision = false): array {
         // Fetch customer and network account
         $stmt = $db->prepare("SELECT c.*, na.username, na.password, na.mac_address, na.current_ip, na.network_device_id, na.protocol, cs.access_profile_id, COALESCE(ap.mikrotik_profile_name, ap.profile_name) as profile_name
             FROM customers c
@@ -250,20 +250,27 @@ class MikrotikSyncService {
 
             $lastLoggedOut = null;
             $disconnectReason = null;
+            $secretExists = false;
 
             // 2. Check PPPoE Secret
             $secList = $api->comm('/ppp/secret/print', ['?name' => $username]);
             if (!empty($secList)) {
                 $sec = $secList[0];
+                $secretExists = true;
                 $isDisabled = ($sec['disabled'] ?? 'false') === 'true';
                 $lines[] = "PPPoE Secret: Found on Router";
                 $lines[] = "Profile: " . ($sec['profile'] ?? 'default');
                 $lines[] = "Account State: " . ($isDisabled ? 'DISABLED / SUSPENDED' : 'ENABLED / ACTIVE');
                 $lines[] = "Bound Caller ID: " . (!empty($sec['caller-id']) ? $sec['caller-id'] : 'None (Unbound)');
-                if (!empty($sec['last-logged-out'])) {
-                    $lastLoggedOut = $sec['last-logged-out'];
+                
+                $rawLogout = trim($sec['last-logged-out'] ?? '');
+                if (!empty($rawLogout) && !str_starts_with($rawLogout, '1970') && !str_starts_with($rawLogout, 'jan/01/1970') && $rawLogout !== '0000-00-00 00:00:00') {
+                    $lastLoggedOut = $rawLogout;
                     $lines[] = "Last Logged Out: " . $lastLoggedOut;
+                } else {
+                    $lines[] = "Last Logged Out: Never (No session history)";
                 }
+
                 if (!empty($sec['last-disconnect-reason'])) {
                     $disconnectReason = $sec['last-disconnect-reason'];
                     $lines[] = "Disconnect Reason: " . $disconnectReason;
@@ -271,9 +278,9 @@ class MikrotikSyncService {
                 if (!$callerId && !empty($sec['last-caller-id'])) {
                     $callerId = $sec['last-caller-id'];
                 }
-            } else {
-                // Secret does not exist on MikroTik, auto provision
-                $lines[] = "PPPoE Secret: Not found on router. Auto-provisioning...";
+            } elseif ($allowProvision) {
+                // User explicitly triggered Provision to Router
+                $lines[] = "PPPoE Secret: Provisioning new secret to router...";
                 $pkgProfile = $cust['profile_name'] ?: 'default';
                 $api->comm('/ppp/secret/add', [
                     '=name=' . $username,
@@ -282,7 +289,13 @@ class MikrotikSyncService {
                     '=service=pppoe',
                     '=comment=' . "{$cust['full_name']} | {$cust['customer_code']}",
                 ]);
-                $lines[] = "PPPoE Secret: Successfully created with profile '{$pkgProfile}'";
+                $lines[] = "PPPoE Secret: Successfully created on router with profile '{$pkgProfile}'";
+                $secretExists = true;
+            } else {
+                // Pure Sync inspection: Truthfully report that secret does NOT exist on MikroTik
+                $lines[] = "PPPoE Secret: NOT FOUND on Router";
+                $lines[] = "Account State: Not Provisioned on MikroTik";
+                $lines[] = "Notice: User '{$username}' does not exist in router's PPPoE secrets.";
             }
 
             // Update database with latest live values
@@ -331,16 +344,26 @@ class MikrotikSyncService {
 
         return [
             'success' => true,
-            'message' => 'MikroTik live session and secret synchronized successfully',
+            'message' => $secretExists 
+                ? 'MikroTik live session and secret synchronized successfully'
+                : "Customer '{$username}' is not provisioned on router {$router['device_name']}",
             'data' => [
                 'username' => $username,
                 'isOnline' => $isOnline,
+                'secretExists' => $secretExists,
                 'currentIp' => $currentIp,
                 'macAddress' => $callerId,
                 'uptime' => $uptime,
                 'mikrotikDetailLines' => $lines,
             ],
         ];
+    }
+
+    /**
+     * Explicitly push and provision customer secret to MikroTik
+     */
+    public static function provisionSecret(PDO $db, $customerId, ?int $tenantId = null): array {
+        return self::syncCustomer($db, $customerId, $tenantId, true);
     }
 
     /**

@@ -234,6 +234,9 @@ const formatDate = (dateString: string | null): string => {
 const formatDateTime = (dateString: string | null | undefined): string => {
   if (!dateString) return '—';
   const cleanStr = String(dateString).trim();
+  if (cleanStr.startsWith('1970') || cleanStr.startsWith('jan/01/1970') || cleanStr.startsWith('0000') || cleanStr === '—') {
+    return 'Never';
+  }
   const date = new Date(cleanStr.replace(' ', 'T'));
   if (isNaN(date.getTime())) {
     // Return raw RouterOS date string if standard parsing fails
@@ -336,7 +339,8 @@ export default function CustomerDetailPage() {
   const [pingResult, setPingResult] = useState<{ success: boolean; address?: string; uptime?: string; lines: string[]; bandwidthLines: string[]; error?: string } | null>(null);
   const [isPingLoading, setIsPingLoading] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
-  const [syncResult, setSyncResult] = useState<{ username?: string; mikrotikDetailLines?: string[]; message?: string; error?: string } | null>(null);
+  const [syncResult, setSyncResult] = useState<{ username?: string; mikrotikDetailLines?: string[]; message?: string; error?: string; secretExists?: boolean } | null>(null);
+  const [isProvisioning, setIsProvisioning] = useState(false);
   const [slowLoad, setSlowLoad] = useState(false);
 
   useEffect(() => {
@@ -985,6 +989,7 @@ export default function CustomerDetailPage() {
             username: d.username,
             mikrotikDetailLines: d.mikrotikDetailLines,
             message: d.message,
+            secretExists: d.secretExists,
           });
         }
         await loadCustomerDetail();
@@ -998,6 +1003,36 @@ export default function CustomerDetailPage() {
       setSyncResult({ error: err?.message || 'Failed to sync session data.' });
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleProvisionToRouter = async () => {
+    if (!id || !customerData) return;
+    setIsProvisioning(true);
+    try {
+      const response = await customersService.provisionToMikrotik(id);
+      if (response.success) {
+        toast.success(response.message || 'Secret provisioned successfully to MikroTik router');
+        const d = response.data;
+        if (d) {
+          setSyncResult({
+            username: d.username,
+            mikrotikDetailLines: d.mikrotikDetailLines,
+            message: response.message,
+            secretExists: d.secretExists,
+          });
+        }
+        await loadCustomerDetail();
+        if (customerData.network.protocolType === 'pppoe') {
+          await loadMacStatus();
+        }
+      } else {
+        toast.error(response.message || 'Failed to provision secret to router');
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Provisioning failed');
+    } finally {
+      setIsProvisioning(false);
     }
   };
 
@@ -1962,10 +1997,33 @@ export default function CustomerDetailPage() {
               )}
             </div>
             {!isSyncing && syncResult && (
-              <div className="px-5 py-3 border-t border-sky-200/60 dark:border-slate-600 bg-sky-50/50 dark:bg-slate-900/30 rounded-b-2xl flex justify-end">
+              <div className="px-5 py-3 border-t border-sky-200/60 dark:border-slate-600 bg-sky-50/50 dark:bg-slate-900/30 rounded-b-2xl flex justify-between items-center gap-2">
+                {syncResult.secretExists === false ? (
+                  <button
+                    type="button"
+                    onClick={handleProvisionToRouter}
+                    disabled={isProvisioning}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold text-xs sm:text-sm shadow-md transition-all disabled:opacity-50"
+                  >
+                    {isProvisioning ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Provisioning to MikroTik...</span>
+                      </>
+                    ) : (
+                      <>
+                        <PlusIcon className="w-4 h-4" />
+                        <span>Provision to MikroTik</span>
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <div />
+                )}
                 <button
+                  type="button"
                   onClick={() => { setIsSyncModalOpen(false); setSyncResult(null); }}
-                  className="px-4 py-2.5 bg-sky-500 hover:bg-sky-600 dark:bg-teal-600 dark:hover:bg-teal-500 text-white rounded-xl font-semibold text-sm transition-all"
+                  className="px-4 py-2 bg-sky-500 hover:bg-sky-600 dark:bg-teal-600 dark:hover:bg-teal-500 text-white rounded-xl font-semibold text-xs sm:text-sm transition-all"
                 >
                   Close
                 </button>

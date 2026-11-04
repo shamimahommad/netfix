@@ -158,6 +158,9 @@ if ($method === 'GET' && preg_match('#^/customers/([^/]+)/mac-status$#', $uri, $
 if ($method === 'POST' && preg_match('#^/customers/([^/]+)/sync$#', $uri, $m)) {
     CustomersController::syncSession($m[1]);
 }
+if ($method === 'POST' && preg_match('#^/customers/([^/]+)/provision$#', $uri, $m)) {
+    CustomersController::provisionSecret($m[1]);
+}
 if ($method === 'POST' && preg_match('#^/customers/([^/]+)/disconnect$#', $uri, $m)) {
     CustomersController::disconnectSession($m[1]);
 }

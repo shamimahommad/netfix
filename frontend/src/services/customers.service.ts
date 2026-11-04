@@ -225,8 +225,13 @@ export const customersService = {
     return response.data;
   },
 
-  async syncSession(customerId: string): Promise<{ success: boolean; data: any }> {
-    const response = await api.post<{ success: boolean; data: any }>(`/customers/${customerId}/sync`);
+  async syncSession(customerId: string): Promise<{ success: boolean; data: any; message?: string }> {
+    const response = await api.post<{ success: boolean; data: any; message?: string }>(`/customers/${customerId}/sync`);
+    return response.data;
+  },
+
+  async provisionToMikrotik(customerId: string): Promise<{ success: boolean; data: any; message?: string }> {
+    const response = await api.post<{ success: boolean; data: any; message?: string }>(`/customers/${customerId}/provision`);
     return response.data;
   },
 
