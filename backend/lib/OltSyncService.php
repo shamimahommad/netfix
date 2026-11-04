@@ -35,7 +35,7 @@ class OltSyncService {
         $port = (int)($oltDev['web_port'] ?: 1010);
         $user = $oltDev['api_username'] ?: 'star';
         $pass = $oltDev['api_password'] ?: 'star321';
-        $proto = ($port == 1010 || $port == 443) ? 'https' : 'http';
+        $proto = ($port == 80) ? 'http' : 'https';
 
         $client = new VsolOltClient($ip, $port, $user, $pass, $proto, 8);
         $sysInfo = $client->getSystemInfo();
@@ -43,13 +43,25 @@ class OltSyncService {
         $onus = $client->getOnus(null, true);
 
         if (!$sysInfo && empty($onus)) {
-            // If connection failed, fallback to local stored data
-            return self::getLocalData($db, $tenantId, $deviceId, $oltDev);
+            // If connection failed, return honest error so user knows hardware was unreachable
+            $local = self::getLocalData($db, $tenantId, $deviceId, $oltDev);
+            $local['syncError'] = "Could not connect to OLT hardware at {$ip}:{$port}. Please verify the IP address, API/Web port, and credentials.";
+            $local['isOnline'] = false;
+            return $local;
         }
 
         // Update network_devices table with telemetry JSON & last_sync_at
         $telemetry = [
             'system' => $sysInfo,
+            'model' => $sysInfo['model'] ?? 'V1601E04-DP',
+            'firmware' => $sysInfo['firmware'] ?? '',
+            'hardware' => $sysInfo['hardware'] ?? '',
+            'serial' => $sysInfo['serial'] ?? '',
+            'mac' => $sysInfo['mac'] ?? '',
+            'uptime' => $sysInfo['uptime'] ?? '',
+            'cpuUsagePercent' => $sysInfo['cpuUsagePercent'] ?? 0,
+            'memoryUsagePercent' => $sysInfo['memoryUsagePercent'] ?? 0,
+            'temperatureC' => !empty($sysInfo['cpuTemp']) ? (float)str_replace('°C', '', $sysInfo['cpuTemp']) : null,
             'ponPorts' => $ponPorts,
             'totalOnusOnline' => count($onus),
             'lastHardwareSync' => date('Y-m-d H:i:s'),
@@ -126,24 +138,35 @@ class OltSyncService {
         }
         unset($pp);
 
+        $isSynced = !empty($telemetry['system']) || !empty($lastSync);
+        $system = $telemetry['system'] ?? [
+            'vendor' => strtoupper($oltDev['vendor'] ?: 'VSOL'),
+            'model' => 'EPON/GPON OLT',
+            'serial' => $oltDev['device_code'] ?? '',
+            'hardware' => null,
+            'firmware' => null,
+            'uptime' => null,
+            'cpuTemp' => null,
+            'cpuUsage' => null,
+            'memoryUsage' => null,
+            'totalPonPorts' => 4,
+            'totalGePorts' => 8,
+        ];
+
         return [
             'isStored' => true,
+            'isSynced' => $isSynced,
+            'isOnline' => $isSynced,
             'lastSyncAt' => $lastSync,
             'syncAgeMinutes' => $syncAgeMinutes,
             'nextScheduledSyncMinutes' => max(0, 120 - ($syncAgeMinutes ?? 0)),
-            'system' => $telemetry['system'] ?? [
-                'vendor' => 'VSOL',
-                'model' => 'V1600D4-DP',
-                'serial' => $oltDev['device_code'] ?? '',
-                'hardware' => 'V1.3.4',
-                'firmware' => 'V2.03.77R',
-                'uptime' => '24 days, 16:42:10',
-                'cpuTemp' => '62.9°C',
-                'cpuUsage' => '20%',
-                'memoryUsage' => '22%',
-                'totalPonPorts' => 4,
-                'totalGePorts' => 8,
-            ],
+            'system' => $system,
+            'model' => $telemetry['model'] ?? $system['model'] ?? null,
+            'firmware' => $telemetry['firmware'] ?? $system['firmware'] ?? null,
+            'uptime' => $telemetry['uptime'] ?? $system['uptime'] ?? null,
+            'cpuUsagePercent' => $telemetry['cpuUsagePercent'] ?? ($system['cpuUsagePercent'] ?? null),
+            'memoryUsagePercent' => $telemetry['memoryUsagePercent'] ?? ($system['memoryUsagePercent'] ?? null),
+            'temperatureC' => $telemetry['temperatureC'] ?? null,
             'ponPorts' => $ponPorts,
             'totalOnus' => $totalStored,
         ];

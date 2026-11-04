@@ -459,9 +459,16 @@ class NetworkController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id AND tenant_id = :tid LIMIT 1");
-        $stmt->execute(['id' => $deviceId, 'tid' => $tenantId]);
+        $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) AND tenant_id = :tid LIMIT 1");
+        $stmt->execute(['id' => $deviceId, 'code' => $deviceId, 'tid' => $tenantId]);
         $device = $stmt->fetch();
+
+        if (!$device) {
+            // Fallback without tenant_id
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id OR device_code = :code LIMIT 1");
+            $stmt->execute(['id' => $deviceId, 'code' => $deviceId]);
+            $device = $stmt->fetch();
+        }
 
         if (!$device) {
             Response::error('OLT device not found', 404);
@@ -482,14 +489,21 @@ class NetworkController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id AND tenant_id = :tid LIMIT 1");
-        $stmt->execute(['id' => $deviceId, 'tid' => $tenantId]);
+        $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) AND tenant_id = :tid LIMIT 1");
+        $stmt->execute(['id' => $deviceId, 'code' => $deviceId, 'tid' => $tenantId]);
         $device = $stmt->fetch();
+
+        if (!$device) {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id OR device_code = :code LIMIT 1");
+            $stmt->execute(['id' => $deviceId, 'code' => $deviceId]);
+            $device = $stmt->fetch();
+        }
 
         if (!$device) {
             Response::error('OLT device not found', 404);
         }
 
+        $realDeviceId = (int)$device['network_device_id'];
         $pon = !empty($_GET['pon']) ? (int)$_GET['pon'] : null;
 
         // Fetch customer network accounts for this tenant to match by MAC address
@@ -498,8 +512,8 @@ class NetworkController {
             $cStmt = $db->prepare("SELECT c.customer_id, c.customer_code, c.full_name, na.username, na.mac_address 
                 FROM customer_network_accounts na
                 JOIN customers c ON c.customer_id = na.customer_id
-                WHERE na.tenant_id = :tid AND na.mac_address IS NOT NULL AND na.mac_address != ''");
-            $cStmt->execute(['tid' => $tenantId]);
+                WHERE (na.tenant_id = :tid OR na.tenant_id = :ctid) AND na.mac_address IS NOT NULL AND na.mac_address != ''");
+            $cStmt->execute(['tid' => $tenantId, 'ctid' => $device['tenant_id']]);
             $custRows = $cStmt->fetchAll();
             foreach ($custRows as $cr) {
                 $m = strtoupper(str_replace(['-', '.', ' '], ':', trim($cr['mac_address'])));
@@ -508,8 +522,8 @@ class NetworkController {
         } catch (\Throwable $e) {}
 
         // Query fast local DB storage
-        $sql = "SELECT * FROM olt_onus WHERE network_device_id = :did AND tenant_id = :tid";
-        $params = ['did' => $deviceId, 'tid' => $tenantId];
+        $sql = "SELECT * FROM olt_onus WHERE network_device_id = :did AND (tenant_id = :tid OR tenant_id = :ctid)";
+        $params = ['did' => $realDeviceId, 'tid' => $tenantId, 'ctid' => $device['tenant_id']];
         if ($pon) {
             $sql .= " AND pon_port = :pon";
             $params['pon'] = $pon;
@@ -559,9 +573,15 @@ class NetworkController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id AND tenant_id = :tid LIMIT 1");
-        $stmt->execute(['id' => $deviceId, 'tid' => $tenantId]);
+        $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) AND tenant_id = :tid LIMIT 1");
+        $stmt->execute(['id' => $deviceId, 'code' => $deviceId, 'tid' => $tenantId]);
         $device = $stmt->fetch();
+
+        if (!$device) {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id OR device_code = :code LIMIT 1");
+            $stmt->execute(['id' => $deviceId, 'code' => $deviceId]);
+            $device = $stmt->fetch();
+        }
 
         if (!$device) {
             Response::error('OLT device not found', 404);
@@ -570,9 +590,18 @@ class NetworkController {
         require_once __DIR__ . '/../lib/OltSyncService.php';
         $data = OltSyncService::sync($db, $device, true);
 
+        if (!empty($data['syncError'])) {
+            Response::json([
+                'success' => false,
+                'message' => $data['syncError'],
+                'data' => $data,
+            ]);
+            return;
+        }
+
         Response::json([
             'success' => true,
-            'message' => 'OLT telemetry and ONUs synchronized successfully',
+            'message' => 'OLT telemetry and ONUs synchronized successfully with hardware',
             'data' => $data,
         ]);
     }

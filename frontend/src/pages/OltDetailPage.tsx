@@ -14,6 +14,7 @@ import {
   Zap,
   Radio,
   ExternalLink,
+  AlertTriangle,
 } from 'lucide-react';
 import { PageHeader } from '@/components/common';
 import { networkService } from '@/services/network.service';
@@ -90,10 +91,11 @@ export default function OltDetailPage() {
     try {
       const res = await networkService.syncOlt(id);
       if (res.success) {
-        toast.success(res.message || 'OLT synchronized successfully');
+        toast.success(res.message || 'OLT synchronized successfully with hardware');
         await loadAllData();
       } else {
-        toast.error('Sync completed with warnings');
+        toast.error(res.message || 'Hardware sync reported an issue');
+        await loadAllData();
       }
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message || 'Sync failed');
@@ -189,21 +191,21 @@ export default function OltDetailPage() {
             </span>
             <span>•</span>
             <span>
-              Vendor: <strong className="uppercase text-slate-700 dark:text-slate-300">{device?.vendor || 'VSOL'}</strong>
+              Vendor: <strong className="uppercase text-slate-700 dark:text-slate-300">{device?.vendor || telemetry?.system?.vendor || 'VSOL'}</strong>
             </span>
             <span>•</span>
             <span>
-              Firmware: <strong className="text-slate-700 dark:text-slate-300">{telemetry?.firmware || 'V2.0.4R'}</strong>
+              Firmware: <strong className="text-slate-700 dark:text-slate-300">{telemetry?.firmware || telemetry?.system?.firmware || (telemetry?.isSynced ? '—' : 'Unsynced')}</strong>
             </span>
             <span>•</span>
             <span>
-              Last Synced: <strong className="text-blue-600 dark:text-blue-400">{telemetry?.lastSyncAt || 'Recently'}</strong>
+              Last Synced: <strong className="text-blue-600 dark:text-blue-400">{telemetry?.lastSyncAt ? new Date(telemetry.lastSyncAt).toLocaleString() : (telemetry?.isSynced ? 'Recently' : 'Never')}</strong>
             </span>
           </div>
         }
         badge={
           <span className="px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-            {telemetry?.model || 'V1600D4-DP'}
+            {telemetry?.model || telemetry?.system?.model || 'EPON OLT'}
           </span>
         }
         actions={
@@ -221,6 +223,24 @@ export default function OltDetailPage() {
         }
       />
 
+      {/* Hardware Sync Error Banner */}
+      {telemetry?.syncError && (
+        <div className="flex items-start sm:items-center gap-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs sm:text-sm">
+          <AlertTriangle className="w-5 h-5 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5 sm:mt-0" />
+          <div className="flex-1 min-w-0">
+            <strong className="font-semibold block text-amber-800 dark:text-amber-200">Hardware Telemetry Notice</strong>
+            <span>{telemetry.syncError}</span>
+          </div>
+          <button
+            onClick={handleSyncNow}
+            disabled={isSyncing}
+            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold shrink-0 transition"
+          >
+            Retry Sync
+          </button>
+        </div>
+      )}
+
       {/* Hardware Telemetry Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* CPU */}
@@ -233,16 +253,20 @@ export default function OltDetailPage() {
               CPU Load
             </span>
             <span className="text-base font-bold text-slate-800 dark:text-slate-100">
-              {telemetry?.cpuUsagePercent ?? 20}%
+              {telemetry?.cpuUsagePercent !== null && telemetry?.cpuUsagePercent !== undefined
+                ? `${telemetry.cpuUsagePercent}%`
+                : (telemetry?.isSynced ? '0%' : '—')}
             </span>
           </div>
           <div className="w-full bg-slate-100 dark:bg-slate-700 h-2 rounded-full overflow-hidden mt-3">
             <div
               className="bg-blue-500 h-full rounded-full transition-all duration-500"
-              style={{ width: `${telemetry?.cpuUsagePercent ?? 20}%` }}
+              style={{ width: `${Math.min(100, Math.max(telemetry?.cpuUsagePercent ?? 0, 3))}%` }}
             />
           </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-2 font-medium">Optimal operation load</p>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-2 font-medium">
+            {telemetry?.isSynced ? 'Live OLT processor load' : 'Sync hardware to view load'}
+          </p>
         </div>
 
         {/* RAM */}
@@ -255,16 +279,20 @@ export default function OltDetailPage() {
               RAM Memory
             </span>
             <span className="text-base font-bold text-slate-800 dark:text-slate-100">
-              {telemetry?.memoryUsagePercent ?? 22}%
+              {telemetry?.memoryUsagePercent !== null && telemetry?.memoryUsagePercent !== undefined
+                ? `${telemetry.memoryUsagePercent}%`
+                : (telemetry?.isSynced ? '—' : '—')}
             </span>
           </div>
           <div className="w-full bg-slate-100 dark:bg-slate-700 h-2 rounded-full overflow-hidden mt-3">
             <div
               className="bg-indigo-500 h-full rounded-full transition-all duration-500"
-              style={{ width: `${telemetry?.memoryUsagePercent ?? 22}%` }}
+              style={{ width: `${Math.min(100, Math.max(telemetry?.memoryUsagePercent ?? 0, 3))}%` }}
             />
           </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-2 font-medium">Healthy buffer headroom</p>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-2 font-medium truncate" title={telemetry?.uptime ? `Uptime: ${telemetry.uptime}` : undefined}>
+            {telemetry?.uptime ? `Uptime: ${telemetry.uptime}` : 'System memory utilization'}
+          </p>
         </div>
 
         {/* Temperature */}
@@ -277,12 +305,12 @@ export default function OltDetailPage() {
               Board Temperature
             </span>
             <span className="text-base font-bold text-slate-800 dark:text-slate-100">
-              {telemetry?.temperatureC ?? 62.9}°C
+              {telemetry?.temperatureC ? `${telemetry.temperatureC}°C` : (telemetry?.isSynced ? 'Normal' : '—')}
             </span>
           </div>
           <div className="flex items-center gap-1.5 mt-3 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
             <ShieldCheck className="w-4 h-4 shrink-0" />
-            <span>Normal Thermal State</span>
+            <span>{telemetry?.isSynced ? 'Normal Thermal State' : 'Offline / Unsynced'}</span>
           </div>
           <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 font-medium">Max threshold: 75°C</p>
         </div>
@@ -302,9 +330,11 @@ export default function OltDetailPage() {
           </div>
           <div className="flex items-center gap-1.5 mt-3 text-xs text-slate-600 dark:text-slate-300 font-medium">
             <Radio className="w-4 h-4 text-emerald-500" />
-            <span>All 4 PON Ports Active</span>
+            <span>
+              {telemetry?.ponPorts?.filter((p: any) => p.status === 'online').length || 1} of 4 PON Ports Active
+            </span>
           </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 font-medium">Live Telemetry Status</p>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 font-medium">Live Hardware Telemetry</p>
         </div>
       </div>
 
@@ -313,7 +343,11 @@ export default function OltDetailPage() {
         {[1, 2, 3, 4].map((ponNum) => {
           const count = ponCounts[ponNum] || 0;
           const isSelected = selectedPon === ponNum;
-          const txPowers: Record<number, string> = { 1: '+9.12', 2: '+9.05', 3: '+9.21', 4: '+9.25' };
+          const portInfo = telemetry?.ponPorts?.find((p: any) => p.portNum === ponNum);
+          const isOnline = portInfo ? portInfo.status === 'online' : (count > 0);
+          const txPower = portInfo?.txPowerDbm !== null && portInfo?.txPowerDbm !== undefined
+            ? `+${portInfo.txPowerDbm} dBm`
+            : (count > 0 ? 'Active' : '—');
 
           return (
             <button
@@ -329,20 +363,24 @@ export default function OltDetailPage() {
                 <span className="font-bold text-sm text-slate-800 dark:text-slate-100">
                   EPON 0/{ponNum}
                 </span>
-                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60">
-                  Online
+                <span className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${
+                  isOnline
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60'
+                    : 'bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                }`}>
+                  {isOnline ? 'Online' : 'Offline'}
                 </span>
               </div>
               <div className="mt-2 flex items-baseline justify-between">
                 <span className="text-xl font-bold text-slate-900 dark:text-slate-100">
-                  {count}
+                  {count} <span className="text-xs font-normal text-slate-400">ONUs</span>
                 </span>
                 <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                  Tx: {txPowers[ponNum]} dBm
+                  Tx: {txPower}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-                {isSelected ? '✓ Filter active' : 'Click to filter'}
+                {isSelected ? '✓ Filter active' : (isOnline ? 'Click to filter' : 'No optical link')}
               </p>
             </button>
           );
