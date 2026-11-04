@@ -21,6 +21,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useCustomerPortalProfile } from '@/contexts/CustomerPortalContext';
 import { authService } from '@/services/auth.service';
 import { customerPortalService } from '@/services/customer-portal.service';
+import Footer from './Footer';
 import { useState, useEffect } from 'react';
 
 const navItems = [
@@ -279,10 +280,11 @@ export default function CustomerPortalLayout() {
         )}
       </AnimatePresence>
 
-      <main className="flex-1 min-w-0 overflow-auto bg-gradient-to-br from-slate-50 via-slate-50/95 to-blue-50/20 dark:from-slate-900 dark:via-slate-900 dark:to-slate-900/95 customer-portal-scrollbar">
-        <div className="pt-4 lg:pt-0 pl-4 lg:pl-0 pr-4 pb-4 pt-16 lg:pt-6">
+      <main className="flex-1 min-w-0 overflow-auto bg-gradient-to-br from-slate-50 via-slate-50/95 to-blue-50/20 dark:from-slate-900 dark:via-slate-900 dark:to-slate-900/95 customer-portal-scrollbar flex flex-col justify-between">
+        <div className="pt-4 lg:pt-0 pl-4 lg:pl-0 pr-4 pb-4 pt-16 lg:pt-6 flex-1">
           <Outlet />
         </div>
+        <Footer />
       </main>
     </div>
   );

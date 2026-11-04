@@ -2,6 +2,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import Footer from './Footer';
 import { useAuthStore } from '@/stores/authStore';
 import { useTenantStore } from '@/stores/tenantStore';
 
@@ -118,11 +119,14 @@ export default function AppLayout({ sidebarItems, userType, children }: AppLayou
         />
 
         {/* Page content */}
-        <main className="p-4 lg:p-6">
+        <main className="p-4 lg:p-6 flex-1">
           <div className="w-full min-w-0">
             {children ?? <Outlet />}
           </div>
         </main>
+
+        {/* Dashboard Footer */}
+        <Footer />
       </div>
     </div>
   );

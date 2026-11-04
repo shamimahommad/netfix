@@ -220,7 +220,6 @@ function AppContent() {
         <Route path="*" element={<ErrorPage status={404} />} />
           </Routes>
         </main>
-        <Footer />
       </div>
     </BrowserRouter>
   );
