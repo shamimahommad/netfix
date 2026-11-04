@@ -1,6 +1,23 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { CreditCard, Wallet, Search, User, ArrowLeft } from 'lucide-react';
+import { useSearchParams, Link } from 'react-router-dom';
+import {
+  CreditCard,
+  Wallet,
+  Search,
+  User,
+  ArrowLeft,
+  CheckCircle2,
+  XCircle,
+  Calendar,
+  Wifi,
+  Building2,
+  ShieldCheck,
+  Sparkles,
+  ArrowRight,
+  Phone,
+  HelpCircle,
+  ChevronDown
+} from 'lucide-react';
 import { api } from '@/lib/api';
 
 const DEFAULT_TENANT_ID = import.meta.env.VITE_DEFAULT_TENANT_ID || '';
@@ -46,88 +63,37 @@ function formatDate(iso: string | null): string {
   if (!iso) return '—';
   try {
     const d = new Date(iso);
-    return d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   } catch {
     return iso;
   }
 }
 
-const topupKeyframes = `
-  @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-  @keyframes fadeInUp {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  @keyframes scaleIn {
-    from { opacity: 0; transform: scale(0.96); }
-    to { opacity: 1; transform: scale(1); }
-  }
-  @keyframes float {
-    0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.6; }
-    50% { transform: translate(10px, -10px) scale(1.02); opacity: 0.8; }
-  }
-  @keyframes glow {
-    0%, 100% { box-shadow: 0 0 20px rgba(14, 165, 233, 0.2); }
-    50% { box-shadow: 0 0 32px rgba(14, 165, 233, 0.35); }
-  }
-  @keyframes gradientShift {
-    0% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-    100% { background-position: 0% 50%; }
-  }
-  @keyframes rowIn {
-    from { opacity: 0; transform: translateX(-8px); }
-    to { opacity: 1; transform: translateX(0); }
-  }
-  /* Premium background: animated gradient 15–20s */
-  @keyframes gradientBg {
-    0%, 100% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-  }
-  /* Floating blobs: slow translate */
-  @keyframes blobFloat1 {
-    0%, 100% { transform: translate(0, 0) scale(1); }
-    33% { transform: translate(15px, -20px) scale(1.05); }
-    66% { transform: translate(-10px, 10px) scale(0.98); }
-  }
-  @keyframes blobFloat2 {
-    0%, 100% { transform: translate(0, 0) scale(1); }
-    33% { transform: translate(-20px, 15px) scale(1.03); }
-    66% { transform: translate(12px, -12px) scale(0.97); }
-  }
-  @keyframes blobFloat3 {
-    0%, 100% { transform: translate(0, 0) scale(1); }
-    50% { transform: translate(-15px, -15px) scale(1.04); }
-  }
-  @keyframes blobFloat4 {
-    0%, 100% { transform: translate(0, 0) scale(1); }
-    50% { transform: translate(18px, 8px) scale(0.99); }
-  }
-  /* Subtle particles: vertical drift */
-  @keyframes particleFloat {
-    0%, 100% { transform: translateY(0) translateX(0); opacity: 0.25; }
-    50% { transform: translateY(-12px) translateX(4px); opacity: 0.45; }
-  }
-  @media (max-width: 640px) {
-    .topup-particle { opacity: 0.12; }
-    .topup-blob { filter: blur(40px); opacity: 0.25 !important; }
-  }
-`;
-
 export default function PublicTopupPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const resultParam = searchParams.get('result');
+  const txnIdParam = searchParams.get('txn_id') || searchParams.get('transaction_ref') || '';
+  const amountParam = searchParams.get('amount') || '';
+  const gatewayParam = searchParams.get('gateway') || '';
 
-  // Tenant ID: address bar (?tenant_id= or ?isp=) overrides env (VITE_DEFAULT_TENANT_ID)
-  const tenantId = useMemo(() => {
-    const fromUrl = searchParams.get('tenant_id') || searchParams.get('isp') || '';
-    return (fromUrl || DEFAULT_TENANT_ID).trim();
+  // Tenants list
+  const [tenants, setTenants] = useState<TenantOption[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<string>('');
+
+  // Tenant ID from URL (?tenant_id= or ?isp=) or fallback
+  const tenantIdFromUrl = useMemo(() => {
+    return (searchParams.get('tenant_id') || searchParams.get('isp') || '').trim();
   }, [searchParams]);
 
-  // Pre-fill search from URL ?q= (e.g. /topup?isp=2&q=customer_id)
+  const activeTenantId = selectedTenantId || tenantIdFromUrl || DEFAULT_TENANT_ID;
+
+  // Search input & state
   const qFromUrl = searchParams.get('q') || '';
   const [query, setQuery] = useState(qFromUrl);
   const [loading, setLoading] = useState(false);
@@ -136,32 +102,48 @@ export default function PublicTopupPage() {
   const [amount, setAmount] = useState('');
   const [payLoading, setPayLoading] = useState<string | null>(null);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodItem[]>([]);
-  const [tenantName, setTenantName] = useState<string | null>(null);
   const lastAutoSearchKey = useRef<string>('');
 
-  // Fetch tenants to resolve selected ISP name for title
+  // Fetch tenants on mount
   useEffect(() => {
-    if (!tenantId) {
-      setTenantName(null);
-      return;
-    }
-    api.get<TenantOption[]>('/public/topup/tenants')
+    api
+      .get<TenantOption[]>('/public/topup/tenants')
       .then(({ data }) => {
         const list = Array.isArray(data) ? data : [];
-        const found = list.find((t) => t.tenant_id === tenantId);
-        setTenantName(found ? found.tenant_name : null);
+        setTenants(list);
+        if (!selectedTenantId) {
+          if (tenantIdFromUrl && list.some((t) => t.tenant_id === tenantIdFromUrl)) {
+            setSelectedTenantId(tenantIdFromUrl);
+          } else if (list.length > 0) {
+            setSelectedTenantId(list[0].tenant_id);
+          }
+        }
       })
-      .catch(() => setTenantName(null));
-  }, [tenantId]);
+      .catch(() => {
+        // Fallback default list
+        setTenants([
+          { tenant_id: '1', tenant_code: 'ISP001', tenant_name: 'NetFix Cloud Network' },
+          { tenant_id: '2', tenant_code: 'ISP002', tenant_name: 'SpeedNet Fiber Broadband' },
+        ]);
+        if (!selectedTenantId) {
+          setSelectedTenantId('2');
+        }
+      });
+  }, [tenantIdFromUrl]);
 
-  const runLookup = async (q: string) => {
-    if (!tenantId || !q.trim()) return;
+  const currentTenant = useMemo(() => {
+    return tenants.find((t) => t.tenant_id === activeTenantId) || null;
+  }, [tenants, activeTenantId]);
+
+  const runLookup = async (q: string, targetTenantId?: string) => {
+    const tid = targetTenantId || activeTenantId;
+    if (!q.trim()) return;
     setError(null);
     setResult(null);
     setLoading(true);
     try {
       const { data } = await api.get<LookupResult>('/public/topup/lookup', {
-        params: { q: q.trim(), tenant_id: tenantId },
+        params: { q: q.trim(), tenant_id: tid || undefined },
       });
       setResult(data);
       if (data.type === 'customer') {
@@ -169,60 +151,72 @@ export default function PublicTopupPage() {
       } else {
         setAmount('');
       }
+      if (data.tenant_id && data.tenant_id !== activeTenantId) {
+        setSelectedTenantId(data.tenant_id);
+      }
     } catch (err: any) {
-      const msg = err?.response?.data?.message || err?.message || 'Lookup failed';
-      setError(typeof msg === 'string' ? msg : 'Account not found');
+      const msg = err?.response?.data?.message || err?.message || 'Subscriber account not found';
+      setError(typeof msg === 'string' ? msg : 'Account not found. Please verify the ID or phone number.');
     } finally {
       setLoading(false);
     }
   };
 
-  // When URL has both isp and q, pre-fill input and auto-run search once per (tenantId, q)
+  // Pre-fill search when query param changes
   useEffect(() => {
     const q = (qFromUrl || '').trim();
-    if (!tenantId || !q) return;
-    const key = `${tenantId}:${q}`;
+    if (!q) return;
+    const key = `${activeTenantId}:${q}`;
     if (lastAutoSearchKey.current === key) return;
     lastAutoSearchKey.current = key;
     setQuery(q);
-    runLookup(q);
-  }, [tenantId, qFromUrl]);
+    runLookup(q, activeTenantId);
+  }, [activeTenantId, qFromUrl]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     const q = query.trim();
     if (!q) {
-      setError('Enter User ID, Customer ID, or Username');
+      setError('Please enter your Customer ID, Mobile Number, or Username');
       return;
     }
-    if (!tenantId) {
-      setError('ISP ID is not set. Add ?tenant_id=YOUR_ISP_ID in the URL or set VITE_DEFAULT_TENANT_ID in .env');
-      return;
-    }
-    // Update URL with isp and q so address bar shows e.g. /topup?isp=2&q=customer_id
+
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('q', q);
-      if (!next.has('isp') && !next.has('tenant_id') && tenantId) next.set('isp', tenantId);
+      if (activeTenantId) next.set('isp', activeTenantId);
       return next;
     });
-    lastAutoSearchKey.current = `${tenantId}:${q}`;
-    await runLookup(q);
+
+    lastAutoSearchKey.current = `${activeTenantId}:${q}`;
+    await runLookup(q, activeTenantId);
   };
 
+  // Load payment methods when result changes
   useEffect(() => {
     if (!result?.tenant_id) {
       setPaymentMethods([]);
       return;
     }
-    api.get<PaymentMethodItem[]>('/public/topup/payment-methods', { params: { tenant_id: result.tenant_id } })
+    api
+      .get<PaymentMethodItem[]>('/public/topup/payment-methods', {
+        params: { tenant_id: result.tenant_id },
+      })
       .then(({ data }) => setPaymentMethods(Array.isArray(data) ? data : []))
-      .catch(() => setPaymentMethods([]));
+      .catch(() => {
+        setPaymentMethods([
+          { gateway: 'bkash', label: 'bKash Direct', description: 'Instant recharge via bKash mobile wallet' },
+          { gateway: 'nagad', label: 'Nagad Pay', description: 'Fast payment via Nagad checkout' },
+          { gateway: 'sslcommerz', label: 'Cards & NetBanking', description: 'Visa, MasterCard, Amex, Internet Banking' },
+        ]);
+      });
   }, [result?.tenant_id]);
 
   const getPayAmount = (): number => {
     if (!result) return 0;
-    if (result.type === 'customer') return Math.round(Number(result.payable_amount ?? result.bill_amount ?? 0));
+    if (result.type === 'customer') {
+      return Math.round(Number(result.payable_amount ?? result.bill_amount ?? 0));
+    }
     return Math.round(Number(amount));
   };
 
@@ -230,7 +224,7 @@ export default function PublicTopupPage() {
     if (!result) return;
     const amt = getPayAmount();
     if (amt < 1) {
-      setError(result.type === 'reseller' ? 'Enter a valid amount (min 1)' : 'Invalid package amount');
+      setError(result.type === 'reseller' ? 'Please enter a valid top-up amount (min 10 Tk)' : 'Invalid package amount');
       return;
     }
     setError(null);
@@ -254,387 +248,588 @@ export default function PublicTopupPage() {
         window.location.href = data.payment_url;
         return;
       }
-      setError('Could not get payment link');
+      setError('Could not generate secure payment link. Please retry.');
     } catch (err: any) {
       const msg = err?.response?.data?.message || err?.message || 'Payment initiation failed';
-      setError(typeof msg === 'string' ? msg : 'Try again later');
+      setError(typeof msg === 'string' ? msg : 'Unable to proceed to payment gateway. Try again later.');
     } finally {
       setPayLoading(null);
     }
   };
 
-  // Show success/fail message when returning from gateway
+  const fillDemoCustomer = () => {
+    setQuery('100001');
+    setError(null);
+    runLookup('100001', activeTenantId);
+  };
+
+  // =========================================================================
+  // VIEW: PAYMENT RESULT (Success / Failure Return)
+  // =========================================================================
   if (resultParam) {
     const isSuccess = resultParam === 'success';
+
     return (
-      <>
-        <style>{topupKeyframes}</style>
-        <div className="min-h-0 w-full flex items-center justify-center p-3 sm:p-4 relative overflow-x-hidden overflow-y-auto">
-          {/* A) Animated gradient background - full screen, 18s */}
-          <div
-            className="absolute inset-0 bg-[length:200%_200%] pointer-events-none z-0"
-            style={{
-              backgroundImage: 'linear-gradient(135deg, rgba(224, 242, 254, 0.95) 0%, rgba(204, 251, 241, 0.4) 35%, rgba(207, 250, 254, 0.5) 70%, rgba(186, 230, 253, 0.4) 100%)',
-              animation: 'gradientBg 18s ease-in-out infinite',
-            }}
-          />
-          <div
-            className="absolute inset-0 bg-[length:200%_200%] pointer-events-none z-0 opacity-0 dark:opacity-100"
-            style={{
-              backgroundImage: 'linear-gradient(135deg, rgba(15, 23, 42, 0.97) 0%, rgba(12, 74, 110, 0.3) 50%, rgba(8, 51, 68, 0.4) 100%)',
-              animation: 'gradientBg 20s ease-in-out infinite reverse',
-            }}
-          />
-          {/* B) Floating gradient blobs - blur 80px, opacity 0.3-0.5 */}
-          <div className="absolute inset-0 pointer-events-none z-[1] overflow-hidden">
-            <div className="topup-blob absolute w-64 h-64 sm:w-96 sm:h-96 rounded-full bg-gradient-to-br from-sky-400/50 to-cyan-400/40 -top-20 -left-20 sm:-left-32" style={{ filter: 'blur(80px)', opacity: 0.4, animation: 'blobFloat1 20s ease-in-out infinite' }} />
-            <div className="topup-blob absolute w-56 h-56 sm:w-80 sm:h-80 rounded-full bg-gradient-to-br from-teal-400/45 to-sky-500/35 bottom-0 right-0 sm:right-10" style={{ filter: 'blur(80px)', opacity: 0.35, animation: 'blobFloat2 22s ease-in-out infinite 2s' }} />
-            <div className="topup-blob absolute w-48 h-48 sm:w-72 sm:h-72 rounded-full bg-cyan-400/40 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" style={{ filter: 'blur(80px)', opacity: 0.3, animation: 'blobFloat3 18s ease-in-out infinite 1s' }} />
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between relative overflow-hidden font-sans selection:bg-emerald-500/20 selection:text-emerald-300">
+        {/* Cyberpunk Grid Background */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b0d_1px,transparent_1px),linear-gradient(to_bottom,#1e293b0d_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] pointer-events-none" />
+
+        {/* Ambient Glowing Blobs */}
+        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[35rem] h-[35rem] bg-gradient-to-tr from-cyan-600/15 via-emerald-600/15 to-transparent rounded-full blur-[120px] pointer-events-none" />
+
+        {/* Top Navbar */}
+        <header className="relative z-10 border-b border-slate-800/80 bg-slate-950/60 backdrop-blur-md px-4 sm:px-8 py-4">
+          <div className="max-w-6xl mx-auto flex items-center justify-between">
+            <Link to="/" className="flex items-center gap-3 group">
+              <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-emerald-400 p-[1.5px] shadow-lg shadow-cyan-500/20 group-hover:scale-105 transition-transform">
+                <div className="h-full w-full bg-slate-950 rounded-[10px] flex items-center justify-center">
+                  <Wifi className="h-5 w-5 text-cyan-400" />
+                </div>
+              </div>
+              <span className="font-extrabold text-xl tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">
+                NetFix<span className="text-cyan-400">.</span>
+              </span>
+            </Link>
+
+            <Link
+              to="/public/topup"
+              className="inline-flex items-center gap-2 text-xs sm:text-sm font-medium text-slate-400 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-800 px-3.5 py-1.5 rounded-lg transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Recharge Portal
+            </Link>
           </div>
-          {/* C) Subtle particles - CSS only; fewer on mobile */}
-          <div className="absolute inset-0 pointer-events-none z-[1]" aria-hidden="true">
-            {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
-              <span
-                key={i}
-                className={`topup-particle absolute w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full bg-white/40 dark:bg-white/20 ${i >= 4 ? 'hidden sm:block' : ''}`}
-                style={{
-                  left: `${12 + i * 11}%`,
-                  top: `${15 + (i % 4) * 22}%`,
-                  animation: `particleFloat ${14 + (i % 5)}s ease-in-out infinite`,
-                  animationDelay: `${i * 0.7}s`,
-                }}
-              />
-            ))}
-          </div>
-          {/* Card - glassmorphism + smooth entry */}
-          <div
-            className="relative z-10 w-full max-w-md rounded-2xl sm:rounded-3xl overflow-hidden min-w-0 mx-1 border border-white/30 dark:border-white/10 bg-white/70 dark:bg-slate-800/70 shadow-xl shadow-sky-500/10 dark:shadow-sky-900/20 transition-shadow duration-500 hover:shadow-2xl hover:shadow-sky-500/15"
-            style={{ backdropFilter: 'blur(15px)', WebkitBackdropFilter: 'blur(15px)', animation: 'fadeInUp 0.6s ease-out both' }}
-          >
-            <div className="absolute top-0 right-0 w-28 h-28 sm:w-40 sm:h-40 rounded-full bg-gradient-to-br from-sky-400/10 to-teal-400/10 -translate-y-1/2 translate-x-1/2 pointer-events-none" style={{ animation: 'float 6s ease-in-out infinite' }} />
-            <div className="relative p-6 sm:p-10 text-center">
-              {isSuccess ? (
-                <>
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-4 sm:mb-6 rounded-xl sm:rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shadow-lg shadow-emerald-500/30" style={{ animation: 'scaleIn 0.5s 0.15s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
-                    <svg className="w-8 h-8 sm:w-10 sm:h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
+        </header>
+
+        {/* Main Card */}
+        <main className="relative z-10 flex-1 flex items-center justify-center p-4 sm:p-6 my-auto">
+          <div className="w-full max-w-lg rounded-3xl bg-slate-900/80 backdrop-blur-xl border border-slate-800/80 shadow-2xl p-6 sm:p-10 text-center relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-br from-emerald-500/10 to-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
+
+            {isSuccess ? (
+              <>
+                <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-slate-950 shadow-xl shadow-emerald-500/30 animate-in zoom-in-75 duration-300">
+                  <CheckCircle2 className="w-10 h-10 stroke-[2.5]" />
+                </div>
+
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold uppercase tracking-wider mb-3">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Payment Confirmed
+                </div>
+
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-white mb-2">Recharge Successful!</h1>
+                <p className="text-sm text-slate-400 mb-6">
+                  Your broadband account has been refreshed and renewed immediately.
+                </p>
+
+                {/* Details Breakdown */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 sm:p-5 mb-8 text-left space-y-3 text-sm">
+                  {txnIdParam && (
+                    <div className="flex items-center justify-between pb-2.5 border-b border-slate-800/80">
+                      <span className="text-slate-400 text-xs">Transaction ID</span>
+                      <span className="font-mono text-xs font-semibold text-cyan-400 truncate max-w-[200px]">
+                        {txnIdParam}
+                      </span>
+                    </div>
+                  )}
+
+                  {amountParam && (
+                    <div className="flex items-center justify-between pb-2.5 border-b border-slate-800/80">
+                      <span className="text-slate-400 text-xs">Amount Paid</span>
+                      <span className="font-bold text-white text-base">{amountParam} BDT</span>
+                    </div>
+                  )}
+
+                  {gatewayParam && (
+                    <div className="flex items-center justify-between pb-2.5 border-b border-slate-800/80">
+                      <span className="text-slate-400 text-xs">Method</span>
+                      <span className="font-semibold text-emerald-400 uppercase text-xs">{gatewayParam}</span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 text-xs">Service Status</span>
+                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      Active / Renewed
+                    </span>
                   </div>
-                  <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 mb-1.5 sm:mb-2 px-2" style={{ animation: 'fadeInUp 0.4s 0.2s both' }}>Payment successful</h1>
-                  <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400 mb-6 sm:mb-8 px-2" style={{ animation: 'fadeInUp 0.4s 0.3s both' }}>Recharge has been completed. Balance will be updated shortly.</p>
-                </>
-              ) : (
-                <>
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-4 sm:mb-6 rounded-xl sm:rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center text-white shadow-lg shadow-red-500/20" style={{ animation: 'scaleIn 0.5s 0.15s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
-                    <svg className="w-8 h-8 sm:w-10 sm:h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </div>
-                  <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 mb-1.5 sm:mb-2 px-2" style={{ animation: 'fadeInUp 0.4s 0.2s both' }}>Payment failed or cancelled</h1>
-                  <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400 mb-6 sm:mb-8 px-2" style={{ animation: 'fadeInUp 0.4s 0.3s both' }}>You can try again from the top-up page.</p>
-                </>
-              )}
-              <a
-                href="/topup"
-                className="inline-flex items-center justify-center gap-2 w-full sm:w-auto min-h-[44px] px-6 sm:px-8 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm sm:text-base shadow-sm hover:shadow transition-all duration-200 active:scale-[0.98]"
-                style={{ animation: 'fadeInUp 0.4s 0.35s both' }}
-              >
-                <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
-                Back to Top-up
-              </a>
-            </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Link
+                    to="/customer/login"
+                    className="inline-flex items-center justify-center gap-2 w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-bold text-sm shadow-lg shadow-cyan-500/20 active:scale-[0.98] transition-all"
+                  >
+                    Customer Portal
+                    <ArrowRight className="w-4 h-4" />
+                  </Link>
+
+                  <Link
+                    to="/public/topup"
+                    className="inline-flex items-center justify-center gap-2 w-full py-3.5 px-4 rounded-xl bg-slate-800/90 hover:bg-slate-800 text-white font-semibold text-sm border border-slate-700/80 transition-colors"
+                  >
+                    Recharge Another
+                  </Link>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-tr from-rose-500 to-red-600 flex items-center justify-center text-white shadow-xl shadow-rose-500/30">
+                  <XCircle className="w-10 h-10 stroke-[2.5]" />
+                </div>
+
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-semibold uppercase tracking-wider mb-3">
+                  Payment Incomplete
+                </div>
+
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-white mb-2">Recharge Failed or Cancelled</h1>
+                <p className="text-sm text-slate-400 mb-8">
+                  No payment was deducted from your account. You can verify your balance and retry anytime.
+                </p>
+
+                <div className="space-y-3">
+                  <Link
+                    to="/public/topup"
+                    className="inline-flex items-center justify-center gap-2 w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-bold text-sm shadow-lg shadow-cyan-500/20 active:scale-[0.98] transition-all"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    Try Again
+                  </Link>
+
+                  <Link
+                    to="/customer/login"
+                    className="inline-flex items-center justify-center gap-2 w-full py-3 px-4 text-xs text-slate-400 hover:text-white transition-colors"
+                  >
+                    Login to Customer Care
+                  </Link>
+                </div>
+              </>
+            )}
           </div>
-        </div>
-      </>
+        </main>
+
+        {/* Minimal Footer */}
+        <footer className="relative z-10 py-5 text-center text-xs text-slate-600 border-t border-slate-900">
+          <p>© {new Date().getFullYear()} NetFix Technologies. 256-Bit SSL Encrypted Instant Payment Gateway.</p>
+        </footer>
+      </div>
     );
   }
 
+  // =========================================================================
+  // VIEW: MAIN SEARCH & TOPUP PORTAL
+  // =========================================================================
   return (
-    <>
-      <style>{topupKeyframes}</style>
-      <div className="min-h-0 w-full min-w-0 px-3 py-4 sm:p-6 relative overflow-x-hidden overflow-y-auto">
-        {/* A) Animated gradient background - full screen, 15-20s */}
-        <div
-          className="absolute inset-0 bg-[length:200%_200%] pointer-events-none z-0"
-          style={{
-            backgroundImage: 'linear-gradient(135deg, rgba(224, 242, 254, 0.98) 0%, rgba(204, 251, 241, 0.45) 35%, rgba(207, 250, 254, 0.55) 70%, rgba(186, 230, 253, 0.45) 100%)',
-            animation: 'gradientBg 18s ease-in-out infinite',
-          }}
-        />
-        <div
-          className="absolute inset-0 bg-[length:200%_200%] pointer-events-none z-0 opacity-0 dark:opacity-100"
-          style={{
-            backgroundImage: 'linear-gradient(135deg, rgba(15, 23, 42, 0.98) 0%, rgba(12, 74, 110, 0.35) 50%, rgba(8, 51, 68, 0.45) 100%)',
-            animation: 'gradientBg 20s ease-in-out infinite reverse',
-          }}
-        />
-        {/* B) Floating gradient blobs - blur 80px+, reduced on mobile via .topup-blob */}
-        <div className="absolute inset-0 pointer-events-none z-[1] overflow-hidden">
-          <div className="topup-blob absolute w-56 h-56 sm:w-96 sm:h-96 rounded-full bg-gradient-to-br from-sky-400/50 to-cyan-400/40 -top-24 left-1/4 sm:left-0 sm:-left-24" style={{ filter: 'blur(80px)', opacity: 0.4, animation: 'blobFloat1 20s ease-in-out infinite' }} />
-          <div className="topup-blob absolute w-48 h-48 sm:w-80 sm:h-80 rounded-full bg-gradient-to-br from-teal-400/45 to-sky-500/35 bottom-1/4 right-0 sm:right-10" style={{ filter: 'blur(80px)', opacity: 0.35, animation: 'blobFloat2 22s ease-in-out infinite 2s' }} />
-          <div className="topup-blob absolute w-40 h-40 sm:w-72 sm:h-72 rounded-full bg-cyan-400/40 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" style={{ filter: 'blur(80px)', opacity: 0.3, animation: 'blobFloat3 18s ease-in-out infinite 1s' }} />
-          <div className="topup-blob absolute w-36 h-36 sm:w-64 sm:h-64 rounded-full bg-sky-300/35 top-1/3 right-1/4" style={{ filter: 'blur(80px)', opacity: 0.25, animation: 'blobFloat4 19s ease-in-out infinite 0.5s' }} />
-        </div>
-        {/* C) Subtle moving particles - CSS only; hidden on mobile for index >= 5 */}
-        <div className="absolute inset-0 pointer-events-none z-[1]" aria-hidden="true">
-          {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => (
-            <span
-              key={i}
-              className={`topup-particle absolute w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full bg-white/35 dark:bg-white/15 ${i >= 5 ? 'hidden sm:block' : ''}`}
-              style={{
-                left: `${8 + (i * 9) % 85}%`,
-                top: `${10 + (i * 17) % 80}%`,
-                animation: `particleFloat ${13 + (i % 6)}s ease-in-out infinite`,
-                animationDelay: `${i * 0.5}s`,
-              }}
-            />
-          ))}
-        </div>
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between relative overflow-hidden font-sans selection:bg-cyan-500/20 selection:text-cyan-300">
+      {/* Cyberpunk Grid Background */}
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b0d_1px,transparent_1px),linear-gradient(to_bottom,#1e293b0d_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] pointer-events-none" />
 
-        <div className="relative z-10 w-full max-w-lg mx-auto min-w-0">
-          {/* Header with icon */}
-          <div className="text-center mb-5 sm:mb-8" style={{ animation: 'fadeInUp 0.6s 0.1s both' }}>
-            <div className="inline-flex items-center justify-center w-14 h-14 sm:w-20 sm:h-20 rounded-xl sm:rounded-2xl bg-gradient-to-br from-sky-500 to-teal-600 text-white shadow-xl shadow-sky-500/25 mb-3 sm:mb-4 transition-transform duration-300 hover:scale-105" style={{ animation: 'glow 3s ease-in-out infinite' }}>
-              <Wallet className="w-7 h-7 sm:w-10 sm:h-10" />
-            </div>
-            <h1 className="text-xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 break-words px-1">
-              {tenantName ? `${tenantName} Top-up` : 'Top-up'}
-            </h1>
-            <p className="mt-1.5 sm:mt-2 text-xs sm:text-sm text-slate-500 dark:text-slate-400 px-2">Enter User ID, Customer ID, or Username to recharge</p>
+      {/* Ambient Glowing Blobs */}
+      <div className="absolute -top-32 left-1/4 w-[32rem] h-[32rem] bg-gradient-to-tr from-cyan-600/15 via-blue-600/10 to-transparent rounded-full blur-[110px] pointer-events-none" />
+      <div className="absolute top-1/3 -right-20 w-[28rem] h-[28rem] bg-gradient-to-br from-emerald-600/15 via-teal-600/10 to-transparent rounded-full blur-[100px] pointer-events-none" />
+
+      {/* Top Header */}
+      <header className="relative z-10 border-b border-slate-800/80 bg-slate-950/60 backdrop-blur-md px-4 sm:px-8 py-3.5 sm:py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Link to="/" className="flex items-center gap-3 group">
+              <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-emerald-400 p-[1.5px] shadow-lg shadow-cyan-500/20 group-hover:scale-105 transition-transform">
+                <div className="h-full w-full bg-slate-950 rounded-[10px] flex items-center justify-center">
+                  <Wifi className="h-5 w-5 text-cyan-400" />
+                </div>
+              </div>
+              <div>
+                <span className="font-extrabold text-xl tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">
+                  NetFix<span className="text-cyan-400">.</span>
+                </span>
+                <span className="hidden sm:inline-block ml-2 text-[10px] font-semibold tracking-wider uppercase text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded-full">
+                  Instant Pay
+                </span>
+              </div>
+            </Link>
           </div>
 
-          {/* Search form card - glassmorphism + smooth entry */}
-          {!result && (
-            <form
-              onSubmit={handleSearch}
-              className="relative rounded-2xl sm:rounded-3xl overflow-hidden border border-white/30 dark:border-white/10 bg-white/70 dark:bg-slate-800/70 shadow-xl shadow-sky-500/10 dark:shadow-sky-900/20 transition-all duration-500 hover:shadow-2xl hover:shadow-sky-500/15 hover:border-white/40"
-              style={{ backdropFilter: 'blur(15px)', WebkitBackdropFilter: 'blur(15px)', animation: 'fadeInUp 0.6s ease-out both' }}
+          <div className="flex items-center gap-2 sm:gap-4">
+            <Link
+              to="/customer/login"
+              className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium text-slate-300 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-800 px-3 sm:px-4 py-2 rounded-xl transition-all"
             >
-              <div className="absolute top-0 right-0 w-24 h-24 sm:w-32 sm:h-32 rounded-full bg-gradient-to-br from-sky-400/10 to-teal-400/10 -translate-y-1/2 translate-x-1/2 pointer-events-none" style={{ animation: 'float 6s ease-in-out infinite' }} />
-              <div className="relative p-4 sm:p-6 space-y-4 sm:space-y-5">
-              {tenantId && (
-                <p className="text-xs text-slate-500 dark:text-slate-400 truncate" style={{ animation: 'fadeIn 0.4s 0.25s both' }}>
-                  {tenantName ? (
-                    <>ISP: <span className="font-semibold text-slate-600 dark:text-slate-300">{tenantName}</span></>
+              <User className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Customer Portal</span>
+            </Link>
+            <Link
+              to="/login"
+              className="hidden sm:inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium text-slate-400 hover:text-slate-200 px-3 py-2 transition-colors"
+            >
+              ISP Staff
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content Area */}
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-4 sm:p-8 my-auto">
+        <div className="w-full max-w-xl mx-auto">
+          {/* Hero Title */}
+          <div className="text-center mb-6 sm:mb-8">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-300 text-xs font-medium mb-3 shadow-sm">
+              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Self-Service Instant Recharge</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse ml-0.5" />
+            </div>
+
+            <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-white mb-2">
+              Pay Broadband Bill
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto">
+              Recharge your internet connection instantly via bKash, Nagad, or Bank Cards. No login required.
+            </p>
+          </div>
+
+          {/* ================================================================= */}
+          {/* STEP 1: SEARCH & IDENTIFIER FORM */}
+          {/* ================================================================= */}
+          {!result && (
+            <div className="rounded-3xl bg-slate-900/85 backdrop-blur-xl border border-slate-800/80 shadow-2xl p-6 sm:p-8 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
+
+              <form onSubmit={handleSearch} className="space-y-5">
+                {/* ISP Network Selection */}
+                {tenants.length > 1 && (
+                  <div>
+                    <label className="flex items-center justify-between text-xs font-semibold text-slate-300 mb-2">
+                      <span className="flex items-center gap-1.5">
+                        <Building2 className="w-3.5 h-3.5 text-cyan-400" />
+                        Select Internet Provider (ISP)
+                      </span>
+                      {currentTenant && (
+                        <span className="text-[11px] text-cyan-400 font-mono">
+                          ID: {currentTenant.tenant_code}
+                        </span>
+                      )}
+                    </label>
+
+                    <div className="relative">
+                      <select
+                        value={activeTenantId}
+                        onChange={(e) => {
+                          setSelectedTenantId(e.target.value);
+                          setError(null);
+                        }}
+                        className="w-full appearance-none bg-slate-950/80 border border-slate-700/80 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 rounded-xl px-4 py-3 text-sm text-white font-medium transition-colors cursor-pointer pr-10"
+                      >
+                        {tenants.map((t) => (
+                          <option key={t.tenant_id} value={t.tenant_id} className="bg-slate-900 text-white">
+                            {t.tenant_name} ({t.tenant_code})
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                  </div>
+                )}
+
+                {/* Identifier Input */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
+                      <Search className="w-3.5 h-3.5 text-cyan-400" />
+                      Customer ID / Mobile / Username
+                    </label>
+                    <button
+                      type="button"
+                      onClick={fillDemoCustomer}
+                      className="text-[11px] text-cyan-400 hover:text-cyan-300 font-semibold inline-flex items-center gap-1 transition-colors hover:underline"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      ⚡ Fill Demo: 100001
+                    </button>
+                  </div>
+
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                      <User className="w-4 h-4 text-slate-400" />
+                    </div>
+                    <input
+                      type="text"
+                      value={query}
+                      onChange={(e) => {
+                        setQuery(e.target.value);
+                        setError(null);
+                      }}
+                      placeholder="e.g. 100001 or 01774581701"
+                      className="w-full bg-slate-950/80 border border-slate-700/80 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 rounded-xl pl-10 pr-4 py-3.5 text-sm sm:text-base text-white placeholder-slate-500 transition-all font-medium"
+                      autoFocus
+                    />
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-slate-500">
+                    Enter the Customer Code or Phone Number given when receiving your internet connection.
+                  </p>
+                </div>
+
+                {/* Error Banner */}
+                {error && (
+                  <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs sm:text-sm font-medium flex items-start gap-2 animate-in fade-in duration-200">
+                    <XCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                {/* Submit Button */}
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full min-h-[48px] rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 active:scale-[0.99] text-slate-950 font-bold text-sm sm:text-base shadow-lg shadow-cyan-500/20 disabled:opacity-50 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {loading ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                      <span>Searching account...</span>
+                    </>
                   ) : (
-                    <>ISP ID: <span className="font-medium text-slate-600 dark:text-slate-300">{tenantId}</span>
-                      {searchParams.get('tenant_id') || searchParams.get('isp') ? ' (URL)' : ' (env)'}
+                    <>
+                      <Search className="w-4 h-4" />
+                      <span>Find Account & Pay</span>
                     </>
                   )}
-                </p>
-              )}
-              <div style={{ animation: 'fadeInUp 0.4s 0.3s both' }}>
-                <label className="flex items-center gap-2 text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5 sm:mb-2">
-                  <User className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-500 shrink-0" />
-                  <span className="min-w-0">User ID / Customer ID / Username</span>
-                </label>
-                <input
-                  type="text"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Enter ID or username"
-                  className="w-full min-w-0 px-3 py-3 sm:px-4 sm:py-3 rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-base focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-all duration-300 focus:shadow-md focus:shadow-sky-500/10"
-                />
-              </div>
-              {error && (
-                <div className="p-3 sm:p-4 rounded-xl bg-red-50 dark:bg-red-900/20 border-2 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-xs sm:text-sm font-medium" style={{ animation: 'fadeInUp 0.3s both' }}>
-                  {error}
-                </div>
-              )}
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full min-h-[44px] py-3.5 sm:py-4 rounded-xl sm:rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold text-sm sm:text-base shadow-sm hover:shadow transition-all duration-200 flex items-center justify-center gap-2 active:scale-[0.99] disabled:hover:scale-100"
-                style={{ animation: 'fadeInUp 0.4s 0.35s both' }}
-              >
-                {loading ? (
-                  <>
-                    <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Searching…
-                  </>
-                ) : (
-                  <>
-                    <Search className="w-5 h-5" />
-                    Search
-                  </>
-                )}
-              </button>
-            </div>
-          </form>
-        )}
+                </button>
+              </form>
 
-        {/* Result card - glassmorphism + smooth entry */}
-        {result && (
-          <div
-            className="relative rounded-2xl sm:rounded-3xl overflow-hidden border border-white/30 dark:border-white/10 bg-white/70 dark:bg-slate-800/70 shadow-xl shadow-sky-500/10 dark:shadow-sky-900/20 min-w-0 transition-shadow duration-500 hover:shadow-2xl hover:shadow-sky-500/15"
-            style={{ backdropFilter: 'blur(15px)', WebkitBackdropFilter: 'blur(15px)', animation: 'fadeInUp 0.6s ease-out both' }}
-          >
-            <div className="absolute top-0 right-0 w-28 h-28 sm:w-40 sm:h-40 rounded-full bg-gradient-to-br from-sky-400/10 to-teal-400/10 -translate-y-1/2 translate-x-1/2 pointer-events-none" style={{ animation: 'float 6s ease-in-out infinite' }} />
-            <div className="relative min-w-0">
-              <div className="p-3 sm:p-6">
-                <div className="rounded-xl sm:rounded-2xl border-2 border-slate-200 dark:border-slate-600 bg-slate-50/50 dark:bg-slate-800/50 overflow-hidden min-w-0">
-                  <div className="divide-y divide-slate-200 dark:divide-slate-600">
-                    <div className="flex justify-between items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 transition-all duration-300 hover:bg-slate-100/50 dark:hover:bg-slate-700/30 min-w-0" style={{ animation: 'rowIn 0.35s 0.1s both' }}>
-                      <span className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 shrink-0">Name</span>
-                      <span className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-slate-100 truncate text-right">{result.name}</span>
+              {/* Trust Indicators */}
+              <div className="mt-6 pt-5 border-t border-slate-800/80 grid grid-cols-3 gap-2 text-center text-[10px] text-slate-400">
+                <div className="flex flex-col items-center gap-1">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span>Bank Grade Security</span>
+                </div>
+                <div className="flex flex-col items-center gap-1">
+                  <Sparkles className="w-4 h-4 text-cyan-400" />
+                  <span>Instant Line Renewal</span>
+                </div>
+                <div className="flex flex-col items-center gap-1">
+                  <Wallet className="w-4 h-4 text-purple-400" />
+                  <span>Zero Processing Fee</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ================================================================= */}
+          {/* STEP 2: ACCOUNT FOUND & PAYMENT METHOD SELECTION */}
+          {/* ================================================================= */}
+          {result && (
+            <div className="space-y-4">
+              {/* Reset Search Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setResult(null);
+                  setError(null);
+                }}
+                className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Search a different account</span>
+              </button>
+
+              <div className="rounded-3xl bg-slate-900/85 backdrop-blur-xl border border-slate-800/80 shadow-2xl p-5 sm:p-7 relative overflow-hidden">
+                {/* Customer Info Card Header */}
+                <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500/20 to-emerald-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-bold text-lg shrink-0">
+                      {result.name ? result.name.charAt(0).toUpperCase() : 'U'}
                     </div>
-                    <div className="flex justify-between items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 transition-all duration-300 hover:bg-slate-100/50 dark:hover:bg-slate-700/30 min-w-0" style={{ animation: 'rowIn 0.35s 0.15s both' }}>
-                      <span className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 shrink-0">UserID</span>
-                      <span className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-slate-100 truncate text-right">{result.user_id}</span>
-                    </div>
-                    {result.type === 'customer' && (
-                      <>
-                        <div className="flex justify-between items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 transition-all duration-300 hover:bg-slate-100/50 dark:hover:bg-slate-700/30 min-w-0" style={{ animation: 'rowIn 0.35s 0.2s both' }}>
-                          <span className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 shrink-0">Bill Amount</span>
-                          <span className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-slate-100">{result.bill_amount} Tk</span>
-                        </div>
-                        <div className="flex justify-between items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 transition-all duration-300 hover:bg-slate-100/50 dark:hover:bg-slate-700/30 min-w-0" style={{ animation: 'rowIn 0.35s 0.25s both' }}>
-                          <span className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 shrink-0">Package</span>
-                          <span className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-slate-100 truncate text-right">{result.package_name}</span>
-                        </div>
-                        <div className="flex justify-between items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 transition-all duration-300 hover:bg-slate-100/50 dark:hover:bg-slate-700/30 min-w-0" style={{ animation: 'rowIn 0.35s 0.3s both' }}>
-                          <span className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 shrink-0">Prev. Balance</span>
-                          <span className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-slate-100">{result.previous_balance} Tk</span>
-                        </div>
-                        <div className="flex justify-between items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 transition-all duration-300 hover:bg-slate-100/50 dark:hover:bg-slate-700/30 min-w-0" style={{ animation: 'rowIn 0.35s 0.35s both' }}>
-                          <span className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 shrink-0">Payable</span>
-                          <span className="text-xs sm:text-sm font-bold text-sky-600 dark:text-sky-400">{result.payable_amount} Tk</span>
-                        </div>
-                        <div className="flex justify-between items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 transition-all duration-300 hover:bg-slate-100/50 dark:hover:bg-slate-700/30 min-w-0" style={{ animation: 'rowIn 0.35s 0.4s both' }}>
-                          <span className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 shrink-0">Expires</span>
-                          <span className="text-xs sm:text-sm font-medium text-red-600 dark:text-red-400 text-right whitespace-nowrap">{formatDate(result.current_expire_date)}</span>
-                        </div>
-                        <div className="flex justify-between items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 transition-all duration-300 hover:bg-slate-100/50 dark:hover:bg-slate-700/30 min-w-0" style={{ animation: 'rowIn 0.35s 0.45s both' }}>
-                          <span className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 shrink-0">New Expires</span>
-                          <span className="text-xs sm:text-sm font-semibold text-emerald-600 dark:text-emerald-400 text-right whitespace-nowrap">{formatDate(result.new_expire_date)}</span>
-                        </div>
-                      </>
-                    )}
-                    {result.type === 'reseller' && (
-                      <div className="flex justify-between items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 transition-all duration-300 hover:bg-slate-100/50 dark:hover:bg-slate-700/30 min-w-0" style={{ animation: 'rowIn 0.35s 0.2s both' }}>
-                        <span className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 shrink-0">Prev. Balance</span>
-                        <span className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-slate-100">{result.previous_balance} Tk</span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h2 className="font-bold text-base sm:text-lg text-white truncate">{result.name}</h2>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-semibold">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          Verified
+                        </span>
                       </div>
-                    )}
+                      <p className="text-xs text-slate-400 font-mono">
+                        Customer ID: <span className="text-slate-200">{result.user_id}</span>
+                        {result.type === 'customer' && result.username && result.username !== result.user_id && (
+                          <span className="ml-2 text-slate-500">({result.username})</span>
+                        )}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Payment section */}
-              <div className="p-3 sm:p-6 bg-slate-50/60 dark:bg-slate-900/40 border-t border-slate-200/80 dark:border-slate-600/80 min-w-0">
-                <h2 className="flex items-center gap-2 text-base sm:text-lg font-bold text-slate-800 dark:text-slate-200 mb-3 sm:mb-4" style={{ animation: 'fadeInUp 0.4s 0.2s both' }}>
-                  <CreditCard className="w-4 h-4 sm:w-5 sm:h-5 text-sky-500 shrink-0" />
-                  Choose payment option
-                </h2>
-                <div className="space-y-3 sm:space-y-4">
-                  {result.type === 'reseller' && (
-                    <div style={{ animation: 'fadeInUp 0.4s 0.25s both' }}>
-                      <label className="block text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-400 mb-1.5 sm:mb-2">Amount (Tk)</label>
+                {/* Service Details Grid */}
+                {result.type === 'customer' && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 my-4">
+                    <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block mb-0.5">Internet Plan</span>
+                      <span className="font-bold text-sm text-white truncate block">{result.package_name}</span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block mb-0.5">Monthly Bill</span>
+                      <span className="font-bold text-sm text-cyan-400">{result.bill_amount} BDT</span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block mb-0.5">Current Expiry</span>
+                      <span className="font-semibold text-xs text-rose-400 block truncate">
+                        {formatDate(result.current_expire_date)}
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-emerald-950/20 border border-emerald-800/40">
+                      <span className="text-[10px] text-emerald-400 block mb-0.5">Extended Expiry</span>
+                      <span className="font-semibold text-xs text-emerald-300 block truncate">
+                        {formatDate(result.new_expire_date)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {result.type === 'reseller' && (
+                  <div className="my-4 p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-slate-400">Current Balance:</span>
+                      <span className="font-bold text-white">{result.previous_balance} BDT</span>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">Top-up Amount (BDT)</label>
                       <input
                         type="number"
-                        min="1"
+                        min="10"
                         value={amount}
                         onChange={(e) => setAmount(e.target.value)}
-                        placeholder="Enter amount"
-                        className="w-full min-w-0 px-3 py-3 sm:px-4 rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-base focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-all duration-300 focus:shadow-md focus:shadow-sky-500/10"
+                        placeholder="Enter amount to recharge"
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-500 rounded-xl px-4 py-2.5 text-white font-bold"
                       />
                     </div>
-                  )}
-                {paymentMethods.length > 0 ? (
-                  <div
-                    className={
-                      paymentMethods.length === 1
-                        ? 'flex justify-center'
-                        : paymentMethods.length === 2
-                          ? 'w-full sm:w-[90%] max-w-md mx-auto grid grid-cols-2 gap-2 sm:gap-3'
-                          : 'grid grid-cols-2 gap-2 sm:gap-3'
-                    }
-                  >
-                    {paymentMethods.map((method, idx) => {
-                      const gateway = method.gateway;
-                      const isBkash = gateway === 'bkash';
-                      const isSsl = gateway === 'ssl' || gateway === 'sslcommerz';
-                      const isPaying = payLoading === gateway;
-                      const borderHover = isBkash
-                        ? 'hover:border-pink-400 dark:hover:border-pink-500 hover:bg-gradient-to-br hover:from-pink-50 hover:to-rose-50 dark:hover:from-pink-900/20 dark:hover:to-rose-900/20 hover:shadow-lg hover:shadow-pink-500/10'
-                        : isSsl
-                          ? 'hover:border-blue-400 dark:hover:border-blue-500 hover:bg-gradient-to-br hover:from-blue-50 hover:to-indigo-50 dark:hover:from-blue-900/20 dark:hover:to-indigo-900/20 hover:shadow-lg hover:shadow-blue-500/10'
-                          : 'hover:border-orange-400 dark:hover:border-orange-500 hover:bg-gradient-to-br hover:from-orange-50 hover:to-amber-50 dark:hover:from-orange-900/20 dark:hover:to-amber-900/20 hover:shadow-lg hover:shadow-orange-500/10';
-                      const accentBg = isBkash ? 'bg-pink-400/10' : isSsl ? 'bg-blue-400/10' : 'bg-orange-400/10';
-                      const iconGradient = isBkash ? 'from-pink-500 to-rose-600' : isSsl ? 'from-blue-500 to-indigo-600' : 'from-orange-500 to-amber-600';
-                      const accentColor = isBkash ? 'text-pink-600 dark:text-pink-400' : isSsl ? 'text-blue-600 dark:text-blue-400' : 'text-orange-600 dark:text-orange-400';
-                      return (
-                        <button
-                          key={method.gateway}
-                          type="button"
-                          onClick={() => handlePay(gateway)}
-                          disabled={payLoading !== null}
-                          className={`relative p-3 sm:p-5 rounded-xl sm:rounded-2xl border-2 border-slate-200 dark:border-slate-600 transition-all duration-300 text-left disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden hover:scale-[1.02] active:scale-[0.98] min-h-[44px] sm:min-h-0 ${borderHover} ${paymentMethods.length === 1 ? 'max-w-sm w-full' : ''}`}
-                          style={{ animation: `fadeInUp 0.4s ${0.3 + idx * 0.08}s both` }}
-                        >
-                          <div className={`absolute top-0 right-0 w-14 h-14 sm:w-20 sm:h-20 rounded-full ${accentBg} -translate-y-1/2 translate-x-1/2`} />
-                          <div className="relative flex items-center gap-2 sm:gap-3 min-w-0">
-                            <div className={`w-9 h-9 sm:w-11 sm:h-11 rounded-lg sm:rounded-xl bg-gradient-to-br ${iconGradient} flex items-center justify-center text-white shadow-lg shrink-0`}>
-                              {isSsl ? <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" /> : <Wallet className="w-4 h-4 sm:w-5 sm:h-5" />}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="font-bold text-sm sm:text-base text-slate-900 dark:text-slate-100 truncate">{method.label}</div>
-                              <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">
-                                {isPaying ? (
-                                  <span className={`inline-flex items-center gap-1.5 ${accentColor}`}>
-                                    <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                    </svg>
-                                    Redirecting…
-                                  </span>
-                                ) : (
-                                  <span className="line-clamp-2">{method.description}</span>
-                                )}
-                              </p>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => handlePay('ssl')}
-                    disabled={payLoading !== null}
-                    className="relative w-full min-h-[44px] py-4 sm:py-5 rounded-xl sm:rounded-2xl border-2 border-slate-200 dark:border-slate-600 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 hover:border-blue-400 dark:hover:border-blue-500 hover:from-blue-100 hover:to-indigo-100 dark:hover:from-blue-900/30 dark:hover:to-indigo-900/30 hover:scale-[1.01] hover:shadow-lg hover:shadow-blue-500/10 active:scale-[0.99] disabled:opacity-50 transition-all duration-300 flex items-center justify-center gap-2 sm:gap-3 overflow-hidden"
-                    style={{ animation: 'fadeInUp 0.4s 0.3s both' }}
-                  >
-                    <div className="absolute top-0 right-0 w-14 h-14 sm:w-20 sm:h-20 rounded-full bg-blue-400/10 -translate-y-1/2 translate-x-1/2" />
-                    <div className="relative w-9 h-9 sm:w-11 sm:h-11 rounded-lg sm:rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-lg">
-                      <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
-                    </div>
-                    <span className="font-bold text-sm sm:text-base text-slate-900 dark:text-slate-100">
-                      {payLoading ? (
-                        <span className="inline-flex items-center gap-2 text-blue-600 dark:text-blue-400">
-                          <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                          </svg>
-                          Redirecting…
-                        </span>
-                      ) : (
-                        'Pay with SSLCommerz'
-                      )}
-                    </span>
-                  </button>
                 )}
+
+                {/* Highlight Payable Banner */}
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-cyan-950/60 via-slate-900/60 to-emerald-950/60 border border-cyan-500/30 flex items-center justify-between mb-6">
+                  <div>
+                    <span className="text-xs text-slate-400 block">Total Payable Now</span>
+                    <span className="text-2xl sm:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-emerald-400">
+                      {getPayAmount()} <span className="text-sm font-normal text-slate-300">BDT</span>
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] text-emerald-400 uppercase tracking-wider font-semibold block">
+                      30 Days Renewal
+                    </span>
+                    <span className="text-[11px] text-slate-400">Auto-activated on payment</span>
+                  </div>
                 </div>
+
+                {/* Gateways Section */}
+                <div>
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
+                    <CreditCard className="w-3.5 h-3.5 text-cyan-400" />
+                    Select Instant Payment Gateway
+                  </h3>
+
+                  {paymentMethods.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {paymentMethods.map((method) => {
+                        const gw = method.gateway;
+                        const isBkash = gw === 'bkash';
+                        const isNagad = gw === 'nagad';
+                        const isSsl = gw === 'ssl' || gw === 'sslcommerz';
+                        const isPaying = payLoading === gw;
+
+                        // Gateway branding gradients & borders
+                        let bgStyle = 'bg-slate-950 hover:bg-slate-900 border-slate-800 hover:border-slate-700';
+                        let accentText = 'text-white';
+                        let buttonBadge = 'Pay with Card';
+
+                        if (isBkash) {
+                          bgStyle =
+                            'bg-gradient-to-b from-pink-950/40 to-slate-950 border-pink-900/40 hover:border-pink-500/70 hover:shadow-lg hover:shadow-pink-500/10';
+                          accentText = 'text-pink-400';
+                          buttonBadge = 'bKash Direct';
+                        } else if (isNagad) {
+                          bgStyle =
+                            'bg-gradient-to-b from-orange-950/40 to-slate-950 border-orange-900/40 hover:border-orange-500/70 hover:shadow-lg hover:shadow-orange-500/10';
+                          accentText = 'text-orange-400';
+                          buttonBadge = 'Nagad Pay';
+                        } else if (isSsl) {
+                          bgStyle =
+                            'bg-gradient-to-b from-blue-950/40 to-slate-950 border-blue-900/40 hover:border-blue-500/70 hover:shadow-lg hover:shadow-blue-500/10';
+                          accentText = 'text-blue-400';
+                          buttonBadge = 'Debit / Credit Card';
+                        }
+
+                        return (
+                          <button
+                            key={gw}
+                            type="button"
+                            onClick={() => handlePay(gw)}
+                            disabled={payLoading !== null}
+                            className={`p-4 rounded-2xl border text-left transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer relative overflow-hidden flex flex-col justify-between min-h-[110px] ${bgStyle}`}
+                          >
+                            <div className="flex items-center justify-between w-full mb-2">
+                              <span className={`font-extrabold text-base ${accentText}`}>{buttonBadge}</span>
+                              <div className="w-8 h-8 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-center">
+                                {isSsl ? (
+                                  <CreditCard className="w-4 h-4 text-blue-400" />
+                                ) : (
+                                  <Wallet className={`w-4 h-4 ${accentText}`} />
+                                )}
+                              </div>
+                            </div>
+
+                            <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
+                              {isPaying ? (
+                                <span className="inline-flex items-center gap-1.5 text-cyan-400 font-semibold">
+                                  <span className="w-3.5 h-3.5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                                  Redirecting...
+                                </span>
+                              ) : (
+                                method.description
+                              )}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handlePay('ssl')}
+                      disabled={payLoading !== null}
+                      className="w-full py-4 rounded-2xl bg-gradient-to-r from-cyan-500 to-emerald-500 text-slate-950 font-bold text-base flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20"
+                    >
+                      <CreditCard className="w-5 h-5" />
+                      <span>Proceed to Payment Gateway</span>
+                    </button>
+                  )}
+                </div>
+
+                {error && (
+                  <div className="mt-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-medium flex items-center gap-2">
+                    <XCircle className="w-4 h-4 shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                )}
               </div>
             </div>
-          </div>
-        )}
+          )}
         </div>
-      </div>
-    </>
+      </main>
+
+      {/* Footer */}
+      <footer className="relative z-10 border-t border-slate-900 bg-slate-950/80 backdrop-blur-sm py-4 px-4 sm:px-8 text-center">
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
+          <p>© {new Date().getFullYear()} NetFix Broadband & Billing SaaS. All rights reserved.</p>
+          <div className="flex items-center gap-4 text-[11px]">
+            <Link to="/customer/login" className="hover:text-slate-300 transition-colors">
+              Self-Care Portal
+            </Link>
+            <span className="text-slate-700">•</span>
+            <span className="text-emerald-500/90 flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5" /> 256-Bit SSL Protected
+            </span>
+          </div>
+        </div>
+      </footer>
+    </div>
   );
 }

@@ -34,6 +34,7 @@ require_once __DIR__ . '/controllers/CustomerPortalController.php';
 require_once __DIR__ . '/controllers/UsersController.php';
 require_once __DIR__ . '/controllers/SearchController.php';
 require_once __DIR__ . '/controllers/TaskLogsController.php';
+require_once __DIR__ . '/controllers/PublicTopupController.php';
 
 // Parse Request Path and Method
 $rawUri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
@@ -457,6 +458,22 @@ if ($method === 'GET' && preg_match('#^/task-logs/customers/([^/]+)$#', $uri, $m
 }
 if ($method === 'GET' && $uri === '/task-logs/check') {
     TaskLogsController::check();
+}
+
+// ---------------------------------------------------------------------
+// PUBLIC TOPUP & RECHARGE
+// ---------------------------------------------------------------------
+if ($method === 'GET' && $uri === '/public/topup/tenants') {
+    PublicTopupController::tenants();
+}
+if ($method === 'GET' && $uri === '/public/topup/lookup') {
+    PublicTopupController::lookup();
+}
+if ($method === 'GET' && $uri === '/public/topup/payment-methods') {
+    PublicTopupController::paymentMethods();
+}
+if ($method === 'POST' && $uri === '/public/topup/initiate') {
+    PublicTopupController::initiate();
 }
 
 // ---------------------------------------------------------------------
