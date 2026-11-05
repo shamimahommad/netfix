@@ -61,6 +61,7 @@ import CustomerTicketPage from './pages/CustomerTicketPage';
 import CustomerReportPage from './pages/CustomerReportPage';
 import CustomerPaymentCallbackPage from './pages/CustomerPaymentCallbackPage';
 import PublicTopupPage from './pages/PublicTopupPage';
+import MockGatewayCheckoutPage from './pages/MockGatewayCheckoutPage';
 import CustomerPortalLayout from './components/layout/CustomerPortalLayout';
 import Footer from './components/layout/Footer';
 import { CustomerPortalProvider } from './contexts/CustomerPortalContext';
@@ -134,6 +135,7 @@ function AppContent() {
               }
             />
             <Route path="/customer/payment-callback" element={<CustomerPaymentCallbackPage />} />
+            <Route path="/payments/simulator" element={<MockGatewayCheckoutPage />} />
             <Route path="/topup" element={<PublicTopupPage />} />
             <Route path="/public/topup" element={<PublicTopupPage />} />
             <Route path="/" element={<Navigate to="/login" replace />} />

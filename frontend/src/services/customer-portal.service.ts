@@ -184,8 +184,8 @@ export const customerPortalService = {
   async initiatePayment(
     amount: number,
     invoiceId?: string,
-    gateway?: 'bkash' | 'ssl',
-  ): Promise<{ success: boolean; payment_url: string; payment_id: string }> {
+    gateway: string = 'bkash',
+  ): Promise<{ success: boolean; payment_url: string; payment_id?: string }> {
     const response = await api.post('/customer/initiate-payment', { amount, invoice_id: invoiceId, gateway });
     return response.data;
   },
@@ -193,8 +193,8 @@ export const customerPortalService = {
   /** Phase 2: Renew via gateway — creates renewal invoice (package + due balance) then redirects to payment. */
   async initiateRenewPayment(
     months: number,
-    gateway?: 'bkash' | 'ssl',
-  ): Promise<{ success: boolean; payment_url: string; payment_id: string }> {
+    gateway: string = 'bkash',
+  ): Promise<{ success: boolean; payment_url: string; payment_id?: string }> {
     const response = await api.post('/customer/initiate-renew-payment', { months, gateway });
     return response.data;
   },

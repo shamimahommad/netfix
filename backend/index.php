@@ -24,6 +24,7 @@ require_once __DIR__ . '/controllers/DashboardController.php';
 require_once __DIR__ . '/controllers/CustomersController.php';
 require_once __DIR__ . '/controllers/BillingController.php';
 require_once __DIR__ . '/controllers/PaymentsController.php';
+require_once __DIR__ . '/controllers/PaymentGatewayController.php';
 require_once __DIR__ . '/controllers/ResellersController.php';
 require_once __DIR__ . '/controllers/AccessProfilesController.php';
 require_once __DIR__ . '/controllers/NetworkController.php';
@@ -244,6 +245,12 @@ if ($method === 'GET' && $uri === '/payments/recharge-history') {
 if ($method === 'POST' && $uri === '/payments/bkash/callback') {
     PaymentsController::bkashCallback();
 }
+if (preg_match('#^/payments/callback/([^/]+)$#', $uri, $m)) {
+    PaymentGatewayController::handleGatewayCallback($m[1]);
+}
+if ($method === 'POST' && $uri === '/payments/simulator/confirm') {
+    PaymentGatewayController::simulatorConfirm();
+}
 
 // ---------------------------------------------------------------------
 // RESELLERS & POP HIERARCHY
@@ -448,6 +455,9 @@ if ($method === 'PUT' && preg_match('#^/tenants/([^/]+)/features$#', $uri, $m)) 
 if ($method === 'PUT' && preg_match('#^/tenants/([^/]+)/payment-gateways$#', $uri, $m)) {
     TenantsController::updatePaymentGateways($m[1]);
 }
+if ($method === 'POST' && (preg_match('#^/tenants/([^/]+)/payment-gateways/test$#', $uri, $m) || preg_match('#^/tenants/([^/]+)/bkash-create-payment$#', $uri, $m))) {
+    PaymentGatewayController::testPaymentFlow($m[1]);
+}
 if ($method === 'PUT' && preg_match('#^/tenants/([^/]+)/sms-gateway$#', $uri, $m)) {
     TenantsController::updateSmsGateway($m[1]);
 }
@@ -483,7 +493,16 @@ if ($method === 'GET' && $uri === '/customer/packages') {
     CustomerPortalController::packages();
 }
 if ($method === 'GET' && $uri === '/customer/payment-methods') {
-    CustomerPortalController::paymentMethods();
+    PaymentGatewayController::getCustomerPaymentMethods();
+}
+if ($method === 'POST' && $uri === '/customer/initiate-payment') {
+    PaymentGatewayController::customerInitiatePayment();
+}
+if ($method === 'POST' && $uri === '/customer/initiate-renew-payment') {
+    PaymentGatewayController::customerInitiateRenewPayment();
+}
+if ($method === 'POST' && $uri === '/customer/confirm-payment') {
+    PaymentGatewayController::customerConfirmPayment();
 }
 if ($method === 'GET' && $uri === '/customer/tickets') {
     CustomerPortalController::tickets();

@@ -71,7 +71,7 @@ export default function CustomerPayBillPage() {
 
   const totalAmount = getAmountForPayment();
 
-  const handlePay = async (invoiceId?: string, gateway: 'bkash' | 'ssl' = 'bkash', payingKey?: string) => {
+  const handlePay = async (invoiceId?: string, gateway: string = 'bkash', payingKey?: string) => {
     if (totalAmount < 1) return;
     if (mode === 'renew' && months < 1) return;
     setPaying(payingKey ?? gateway);
@@ -408,14 +408,13 @@ export default function CustomerPayBillPage() {
             const accentBg = isBkash ? 'bg-pink-400/10' : isSsl ? 'bg-blue-400/10' : 'bg-orange-400/10';
             const iconGradient = isBkash ? 'from-pink-500 to-rose-600' : isSsl ? 'from-blue-500 to-indigo-600' : 'from-orange-500 to-amber-600';
             const accentColor = isBkash ? 'text-pink-600 dark:text-pink-400' : isSsl ? 'text-blue-600 dark:text-blue-400' : 'text-orange-600 dark:text-orange-400';
-            const payGateway = gateway === 'surjopay' ? 'ssl' : gateway;
             return (
               <motion.button
                 key={method.gateway}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 type="button"
-                onClick={() => handlePay(selectedInvoice?.invoiceId, payGateway, gateway)}
+                onClick={() => handlePay(selectedInvoice?.invoiceId, method.gateway, method.gateway)}
                 disabled={totalAmount < 1 || paying !== null}
                 className={`relative p-6 rounded-2xl border-2 border-slate-200 dark:border-slate-600 transition-all duration-200 text-left disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden ${borderHover} ${paymentMethods.length === 1 ? 'max-w-sm w-full' : ''}`}
               >

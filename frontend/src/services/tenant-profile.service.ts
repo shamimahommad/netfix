@@ -43,12 +43,21 @@ export const tenantProfileService = {
     return response.data;
   },
 
-  async createBkashPayment(tenantId: string, amount: number, callbackURL: string): Promise<{ bkashURL: string; paymentID: string }> {
-    const response = await api.post<{ bkashURL: string; paymentID: string }>(`/tenants/${tenantId}/bkash-create-payment`, {
+  async testPaymentGateway(tenantId: string, gateway: string, amount: number, callbackURL: string): Promise<{ payment_url: string; redirectURL?: string; bkashURL?: string; paymentID?: string }> {
+    const response = await api.post<{ payment_url: string; redirectURL?: string; bkashURL?: string; paymentID?: string }>(`/tenants/${tenantId}/payment-gateways/test`, {
+      gateway,
       amount,
       callbackURL,
     });
     return response.data;
+  },
+
+  async createBkashPayment(tenantId: string, amount: number, callbackURL: string): Promise<{ bkashURL: string; paymentID: string }> {
+    const res = await this.testPaymentGateway(tenantId, 'bkash', amount, callbackURL);
+    return {
+      bkashURL: res.payment_url || res.bkashURL || res.redirectURL || '',
+      paymentID: res.paymentID || '',
+    };
   },
 
   async updateTenantLimits(tenantId: string, payload: { maxCustomers?: number; maxRouters?: number; maxOlts?: number; maxUsers?: number }): Promise<{ success: boolean; message: string }> {

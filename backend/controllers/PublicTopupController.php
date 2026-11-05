@@ -6,6 +6,7 @@
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
+require_once __DIR__ . '/../lib/PaymentGatewayService.php';
 
 class PublicTopupController {
 
@@ -154,23 +155,50 @@ class PublicTopupController {
      * GET /public/topup/payment-methods?tenant_id=...
      */
     public static function paymentMethods(): void {
-        Response::json([
-            [
-                'gateway' => 'bkash',
-                'label' => 'bKash Direct',
-                'description' => 'Instant recharge via bKash mobile wallet or QR code',
-            ],
-            [
-                'gateway' => 'nagad',
-                'label' => 'Nagad Pay',
-                'description' => 'Fast payment via Nagad checkout',
-            ],
-            [
-                'gateway' => 'sslcommerz',
-                'label' => 'Cards & NetBanking',
-                'description' => 'Visa, MasterCard, Amex, Rocket & Internet Banking',
-            ],
-        ]);
+        $tenantId = isset($_GET['tenant_id']) ? (int)$_GET['tenant_id'] : 2;
+        $db = Database::getConnection();
+
+        $activeGws = PaymentGatewayService::getActiveGateways($db, $tenantId);
+        if (empty($activeGws)) {
+            Response::json([
+                [
+                    'gateway' => 'bkash',
+                    'label' => 'bKash Direct',
+                    'description' => 'Instant recharge via bKash mobile wallet or QR code',
+                ],
+                [
+                    'gateway' => 'surjopay',
+                    'label' => 'SurjoPay PGW',
+                    'description' => 'Fast payment via SurjoPay gateway (Cards & MFS)',
+                ],
+                [
+                    'gateway' => 'sslcommerz',
+                    'label' => 'Cards & NetBanking',
+                    'description' => 'Visa, MasterCard, Amex, Rocket & Internet Banking',
+                ],
+            ]);
+            return;
+        }
+
+        $list = [];
+        foreach ($activeGws as $gw) {
+            $code = $gw['gateway'];
+            $isBkash = ($code === 'bkash');
+            $isSurjo = ($code === 'surjopay');
+            $isSsl = ($code === 'ssl' || $code === 'sslcommerz');
+
+            $list[] = [
+                'gateway' => $isSsl ? 'sslcommerz' : $code,
+                'label' => $isBkash ? 'bKash Direct' : ($isSurjo ? 'SurjoPay PGW' : 'Cards & NetBanking (SSLCommerz)'),
+                'description' => $isBkash 
+                    ? 'Instant recharge via bKash mobile wallet or QR code' 
+                    : ($isSurjo 
+                        ? 'Fast checkout via SurjoPay multi-channel' 
+                        : 'Visa, MasterCard, Amex, Rocket & Internet Banking'),
+            ];
+        }
+
+        Response::json($list);
     }
 
     /**
@@ -179,88 +207,45 @@ class PublicTopupController {
      */
     public static function initiate(): void {
         $body = json_decode(file_get_contents('php://input'), true) ?: [];
-        $tenantId = $body['tenant_id'] ?? null;
+        $tenantId = isset($body['tenant_id']) ? (int)$body['tenant_id'] : null;
         $amount = (float)($body['amount'] ?? 0);
         $gateway = strtolower(trim($body['gateway'] ?? 'bkash'));
+        if ($gateway === 'sslcommerz') $gateway = 'ssl';
+
         $type = $body['type'] ?? 'customer';
-        $customerId = $body['customer_id'] ?? null;
-        $userId = $body['user_id'] ?? null;
+        $customerId = !empty($body['customer_id']) ? (int)$body['customer_id'] : null;
+        $userId = !empty($body['user_id']) ? (int)$body['user_id'] : null;
 
         if (!$tenantId || $amount <= 0) {
             Response::error('Invalid tenant ID or amount', 400);
         }
 
         $db = Database::getConnection();
-        $db->beginTransaction();
 
-        try {
-            $ref = 'TXN-' . strtoupper($gateway) . '-' . strtoupper(substr(uniqid(), -6)) . date('His');
+        $host = $_SERVER['HTTP_HOST'] ?? 'localhost:4001';
+        $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
+        $callbackUrl = $protocol . $host . "/public/topup";
 
-            if ($type === 'customer' && $customerId) {
-                // Record customer transaction
-                $stmtTrx = $db->prepare("INSERT INTO transactions 
-                    (tenant_id, customer_id, transaction_ref, transaction_type, amount, method, initiator_user_id, initiator_role, description)
-                    VALUES (:tid, :cid, :ref, 'ONLINE_GATEWAY', :amt, :method, 0, 'public', :desc)");
-                $stmtTrx->execute([
-                    'tid' => $tenantId,
-                    'cid' => $customerId,
-                    'ref' => $ref,
-                    'amt' => $amount,
-                    'method' => $gateway,
-                    'desc' => "Public topup via {$gateway}",
-                ]);
+        $res = PaymentGatewayService::initiatePayment(
+            $db,
+            $tenantId,
+            $gateway,
+            $amount,
+            $customerId,
+            null,
+            $callbackUrl,
+            ['flow' => 'public_topup', 'type' => $type, 'user_id' => $userId]
+        );
 
-                // Update customer service expires_at & status
-                $stmtCs = $db->prepare("UPDATE customer_services 
-                    SET expires_at = DATE_ADD(GREATEST(expires_at, NOW()), INTERVAL 30 DAY),
-                        status = 'active'
-                    WHERE customer_id = :cid");
-                $stmtCs->execute(['cid' => $customerId]);
-
-                // Update customer status to active and billing_status to Paid
-                $stmtCust = $db->prepare("UPDATE customers 
-                    SET status = 'active', billing_status = 'Paid' 
-                    WHERE customer_id = :cid");
-                $stmtCust->execute(['cid' => $customerId]);
-
-                // Clear pending invoices if amount covers them
-                $stmtInv = $db->prepare("UPDATE invoices 
-                    SET paid_amount = total_amount, balance_due = 0, status = 'paid' 
-                    WHERE customer_id = :cid AND status IN ('pending', 'partially_paid')");
-                $stmtInv->execute(['cid' => $customerId]);
-            } else if ($type === 'reseller' && $userId) {
-                // Record reseller transaction & credit ledger
-                $stmtBal = $db->prepare("SELECT closing_balance FROM reseller_ledger WHERE user_id = :uid ORDER BY ledger_id DESC LIMIT 1");
-                $stmtBal->execute(['uid' => $userId]);
-                $curBal = (float)($stmtBal->fetchColumn() ?: 0);
-                $newBal = $curBal + $amount;
-
-                $stmtLedger = $db->prepare("INSERT INTO reseller_ledger 
-                    (tenant_id, user_id, credit_amount, entry_type, description, closing_balance)
-                    VALUES (:tid, :uid, :amt, 'ONLINE_TOPUP', :desc, :cb)");
-                $stmtLedger->execute([
-                    'tid' => $tenantId,
-                    'uid' => $userId,
-                    'amt' => $amount,
-                    'desc' => "Online topup via {$gateway} (Ref: {$ref})",
-                    'cb' => $newBal,
-                ]);
-            }
-
-            $db->commit();
-
-            // Return mock or real payment redirect URL
-            $redirectUrl = "/public/topup?result=success&txn_id={$ref}&gateway={$gateway}&amount={$amount}";
-
-            Response::json([
-                'success' => true,
-                'payment_url' => $redirectUrl,
-                'transaction_ref' => $ref,
-            ]);
-        } catch (\Throwable $e) {
-            $db->rollBack();
-            Response::error('Failed to initiate transaction: ' . $e->getMessage(), 500);
+        if (!$res['success']) {
+            Response::error($res['message'] ?? 'Payment initiation failed', 400);
         }
+
+        Response::json([
+            'success' => true,
+            'payment_url' => $res['payment_url'],
+            'transaction_ref' => $res['transaction_ref'],
+        ]);
     }
 }
 

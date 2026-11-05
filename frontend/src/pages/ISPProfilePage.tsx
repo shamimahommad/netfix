@@ -381,12 +381,12 @@ export default function ISPProfilePage() {
     setTestProcessingGateway(gateway);
     try {
       const callbackURL = `${window.location.origin}/saas/tenants/${tenantId}/payment-callback`;
-      if (gateway === 'bkash') {
-        const { bkashURL } = await tenantProfileService.createBkashPayment(tenantId, amount, callbackURL);
-        if (bkashURL) window.location.href = bkashURL;
-        else toast.error('Failed to get bKash URL');
+      const res = await tenantProfileService.testPaymentGateway(tenantId, gateway, amount, callbackURL);
+      const url = res.payment_url || res.redirectURL || res.bkashURL;
+      if (url) {
+        window.location.href = url;
       } else {
-        toast.info(`Test flow for ${gateway.toUpperCase()} initiated`);
+        toast.error(`Failed to get checkout URL for ${gateway.toUpperCase()}`);
       }
     } catch (err: any) {
       toast.error(err.response?.data?.message || `Failed to initiate ${gateway} test`);
@@ -1125,13 +1125,14 @@ export default function ISPProfilePage() {
                         </div>
                       </div>
                     ) : gateway.gateway === 'ssl' ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                         <div>
                           <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Store ID</label>
                           <input
                             type="text"
-                            value={gateway.credentials?.store_id || ''}
+                            value={gateway.credentials?.store_id || gateway.credentials?.appKey || ''}
                             onChange={(e) => updateGatewayCredentials('ssl', 'store_id', e.target.value)}
+                            placeholder="e.g. test_store123"
                             className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                           />
                         </div>
@@ -1139,31 +1140,66 @@ export default function ISPProfilePage() {
                           <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Store Password</label>
                           <input
                             type="password"
-                            value={gateway.credentials?.store_passwd || ''}
+                            value={gateway.credentials?.store_passwd || gateway.credentials?.appSecret || ''}
                             onChange={(e) => updateGatewayCredentials('ssl', 'store_passwd', e.target.value)}
+                            placeholder="••••••••"
                             className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                           />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Gateway Mode</label>
+                          <select
+                            value={gateway.credentials?.sandbox === false ? 'live' : 'sandbox'}
+                            onChange={(e) => updateGatewayCredentials('ssl', 'sandbox', e.target.value === 'sandbox')}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                          >
+                            <option value="sandbox">Sandbox (Test Mode)</option>
+                            <option value="live">Live Production</option>
+                          </select>
                         </div>
                       </div>
                     ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
                         <div>
-                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">API Key</label>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">SP Username</label>
                           <input
                             type="text"
-                            value={gateway.credentials?.apiKey || ''}
-                            onChange={(e) => updateGatewayCredentials('surjopay', 'apiKey', e.target.value)}
+                            value={gateway.credentials?.username || gateway.credentials?.apiKey || ''}
+                            onChange={(e) => updateGatewayCredentials('surjopay', 'username', e.target.value)}
+                            placeholder="Merchant username"
                             className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                           />
                         </div>
                         <div>
-                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">API Secret</label>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">SP Password</label>
                           <input
                             type="password"
-                            value={gateway.credentials?.apiSecret || ''}
-                            onChange={(e) => updateGatewayCredentials('surjopay', 'apiSecret', e.target.value)}
+                            value={gateway.credentials?.password || gateway.credentials?.apiSecret || ''}
+                            onChange={(e) => updateGatewayCredentials('surjopay', 'password', e.target.value)}
+                            placeholder="••••••••"
                             className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                           />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Order Prefix</label>
+                          <input
+                            type="text"
+                            value={gateway.credentials?.prefix || 'NOK'}
+                            onChange={(e) => updateGatewayCredentials('surjopay', 'prefix', e.target.value)}
+                            placeholder="e.g. NOK / SP / NETFIX"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Gateway Mode</label>
+                          <select
+                            value={gateway.credentials?.sandbox === false ? 'live' : 'sandbox'}
+                            onChange={(e) => updateGatewayCredentials('surjopay', 'sandbox', e.target.value === 'sandbox')}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                          >
+                            <option value="sandbox">Sandbox (Test Mode)</option>
+                            <option value="live">Live Production</option>
+                          </select>
                         </div>
                       </div>
                     )}

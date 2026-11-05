@@ -642,6 +642,7 @@ export default function PublicTopupPage() {
                       {paymentMethods.map((method) => {
                         const gw = method.gateway;
                         const isBkash = gw === 'bkash';
+                        const isSurjo = gw === 'surjopay';
                         const isNagad = gw === 'nagad';
                         const isSsl = gw === 'ssl' || gw === 'sslcommerz';
                         const isPaying = payLoading === gw;
@@ -656,6 +657,11 @@ export default function PublicTopupPage() {
                             'bg-gradient-to-b from-pink-950/40 to-slate-950 border-pink-900/40 hover:border-pink-500/70 hover:shadow-lg hover:shadow-pink-500/10';
                           accentText = 'text-pink-400';
                           buttonBadge = 'bKash Direct';
+                        } else if (isSurjo) {
+                          bgStyle =
+                            'bg-gradient-to-b from-amber-950/40 to-slate-950 border-amber-900/40 hover:border-amber-500/70 hover:shadow-lg hover:shadow-amber-500/10';
+                          accentText = 'text-amber-400';
+                          buttonBadge = 'SurjoPay PGW';
                         } else if (isNagad) {
                           bgStyle =
                             'bg-gradient-to-b from-orange-950/40 to-slate-950 border-orange-900/40 hover:border-orange-500/70 hover:shadow-lg hover:shadow-orange-500/10';

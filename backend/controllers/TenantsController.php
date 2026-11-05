@@ -225,8 +225,9 @@ class TenantsController {
         ];
 
         // Payment gateways
+        $realTid = (int)$tenant['tenant_id'];
         $stmtPg = $db->prepare("SELECT * FROM payment_gateway_settings WHERE tenant_id = :tid");
-        $stmtPg->execute(['tid' => $id]);
+        $stmtPg->execute(['tid' => $realTid]);
         $pgRows = $stmtPg->fetchAll() ?: [];
         $paymentGateways = array_map(function($pg) {
             return [
@@ -239,12 +240,60 @@ class TenantsController {
                     'appSecret' => $pg['app_secret'] ?? '',
                     'username' => $pg['username'] ?? '',
                     'password' => $pg['password'] ?? '',
+                    'store_id' => $pg['app_key'] ?? '',
+                    'store_passwd' => $pg['app_secret'] ?? '',
+                    'apiKey' => $pg['username'] ?? '',
+                    'apiSecret' => $pg['password'] ?? '',
+                    'prefix' => $pg['app_key'] ?? 'NOK',
                     'sandbox' => (bool)$pg['is_sandbox'],
                 ],
                 'createdAt' => $pg['created_at'],
                 'updatedAt' => $pg['updated_at'],
             ];
         }, $pgRows);
+
+        if (empty($paymentGateways)) {
+            $paymentGateways = [
+                [
+                    'paymentGatewaySettingsId' => '1',
+                    'tenantId' => (string)$realTid,
+                    'gateway' => 'bkash',
+                    'isEnabled' => true,
+                    'credentials' => [
+                        'appKey' => '',
+                        'appSecret' => '',
+                        'username' => '',
+                        'password' => '',
+                        'sandbox' => true,
+                    ],
+                ],
+                [
+                    'paymentGatewaySettingsId' => '2',
+                    'tenantId' => (string)$realTid,
+                    'gateway' => 'surjopay',
+                    'isEnabled' => false,
+                    'credentials' => [
+                        'username' => '',
+                        'password' => '',
+                        'prefix' => 'NOK',
+                        'apiKey' => '',
+                        'apiSecret' => '',
+                        'sandbox' => true,
+                    ],
+                ],
+                [
+                    'paymentGatewaySettingsId' => '3',
+                    'tenantId' => (string)$realTid,
+                    'gateway' => 'ssl',
+                    'isEnabled' => false,
+                    'credentials' => [
+                        'store_id' => '',
+                        'store_passwd' => '',
+                        'sandbox' => true,
+                    ],
+                ],
+            ];
+        }
 
         // SMS gateways
         $stmtSms = $db->prepare("SELECT * FROM sms_gateway_settings WHERE tenant_id = :tid");
@@ -630,31 +679,66 @@ class TenantsController {
         $gateways = $data['gateways'] ?? [];
         $db = Database::getConnection();
 
+        // Resolve real integer tenant_id if tenant_code or slug passed
+        $tStmt = $db->prepare("SELECT tenant_id FROM tenants WHERE tenant_id = :id OR tenant_code = :code OR tenant_slug = :slug LIMIT 1");
+        $tStmt->execute(['id' => $id, 'code' => $id, 'slug' => $id]);
+        $realTenantId = $tStmt->fetchColumn();
+        if (!$realTenantId) {
+            $realTenantId = is_numeric($id) ? (int)$id : 0;
+        }
+
         foreach ($gateways as $gw) {
-            $name = $gw['gateway'] ?? '';
+            $name = strtolower(trim($gw['gateway'] ?? ''));
+            if ($name === 'sslcommerz') $name = 'ssl';
             $enabled = !empty($gw['isEnabled']) ? 1 : 0;
             $creds = $gw['credentials'] ?? [];
 
+            $appKey = '';
+            $appSecret = '';
+            $username = '';
+            $password = '';
+            $isSandbox = isset($creds['sandbox']) ? ($creds['sandbox'] ? 1 : 0) : 1;
+
+            if ($name === 'bkash') {
+                $appKey = $creds['appKey'] ?? ($creds['app_key'] ?? '');
+                $appSecret = $creds['appSecret'] ?? ($creds['app_secret'] ?? '');
+                $username = $creds['username'] ?? '';
+                $password = $creds['password'] ?? '';
+            } else if ($name === 'ssl') {
+                $appKey = $creds['store_id'] ?? ($creds['storeId'] ?? ($creds['appKey'] ?? ''));
+                $appSecret = $creds['store_passwd'] ?? ($creds['storePassword'] ?? ($creds['appSecret'] ?? ''));
+            } else if ($name === 'surjopay') {
+                $appKey = $creds['prefix'] ?? ($creds['appKey'] ?? 'NOK');
+                $username = $creds['username'] ?? ($creds['apiKey'] ?? '');
+                $password = $creds['password'] ?? ($creds['apiSecret'] ?? '');
+            } else {
+                $appKey = $creds['appKey'] ?? '';
+                $appSecret = $creds['appSecret'] ?? '';
+                $username = $creds['username'] ?? '';
+                $password = $creds['password'] ?? '';
+            }
+
             $stmt = $db->prepare("SELECT id FROM payment_gateway_settings WHERE tenant_id = :tid AND gateway = :gw LIMIT 1");
-            $stmt->execute(['tid' => $id, 'gw' => $name]);
+            $stmt->execute(['tid' => $realTenantId, 'gw' => $name]);
             $exists = $stmt->fetch();
 
             if ($exists) {
                 $stmtUp = $db->prepare("UPDATE payment_gateway_settings 
                     SET is_active = :act, 
-                        app_key = COALESCE(:ak, app_key), 
-                        app_secret = COALESCE(:as, app_secret),
-                        username = COALESCE(:un, username),
-                        password = COALESCE(:pw, password),
-                        is_sandbox = :sb
+                        app_key = :ak, 
+                        app_secret = :as,
+                        username = :un,
+                        password = :pw,
+                        is_sandbox = :sb,
+                        updated_at = NOW()
                     WHERE id = :id");
                 $stmtUp->execute([
                     'act' => $enabled,
-                    'ak' => $creds['appKey'] ?? null,
-                    'as' => $creds['appSecret'] ?? null,
-                    'un' => $creds['username'] ?? null,
-                    'pw' => $creds['password'] ?? null,
-                    'sb' => !empty($creds['sandbox']) ? 1 : 0,
+                    'ak' => $appKey,
+                    'as' => $appSecret,
+                    'un' => $username,
+                    'pw' => $password,
+                    'sb' => $isSandbox,
                     'id' => $exists['id'],
                 ]);
             } else {
@@ -662,19 +746,31 @@ class TenantsController {
                     (tenant_id, gateway, app_key, app_secret, username, password, is_sandbox, is_active)
                     VALUES (:tid, :gw, :ak, :as, :un, :pw, :sb, :act)");
                 $stmtIn->execute([
-                    'tid' => $id,
+                    'tid' => $realTenantId,
                     'gw' => $name,
-                    'ak' => $creds['appKey'] ?? '',
-                    'as' => $creds['appSecret'] ?? '',
-                    'un' => $creds['username'] ?? '',
-                    'pw' => $creds['password'] ?? '',
-                    'sb' => !empty($creds['sandbox']) ? 1 : 0,
+                    'ak' => $appKey,
+                    'as' => $appSecret,
+                    'un' => $username,
+                    'pw' => $password,
+                    'sb' => $isSandbox,
                     'act' => $enabled,
                 ]);
             }
+
+            // Sync with tenant_settings table
+            $settingKey = "payment_{$name}_enabled";
+            $stmtSet = $db->prepare("INSERT INTO tenant_settings (tenant_id, setting_key, setting_value, created_at, updated_at)
+                VALUES (:tid, :k, :v, NOW(), NOW())
+                ON DUPLICATE KEY UPDATE setting_value = :v2, updated_at = NOW()");
+            $stmtSet->execute([
+                'tid' => $realTenantId,
+                'k' => $settingKey,
+                'v' => (string)$enabled,
+                'v2' => (string)$enabled,
+            ]);
         }
 
-        Response::json(['success' => true, 'message' => 'Payment gateways updated']);
+        Response::json(['success' => true, 'message' => 'Payment gateways updated successfully']);
     }
 
     public static function updateSmsGateway(string $id): void {
