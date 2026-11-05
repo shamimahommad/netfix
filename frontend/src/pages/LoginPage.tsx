@@ -1,5 +1,5 @@
 import { useState, FormEvent, useEffect, useMemo } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Lock,
@@ -51,22 +51,14 @@ export default function LoginPage() {
   const [demoFilled, setDemoFilled] = useState<string | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
 
-  // Redirect if already authenticated with a valid token
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+
+  // Clear stale persisted auth state if access token is missing
   useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    if (!token) return;
-    if (isAuthenticated && user) {
-      if (user.user_type === 'saas') {
-        navigate('/saas/dashboard', { replace: true });
-      } else if (user.user_type === 'isp') {
-        navigate('/dashboard', { replace: true });
-      } else if (user.user_type === 'customer' || user.role_code === 'customer') {
-        navigate('/customer/dashboard', { replace: true });
-      } else {
-        navigate('/dashboard', { replace: true });
-      }
+    if (!token && (isAuthenticated || user)) {
+      setUser(null);
     }
-  }, [isAuthenticated, user, navigate]);
+  }, [token, isAuthenticated, user, setUser]);
 
   // Load remembered email and tenants on mount
   useEffect(() => {
@@ -177,8 +169,14 @@ export default function LoginPage() {
     setTimeout(() => setDemoFilled(null), 3000);
   };
 
-  if (isAuthenticated && user) {
-    return null;
+  if (token && isAuthenticated && user) {
+    const target =
+      user.user_type === 'saas'
+        ? '/saas/dashboard'
+        : user.user_type === 'isp'
+        ? '/dashboard'
+        : '/customer/dashboard';
+    return <Navigate to={target} replace />;
   }
 
   return (

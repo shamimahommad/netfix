@@ -1,5 +1,5 @@
 import { useState, FormEvent, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   User,
@@ -37,18 +37,14 @@ export default function CustomerLoginPage() {
   const [demoFilled, setDemoFilled] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
 
-  // Redirect if already authenticated
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+
+  // Clear stale persisted auth state if access token is missing
   useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    if (!token) return;
-    if (isAuthenticated && user) {
-      if (user.role_code === 'customer' || user.user_type === 'customer') {
-        navigate('/customer/dashboard', { replace: true });
-      } else {
-        navigate('/dashboard', { replace: true });
-      }
+    if (!token && (isAuthenticated || user)) {
+      setUser(null);
     }
-  }, [isAuthenticated, user, navigate]);
+  }, [token, isAuthenticated, user, setUser]);
 
   // Load remembered customer login on mount
   useEffect(() => {
@@ -59,8 +55,12 @@ export default function CustomerLoginPage() {
     }
   }, []);
 
-  if (isAuthenticated && user) {
-    return null;
+  if (token && isAuthenticated && user) {
+    const target =
+      user.role_code === 'customer' || user.user_type === 'customer'
+        ? '/customer/dashboard'
+        : '/dashboard';
+    return <Navigate to={target} replace />;
   }
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
