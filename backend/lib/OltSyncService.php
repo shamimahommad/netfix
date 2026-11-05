@@ -37,10 +37,14 @@ class OltSyncService {
         $pass = $oltDev['api_password'] ?: 'star321';
         $proto = ($port == 80) ? 'http' : 'https';
 
+        $totalPonPorts = (int)($oltDev['total_pon_ports'] ?? 8);
+        if ($totalPonPorts <= 0) $totalPonPorts = 8;
+        $ponType = strtolower($oltDev['pon_type'] ?? 'epon');
+
         // 20 second timeout for reliable cloud server to physical OLT latency
         $client = new VsolOltClient($ip, $port, $user, $pass, $proto, 20);
-        $sysInfo = $client->getSystemInfo();
-        $ponPorts = $client->getPonPorts();
+        $sysInfo = $client->getSystemInfo($totalPonPorts);
+        $ponPorts = $client->getPonPorts($totalPonPorts, $ponType);
         $onus = $client->getOnus(null, true);
 
         // Option 2: Live MAC Address Table from OLT (includes Router MAC, VLAN ID, Port ID)
@@ -60,10 +64,14 @@ class OltSyncService {
         // Auto-migrate olt_onus schema if missing columns (router_mac, vlan_id, pppoe_username)
         self::ensureOltSchema($db);
 
+        $defaultModel = ($totalPonPorts > 4) 
+            ? "VSOL " . strtoupper($ponType) . " {$totalPonPorts}-Port OLT" 
+            : 'V1601E04-DP';
+
         // Update network_devices table with telemetry JSON & last_sync_at
         $telemetry = [
             'system' => $sysInfo,
-            'model' => $sysInfo['model'] ?? 'V1601E04-DP',
+            'model' => !empty($sysInfo['model']) ? $sysInfo['model'] : $defaultModel,
             'firmware' => $sysInfo['firmware'] ?? '',
             'hardware' => $sysInfo['hardware'] ?? '',
             'serial' => $sysInfo['serial'] ?? '',
@@ -72,6 +80,7 @@ class OltSyncService {
             'cpuUsagePercent' => $sysInfo['cpuUsagePercent'] ?? 0,
             'memoryUsagePercent' => $sysInfo['memoryUsagePercent'] ?? 0,
             'temperatureC' => !empty($sysInfo['cpuTemp']) ? (float)str_replace('°C', '', $sysInfo['cpuTemp']) : null,
+            'totalPonPorts' => $totalPonPorts,
             'ponPorts' => $ponPorts,
             'totalOnusOnline' => count($onus),
             'lastHardwareSync' => date('Y-m-d H:i:s'),
@@ -204,17 +213,69 @@ class OltSyncService {
             $totalStored += (int)$row['count'];
         }
 
+        $totalPonPorts = (int)($oltDev['total_pon_ports'] ?? 8);
+        if ($totalPonPorts <= 0) $totalPonPorts = 8;
+        $ponType = strtolower($oltDev['pon_type'] ?? 'epon');
+        $prefix = ($ponType === 'gpon') ? 'GPON 0/' : 'EPON 0/';
+
         $ponPorts = $telemetry['ponPorts'] ?? [];
-        foreach ($ponPorts as &$pp) {
-            $pNum = (int)str_replace('PON', '', $pp['port']);
-            $pp['connectedOnus'] = $countsByPon[$pNum] ?? 0;
+        if (empty($ponPorts)) {
+            for ($p = 1; $p <= $totalPonPorts; $p++) {
+                $count = $countsByPon[$p] ?? 0;
+                $ponPorts[] = [
+                    'portNum' => $p,
+                    'port' => "PON$p",
+                    'portName' => "{$prefix}{$p}",
+                    'status' => $count > 0 ? 'online' : 'offline',
+                    'operStatus' => $count > 0 ? 'up' : 'down',
+                    'txPowerDbm' => null,
+                    'temperatureC' => null,
+                    'connectedOnus' => $count,
+                ];
+            }
+        } else {
+            // If telemetry has fewer ports than configured, extend them dynamically
+            $existingNums = array_map(function($pp) {
+                return (int)($pp['portNum'] ?? str_replace('PON', '', $pp['port']));
+            }, $ponPorts);
+
+            for ($p = 1; $p <= $totalPonPorts; $p++) {
+                if (!in_array($p, $existingNums)) {
+                    $count = $countsByPon[$p] ?? 0;
+                    $ponPorts[] = [
+                        'portNum' => $p,
+                        'port' => "PON$p",
+                        'portName' => "{$prefix}{$p}",
+                        'status' => $count > 0 ? 'online' : 'offline',
+                        'operStatus' => $count > 0 ? 'up' : 'down',
+                        'txPowerDbm' => null,
+                        'temperatureC' => null,
+                        'connectedOnus' => $count,
+                    ];
+                }
+            }
+
+            usort($ponPorts, function($a, $b) {
+                $na = (int)($a['portNum'] ?? str_replace('PON', '', $a['port']));
+                $nb = (int)($b['portNum'] ?? str_replace('PON', '', $b['port']));
+                return $na <=> $nb;
+            });
+
+            foreach ($ponPorts as &$pp) {
+                $pNum = (int)($pp['portNum'] ?? str_replace('PON', '', $pp['port']));
+                $pp['connectedOnus'] = $countsByPon[$pNum] ?? 0;
+            }
+            unset($pp);
         }
-        unset($pp);
+
+        $defaultModel = ($totalPonPorts > 4) 
+            ? "VSOL " . strtoupper($ponType) . " {$totalPonPorts}-Port OLT" 
+            : 'V1601E04-DP';
 
         $isSynced = !empty($telemetry['system']) || !empty($lastSync);
         $system = $telemetry['system'] ?? [
             'vendor' => strtoupper($oltDev['vendor'] ?: 'VSOL'),
-            'model' => 'EPON/GPON OLT',
+            'model' => $defaultModel,
             'serial' => $oltDev['device_code'] ?? '',
             'hardware' => null,
             'firmware' => null,
@@ -222,9 +283,10 @@ class OltSyncService {
             'cpuTemp' => null,
             'cpuUsage' => null,
             'memoryUsage' => null,
-            'totalPonPorts' => 4,
+            'totalPonPorts' => $totalPonPorts,
             'totalGePorts' => 8,
         ];
+        $system['totalPonPorts'] = $totalPonPorts;
 
         return [
             'isStored' => true,
@@ -234,12 +296,13 @@ class OltSyncService {
             'syncAgeMinutes' => $syncAgeMinutes,
             'nextScheduledSyncMinutes' => max(0, 120 - ($syncAgeMinutes ?? 0)),
             'system' => $system,
-            'model' => $telemetry['model'] ?? $system['model'] ?? null,
+            'model' => $telemetry['model'] ?? $system['model'] ?? $defaultModel,
             'firmware' => $telemetry['firmware'] ?? $system['firmware'] ?? null,
             'uptime' => $telemetry['uptime'] ?? $system['uptime'] ?? null,
             'cpuUsagePercent' => $telemetry['cpuUsagePercent'] ?? ($system['cpuUsagePercent'] ?? null),
             'memoryUsagePercent' => $telemetry['memoryUsagePercent'] ?? ($system['memoryUsagePercent'] ?? null),
             'temperatureC' => $telemetry['temperatureC'] ?? null,
+            'totalPonPorts' => $totalPonPorts,
             'ponPorts' => $ponPorts,
             'totalOnus' => $totalStored,
         ];

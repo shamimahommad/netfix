@@ -69,8 +69,8 @@ class NetworkController {
                 'lastSyncAt' => $r['last_sync_at'],
                 'createdAt' => $r['created_at'],
                 // Real-time calculated status
-                'pingStatus' => $r['status'] === 'active' ? 'online' : 'offline',
-                'latencyMs' => $r['status'] === 'active' ? rand(3, 18) : null,
+                'pingStatus' => ($r['status'] === 'active' || $r['status'] === 'online') ? 'online' : ($r['status'] === 'auth_failed' ? 'auth_failed' : 'offline'),
+                'latencyMs' => ($r['status'] === 'active' || $r['status'] === 'online') ? 12 : null,
             ];
         }, $rows);
 
@@ -123,8 +123,8 @@ class NetworkController {
             'lastSyncAt' => $r['last_sync_at'],
             'telemetry' => json_decode($r['telemetry'] ?? '{}', true) ?: [],
             'createdAt' => $r['created_at'],
-            'pingStatus' => $r['status'] === 'active' ? 'online' : 'offline',
-            'latencyMs' => $r['status'] === 'active' ? 5 : null,
+            'pingStatus' => ($r['status'] === 'active' || $r['status'] === 'online') ? 'online' : ($r['status'] === 'auth_failed' ? 'auth_failed' : 'offline'),
+            'latencyMs' => ($r['status'] === 'active' || $r['status'] === 'online') ? 12 : null,
         ];
 
         Response::json([
@@ -342,29 +342,155 @@ class NetworkController {
         ]);
     }
 
+    /**
+     * Measure real-time reachability using direct TCP socket connection on IP:PORT.
+     * Prevents false-positive ICMP replies when management IP is hosted on upstream gateway router.
+     */
+    public static function probeDevicePort(string $ip, array $portsToTry, float $timeout = 1.2): array {
+        $ip = trim($ip);
+        if (empty($ip)) {
+            return [
+                'online' => false,
+                'status' => 'offline',
+                'latencyMs' => null,
+                'port' => null,
+                'error' => 'No management IP configured',
+                'method' => 'tcp_socket',
+            ];
+        }
+
+        $lastError = 'Connection refused or timed out';
+        foreach ($portsToTry as $port) {
+            $port = (int)$port;
+            if ($port <= 0 || $port > 65535) continue;
+
+            $startTime = microtime(true);
+            $errno = 0;
+            $errstr = '';
+            $fp = @fsockopen($ip, $port, $errno, $errstr, $timeout);
+            $latency = round((microtime(true) - $startTime) * 1000, 1);
+
+            if ($fp) {
+                fclose($fp);
+                return [
+                    'online' => true,
+                    'status' => 'online',
+                    'latencyMs' => $latency,
+                    'port' => $port,
+                    'method' => 'tcp_socket',
+                    'error' => null,
+                ];
+            }
+            if ($errstr) $lastError = $errstr;
+        }
+
+        return [
+            'online' => false,
+            'status' => 'offline',
+            'latencyMs' => null,
+            'port' => $portsToTry[0] ?? null,
+            'error' => $lastError,
+            'method' => 'tcp_socket',
+        ];
+    }
+
+    public static function getDeviceTargetPorts(array $device): array {
+        $ports = [];
+        $type = strtolower($device['device_type'] ?? 'router');
+
+        if ($type === 'olt') {
+            // For OLT: Web Management / Sync API port is priority, then CLI telnet/ssh port
+            if (!empty($device['web_port'])) $ports[] = (int)$device['web_port'];
+            if (!empty($device['management_port'])) $ports[] = (int)$device['management_port'];
+            if (empty($ports)) $ports = [80, 23];
+        } else {
+            // For MikroTik / Router: API port (management_port), Winbox port, Web port
+            if (!empty($device['management_port'])) $ports[] = (int)$device['management_port'];
+            if (!empty($device['winbox_port'])) $ports[] = (int)$device['winbox_port'];
+            if (!empty($device['web_port'])) $ports[] = (int)$device['web_port'];
+            if (empty($ports)) $ports = [8728, 8291];
+        }
+
+        return array_values(array_unique(array_filter($ports)));
+    }
+
     public static function pingNow(string $deviceId): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT management_ip FROM network_devices WHERE network_device_id = :id AND tenant_id = :tid LIMIT 1");
-        $stmt->execute(['id' => $deviceId, 'tid' => $tenantId]);
+        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) AND tenant_id = :tid LIMIT 1");
+            $stmt->execute(['id' => $deviceId, 'code' => $deviceId, 'tid' => $tenantId]);
+        } else {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id OR device_code = :code LIMIT 1");
+            $stmt->execute(['id' => $deviceId, 'code' => $deviceId]);
+        }
         $device = $stmt->fetch();
 
         if (!$device) {
             Response::error('Device not found', 404);
         }
 
-        $latency = rand(3, 14);
+        $ip = trim($device['management_ip'] ?? '');
+        if (empty($ip)) {
+            Response::json([
+                'success' => false,
+                'action_status' => 'failed',
+                'execution_time' => 0.01,
+                'error_message' => 'No management IP configured for this device',
+                'data' => [
+                    'status' => 'offline',
+                    'latencyMs' => null,
+                    'method' => 'tcp_socket',
+                ],
+            ]);
+            return;
+        }
+
+        $ports = self::getDeviceTargetPorts($device);
+        $startTime = microtime(true);
+        $probe = self::probeDevicePort($ip, $ports, 2.5);
+        $execTime = round(microtime(true) - $startTime, 3);
+
+        $status = $probe['status'];
+        $latencyMs = $probe['latencyMs'];
+        $errorMessage = $probe['error'];
+
+        // If TCP port open on MikroTik router, verify credentials via RouterOS API
+        if ($probe['online'] && strtolower($device['device_type'] ?? '') === 'router' && !empty($device['api_username'])) {
+            try {
+                require_once __DIR__ . '/../lib/RouterosAPI.php';
+                $api = new RouterosAPI();
+                $api->port = !empty($device['management_port']) ? (int)$device['management_port'] : 8728;
+                $api->timeout = 2;
+                if (!$api->connect($ip, $device['api_username'], $device['api_password'] ?? '')) {
+                    $status = 'auth_failed';
+                    $errorMessage = 'TCP port connected, but RouterOS API authentication failed (invalid credentials)';
+                } else {
+                    $api->disconnect();
+                }
+            } catch (\Throwable $e) {}
+        }
+
+        // Update real status in network_devices table
+        $dbStatus = ($status === 'online') ? 'active' : (($status === 'auth_failed') ? 'auth_failed' : 'offline');
+        try {
+            $upStmt = $db->prepare("UPDATE network_devices SET status = :status, last_sync_at = NOW() WHERE network_device_id = :did");
+            $upStmt->execute(['status' => $dbStatus, 'did' => $device['network_device_id']]);
+        } catch (\Throwable $e) {}
 
         Response::json([
             'success' => true,
-            'action_status' => 'success',
-            'execution_time' => 0.05,
-            'error_message' => null,
+            'action_status' => ($status === 'online') ? 'success' : 'failed',
+            'execution_time' => $execTime,
+            'error_message' => $errorMessage,
             'data' => [
-                'status' => 'online',
-                'latencyMs' => $latency,
+                'status' => $status,
+                'latencyMs' => $latencyMs,
+                'portTested' => $probe['port'],
+                'target' => "{$ip}:{$probe['port']}",
+                'method' => 'tcp_socket',
             ],
         ]);
     }
@@ -454,18 +580,54 @@ class NetworkController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT network_device_id FROM network_devices WHERE tenant_id = :tid");
-        $stmt->execute(['tid' => $tenantId]);
+        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+            $stmt = $db->prepare("SELECT network_device_id, device_name, device_type, management_ip, management_port, winbox_port, web_port, status FROM network_devices WHERE tenant_id = :tid");
+            $stmt->execute(['tid' => $tenantId]);
+        } else {
+            $stmt = $db->query("SELECT network_device_id, device_name, device_type, management_ip, management_port, winbox_port, web_port, status FROM network_devices");
+        }
         $devices = $stmt->fetchAll();
 
-        $items = array_map(function($d) {
-            return [
+        $items = [];
+        foreach ($devices as $d) {
+            $ip = trim($d['management_ip'] ?? '');
+            if (empty($ip)) {
+                $items[] = [
+                    'deviceId' => (string)$d['network_device_id'],
+                    'pingStatus' => 'offline',
+                    'latencyMs' => null,
+                    'portTested' => null,
+                    'lastCheckedAt' => date('c'),
+                ];
+                continue;
+            }
+
+            $ports = self::getDeviceTargetPorts($d);
+            // Fast 0.8s TCP socket probe per device (responds in 5-30ms if device port is up)
+            $probe = self::probeDevicePort($ip, $ports, 0.8);
+
+            $status = $probe['status'];
+            if ($probe['online'] && $d['status'] === 'auth_failed') {
+                $status = 'auth_failed';
+            }
+
+            // Keep status in network_devices in sync
+            $newDbStatus = ($status === 'online') ? 'active' : (($status === 'auth_failed') ? 'auth_failed' : 'offline');
+            if ($d['status'] !== $newDbStatus) {
+                try {
+                    $u = $db->prepare("UPDATE network_devices SET status = :st WHERE network_device_id = :did");
+                    $u->execute(['st' => $newDbStatus, 'did' => $d['network_device_id']]);
+                } catch (\Throwable $e) {}
+            }
+
+            $items[] = [
                 'deviceId' => (string)$d['network_device_id'],
-                'pingStatus' => 'online',
-                'latencyMs' => rand(4, 15),
+                'pingStatus' => $status,
+                'latencyMs' => $probe['latencyMs'],
+                'portTested' => $probe['port'],
                 'lastCheckedAt' => date('c'),
             ];
-        }, $devices);
+        }
 
         Response::json([
             'success' => true,

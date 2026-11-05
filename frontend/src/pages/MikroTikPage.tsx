@@ -515,11 +515,12 @@ export default function MikroTikPage() {
         
         if (response.data.status === 'online') {
           const latency = response.data.latencyMs ? ` (${response.data.latencyMs}ms)` : '';
-          toast.success(`Device Online: Successfully connected to ${device.deviceName}${latency}`);
+          const target = (response.data as any)?.target ? ` [${(response.data as any).target}]` : '';
+          toast.success(`Device Online${target}: Successfully connected to ${device.deviceName}${latency} via TCP socket probe`);
         } else if (response.data.status === 'auth_failed') {
-          toast.error(`Authentication Failed: Invalid credentials for ${device.deviceName}. Please check username/password.`);
+          toast.error(`Authentication Failed: TCP port responded, but credentials invalid for ${device.deviceName}. Please check username/password.`);
         } else {
-          toast.error(`Device Offline: Could not reach ${device.deviceName}. The device may be down or unreachable.`);
+          toast.error(`Device Offline: Could not reach ${device.deviceName} on management port (${device.managementIp}:${device.managementPort || 8728}).`);
         }
       } else {
         const errorMsg = response.error_message || 'Health check failed';

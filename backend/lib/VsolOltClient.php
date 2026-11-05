@@ -114,7 +114,7 @@ class VsolOltClient {
     /**
      * Retrieve system and hardware telemetry
      */
-    public function getSystemInfo(): ?array {
+    public function getSystemInfo(int $totalConfiguredPorts = 8): ?array {
         $html = $this->request('systeminfo.html');
         if (!$html) return null;
 
@@ -133,7 +133,7 @@ class VsolOltClient {
             'cpuUsagePercent' => 0,
             'memoryUsage' => '',
             'memoryUsagePercent' => 0,
-            'totalPonPorts' => 4,
+            'totalPonPorts' => $totalConfiguredPorts,
             'totalGePorts' => 8,
         ];
 
@@ -165,13 +165,14 @@ class VsolOltClient {
     /**
      * Retrieve PON port statistics and optical transceiver data
      */
-    public function getPonPorts(): array {
+    public function getPonPorts(int $totalConfiguredPorts = 8, string $ponType = 'epon'): array {
         $html = $this->request('poninfo.html');
         if (!$html) return [];
 
         $txPowers = [];
         $temperatures = [];
         $linkStatuses = [];
+        $detectedMaxPort = 0;
 
         // 1. Primary robust row-by-row cell extractor (immune to inner tags, fonts, whitespace, + signs)
         if (preg_match_all('/<tr[^>]*>(.*?)<\/tr>/is', $html, $rowMatches)) {
@@ -185,7 +186,11 @@ class VsolOltClient {
 
                     // Match PON identifier in first cell: "PON1", "PON 1", "EPON0/1", "EPON 0/1", etc.
                     if (preg_match('/^(?:E?PON|GPON)?\s*0?\/?:?\s*(\d+)$/i', $cells[0], $pm)) {
-                        $pKey = 'PON' . (int)$pm[1];
+                        $pNum = (int)$pm[1];
+                        if ($pNum > $detectedMaxPort) {
+                            $detectedMaxPort = $pNum;
+                        }
+                        $pKey = 'PON' . $pNum;
 
                         // Optical Transceiver Table:
                         // [0] Port ID (PON1)
@@ -228,6 +233,8 @@ class VsolOltClient {
             if (preg_match_all('/<tr>\s*<td[^>]*>\s*(PON\d+)\s*<\/td>\s*<td[^>]*>\s*([0-9\.]+|N\/A)\s*<\/td>\s*<td[^>]*>\s*([0-9\.]+|N\/A)\s*<\/td>\s*<td[^>]*>\s*([0-9\.]+|N\/A)\s*<\/td>\s*<td[^>]*>\s*([0-9\.\-+]+|N\/A)\s*<\/td>/i', $html, $matches, PREG_SET_ORDER)) {
                 foreach ($matches as $m) {
                     $pName = strtoupper(trim($m[1]));
+                    $num = (int)str_replace('PON', '', $pName);
+                    if ($num > $detectedMaxPort) $detectedMaxPort = $num;
                     $txPowers[$pName] = ($m[5] !== 'N/A') ? (float)$m[5] : null;
                     $temperatures[$pName] = ($m[2] !== 'N/A') ? (float)$m[2] : null;
                 }
@@ -239,13 +246,18 @@ class VsolOltClient {
             if (preg_match_all('/<tr>\s*<td[^>]*>\s*(PON\d+)\s*<\/td>\s*<td[^>]*>\s*(?:<font[^>]*>)?\s*(Up|Down)\s*(?:<\/font>)?\s*<\/td>/i', $html, $matches, PREG_SET_ORDER)) {
                 foreach ($matches as $m) {
                     $pName = strtoupper(trim($m[1]));
+                    $num = (int)str_replace('PON', '', $pName);
+                    if ($num > $detectedMaxPort) $detectedMaxPort = $num;
                     $linkStatuses[$pName] = strtolower($m[2]);
                 }
             }
         }
 
+        $totalPorts = max($detectedMaxPort, $totalConfiguredPorts, 4);
+        $prefix = (strtolower($ponType) === 'gpon') ? 'GPON 0/' : 'EPON 0/';
+
         $ports = [];
-        for ($p = 1; $p <= 4; $p++) {
+        for ($p = 1; $p <= $totalPorts; $p++) {
             $key = "PON$p";
             $status = $linkStatuses[$key] ?? 'down';
             $tx = $txPowers[$key] ?? null;
@@ -254,7 +266,7 @@ class VsolOltClient {
             $ports[] = [
                 'portNum' => $p,
                 'port' => $key,
-                'portName' => "EPON 0/$p",
+                'portName' => "{$prefix}{$p}",
                 'status' => $status === 'up' ? 'online' : 'offline',
                 'operStatus' => $status,
                 'txPowerDbm' => $tx,

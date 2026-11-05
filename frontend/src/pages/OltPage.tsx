@@ -255,11 +255,12 @@ export default function OltPage() {
         });
         if (response.data.status === 'online') {
           const latency = response.data.latencyMs ? ` (${response.data.latencyMs}ms)` : '';
-          toast.success(`Device Online: ${device.deviceName}${latency}`);
+          const target = (response.data as any)?.target ? ` [${(response.data as any).target}]` : '';
+          toast.success(`OLT Online${target}: ${device.deviceName}${latency} via TCP socket probe`);
         } else if (response.data.status === 'auth_failed') {
           toast.error(`Authentication Failed: ${device.deviceName}`);
         } else {
-          toast.error(`Device Offline: ${device.deviceName}`);
+          toast.error(`OLT Offline: Device did not respond on management port (${device.managementIp}:${device.webPort || device.managementPort || 80})`);
         }
       } else {
         toast.error(response.error_message || 'Health check failed');
@@ -783,7 +784,7 @@ export default function OltPage() {
                         <td className="px-3 py-4 text-sm font-mono">
                           <span className="text-slate-900 dark:text-slate-100 font-semibold">{device.managementIp || '—'}</span>
                           <div className="text-[11px] text-slate-400 mt-0.5">
-                            Port: {device.managementPort || 23}
+                            Web: {device.webPort || 80} | CLI: {device.managementPort || 23}
                           </div>
                         </td>
                         <td className="px-3 py-4 text-xs text-slate-600 dark:text-slate-400 font-mono truncate">

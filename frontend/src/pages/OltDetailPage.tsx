@@ -15,6 +15,7 @@ import {
   Radio,
   ExternalLink,
   AlertTriangle,
+  Activity,
 } from 'lucide-react';
 import { PageHeader } from '@/components/common';
 import { networkService } from '@/services/network.service';
@@ -50,6 +51,8 @@ export default function OltDetailPage() {
   const [onus, setOnus] = useState<OnuRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isPinging, setIsPinging] = useState(false);
+  const [pingData, setPingData] = useState<{ status: string; latencyMs: number | null; port?: number; target?: string } | null>(null);
 
   const [selectedPon, setSelectedPon] = useState<number | 'all'>('all');
   const [signalFilter, setSignalFilter] = useState<'all' | 'good' | 'fair' | 'low'>('all');
@@ -74,6 +77,12 @@ export default function OltDetailPage() {
 
       if (devRes?.success && devRes.data) {
         setDevice(devRes.data);
+        if (!pingData) {
+          setPingData({
+            status: devRes.data.pingStatus || (devRes.data.status === 'active' ? 'online' : 'offline'),
+            latencyMs: devRes.data.latencyMs || null,
+          });
+        }
       }
       if (statusRes?.success && statusRes.data) {
         setTelemetry(statusRes.data);
@@ -87,6 +96,35 @@ export default function OltDetailPage() {
       toast.error(err.message || 'Failed to load OLT details');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handlePing = async () => {
+    if (!id) return;
+    setIsPinging(true);
+    try {
+      const res = await networkService.pingNow(id);
+      if (res.success && res.data) {
+        setPingData({
+          status: res.data.status,
+          latencyMs: res.data.latencyMs,
+          port: (res.data as any).portTested,
+          target: (res.data as any).target,
+        });
+        if (res.data.status === 'online') {
+          const latText = res.data.latencyMs ? ` in ${res.data.latencyMs}ms` : '';
+          const targetText = (res.data as any).target ? ` [${(res.data as any).target}]` : '';
+          toast.success(`OLT Hardware Online${targetText}: Responded${latText} via TCP socket probe!`);
+        } else {
+          toast.error(`OLT Offline: Device did not respond on management port!`);
+        }
+      } else {
+        toast.error(res.error_message || 'Ping probe failed');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || 'Ping probe failed');
+    } finally {
+      setIsPinging(false);
     }
   };
 
@@ -115,18 +153,40 @@ export default function OltDetailPage() {
     setTimeout(() => setCopiedMac(null), 2000);
   };
 
+  // Dynamic PON ports count detection (e.g. 4, 8, 16)
+  const totalPonPorts = useMemo(() => {
+    if (device?.totalPonPorts && device.totalPonPorts > 0) return device.totalPonPorts;
+    if ((telemetry as any)?.totalPonPorts && (telemetry as any).totalPonPorts > 0) return (telemetry as any).totalPonPorts;
+    if (telemetry?.system?.totalPonPorts && telemetry.system.totalPonPorts > 0) return telemetry.system.totalPonPorts;
+    if (telemetry?.ponPorts && telemetry.ponPorts.length > 0) return telemetry.ponPorts.length;
+    const maxOnuPon = onus.reduce((max, onu) => Math.max(max, onu.ponPort || 1), 0);
+    if (maxOnuPon > 4) return Math.max(maxOnuPon, 8);
+    return 8;
+  }, [device, telemetry, onus]);
+
+  const ponPortsList = useMemo(() => {
+    return Array.from({ length: totalPonPorts }, (_, i) => i + 1);
+  }, [totalPonPorts]);
+
+  const ponPrefix = useMemo(() => {
+    const type = (device?.ponType || 'epon').toLowerCase();
+    if (type.includes('gpon')) return 'GPON 0/';
+    if (type.includes('xgs')) return 'XGS 0/';
+    return 'EPON 0/';
+  }, [device?.ponType]);
+
   // Group ONUs by PON port
   const ponCounts = useMemo(() => {
-    const counts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0 };
+    const counts: Record<number, number> = {};
+    for (let i = 1; i <= totalPonPorts; i++) {
+      counts[i] = 0;
+    }
     for (const onu of onus) {
-      if (counts[onu.ponPort] !== undefined) {
-        counts[onu.ponPort]++;
-      } else {
-        counts[onu.ponPort] = 1;
-      }
+      const p = onu.ponPort || 1;
+      counts[p] = (counts[p] || 0) + 1;
     }
     return counts;
-  }, [onus]);
+  }, [onus, totalPonPorts]);
 
   // Filtered ONUs
   const filteredOnus = useMemo(() => {
@@ -212,12 +272,33 @@ export default function OltDetailPage() {
           </div>
         }
         badge={
-          <span className="px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-            {telemetry?.model || telemetry?.system?.model || 'EPON OLT'}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+              {telemetry?.model || telemetry?.system?.model || `${(device?.vendor || 'VSOL').toUpperCase()} ${totalPonPorts}P OLT`}
+            </span>
+            {pingData && (
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg border ${
+                pingData.status === 'online'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60'
+                  : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-800/60'
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${pingData.status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                {pingData.status === 'online' ? `TCP Ping: ${pingData.latencyMs !== null ? `${pingData.latencyMs}ms` : 'Online'}` : 'Offline'}
+              </span>
+            )}
+          </div>
         }
         actions={
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handlePing}
+              disabled={isPinging}
+              className="inline-flex items-center gap-2 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium text-xs sm:text-sm rounded-lg transition-all border border-slate-200 dark:border-slate-700 active:scale-95 disabled:opacity-50"
+              title="Ping IP + Management Port via TCP Socket Probe"
+            >
+              <Activity className={`w-3.5 h-3.5 ${isPinging ? 'animate-spin text-blue-500' : 'text-emerald-500'}`} />
+              <span>{isPinging ? 'Testing...' : 'Ping Test'}</span>
+            </button>
             <button
               onClick={handleSyncNow}
               disabled={isSyncing}
@@ -339,20 +420,37 @@ export default function OltDetailPage() {
           <div className="flex items-center gap-1.5 mt-3 text-xs text-slate-600 dark:text-slate-300 font-medium">
             <Radio className="w-4 h-4 text-emerald-500" />
             <span>
-              {telemetry?.ponPorts?.filter((p: any) => p.status === 'online').length || 1} of 4 PON Ports Active
+              {telemetry?.ponPorts?.filter((p: any) => p.status === 'online').length || (onus.length > 0 ? 1 : 0)} of {totalPonPorts} PON Ports Active
             </span>
           </div>
           <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 font-medium">Live Hardware Telemetry</p>
         </div>
       </div>
 
-      {/* 4 PON Port Status Overview */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[1, 2, 3, 4].map((ponNum) => {
+      {/* Dynamic PON Port Status Overview */}
+      <div className={`grid gap-3 ${
+        totalPonPorts <= 4 
+          ? 'grid-cols-2 md:grid-cols-4' 
+          : totalPonPorts <= 8 
+            ? 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-8' 
+            : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-8'
+      }`}>
+        {ponPortsList.map((ponNum) => {
           const count = ponCounts[ponNum] || 0;
           const isSelected = selectedPon === ponNum;
-          const portInfo = (telemetry?.ponPorts || []).find((p: any) => p.portNum === ponNum || p.port === `PON${ponNum}` || p.portName === `EPON 0/${ponNum}`) 
-            || ((device as any)?.telemetry?.ponPorts || []).find((p: any) => p.portNum === ponNum || p.port === `PON${ponNum}` || p.portName === `EPON 0/${ponNum}`);
+          const portInfo = (telemetry?.ponPorts || []).find((p: any) => 
+            p.portNum === ponNum || 
+            p.port === `PON${ponNum}` || 
+            p.portName === `${ponPrefix}${ponNum}` || 
+            p.portName === `EPON 0/${ponNum}` ||
+            p.portName === `GPON 0/${ponNum}`
+          ) || ((device as any)?.telemetry?.ponPorts || []).find((p: any) => 
+            p.portNum === ponNum || 
+            p.port === `PON${ponNum}` || 
+            p.portName === `${ponPrefix}${ponNum}` || 
+            p.portName === `EPON 0/${ponNum}` ||
+            p.portName === `GPON 0/${ponNum}`
+          );
 
           const isOnline = portInfo ? portInfo.status === 'online' : (count > 0);
           
@@ -373,17 +471,17 @@ export default function OltDetailPage() {
             <button
               key={ponNum}
               onClick={() => setSelectedPon(isSelected ? 'all' : ponNum)}
-              className={`p-4 rounded-2xl border text-left transition-all ${
+              className={`p-3.5 rounded-2xl border text-left transition-all ${
                 isSelected
                   ? 'bg-blue-50/80 dark:bg-blue-950/50 border-blue-500 dark:border-blue-500 shadow-sm ring-1 ring-blue-500'
                   : 'bg-white dark:bg-slate-800 border-slate-200/80 dark:border-slate-700/80 hover:border-slate-300 dark:hover:border-slate-600 shadow-sm'
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className="font-bold text-sm text-slate-800 dark:text-slate-100">
-                  EPON 0/{ponNum}
+                <span className="font-bold text-xs sm:text-sm text-slate-800 dark:text-slate-100 truncate">
+                  {ponPrefix}{ponNum}
                 </span>
-                <span className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
                   isOnline
                     ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60'
                     : 'bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700'
@@ -392,14 +490,14 @@ export default function OltDetailPage() {
                 </span>
               </div>
               <div className="mt-2 flex items-baseline justify-between">
-                <span className="text-xl font-bold text-slate-900 dark:text-slate-100">
-                  {count} <span className="text-xs font-normal text-slate-400">ONUs</span>
+                <span className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100">
+                  {count} <span className="text-[10px] font-normal text-slate-400">ONUs</span>
                 </span>
-                <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+                <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
                   Tx: {txPower}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 truncate">
                 {isSelected ? '✓ Filter active' : (isOnline ? 'Click to filter' : 'No optical link')}
               </p>
             </button>
@@ -426,7 +524,7 @@ export default function OltDetailPage() {
               >
                 All Ports ({onus.length})
               </button>
-              {[1, 2, 3, 4].map((p) => (
+              {ponPortsList.map((p) => (
                 <button
                   key={p}
                   onClick={() => setSelectedPon(p)}
@@ -691,7 +789,7 @@ export default function OltDetailPage() {
         <div className="px-5 py-3.5 bg-slate-50/80 dark:bg-slate-900/60 border-t border-slate-200/80 dark:border-slate-700/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
           <div>
             Showing <strong>{filteredOnus.length}</strong> of <strong>{onus.length}</strong> ONUs
-            {selectedPon !== 'all' && ` (EPON 0/${selectedPon})`}
+            {selectedPon !== 'all' && ` (${ponPrefix}${selectedPon})`}
           </div>
           <div className="flex items-center gap-4">
             <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium text-[11px]">
