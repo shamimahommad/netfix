@@ -248,6 +248,12 @@ if ($method === 'POST' && $uri === '/payments/bkash/callback') {
 if (preg_match('#^/payments/callback/([^/]+)$#', $uri, $m)) {
     PaymentGatewayController::handleGatewayCallback($m[1]);
 }
+if ($method === 'POST' && $uri === '/payments/initiate-balance-topup') {
+    PaymentGatewayController::initiateBalanceTopup();
+}
+if ($method === 'POST' && $uri === '/payments/confirm-balance-topup') {
+    PaymentGatewayController::confirmBalanceTopup();
+}
 if ($method === 'POST' && $uri === '/payments/simulator/confirm') {
     PaymentGatewayController::simulatorConfirm();
 }
@@ -541,6 +547,9 @@ if ($method === 'GET' && ($uri === '/public/topup/payment-methods' || $uri === '
 }
 if ($method === 'POST' && ($uri === '/public/topup/initiate' || $uri === '/topup/initiate')) {
     PublicTopupController::initiate();
+}
+if ($method === 'GET' && ($uri === '/public/topup' || $uri === '/topup' || $uri === '/customer/payment-callback')) {
+    PaymentGatewayController::handlePublicTopupGetCallback();
 }
 
 // ---------------------------------------------------------------------

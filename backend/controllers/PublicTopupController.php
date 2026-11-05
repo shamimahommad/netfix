@@ -7,6 +7,7 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
 require_once __DIR__ . '/../lib/PaymentGatewayService.php';
+require_once __DIR__ . '/PaymentGatewayController.php';
 
 class PublicTopupController {
 
@@ -222,9 +223,7 @@ class PublicTopupController {
 
         $db = Database::getConnection();
 
-        $host = $_SERVER['HTTP_HOST'] ?? 'localhost:4001';
-        $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
-        $callbackUrl = $protocol . $host . "/public/topup";
+        $callbackUrl = PaymentGatewayController::getFrontendBaseUrl() . "/public/topup";
 
         $res = PaymentGatewayService::initiatePayment(
             $db,
