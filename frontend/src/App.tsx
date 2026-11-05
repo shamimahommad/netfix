@@ -24,6 +24,7 @@ import OltPage from './pages/OltPage';
 import OltDetailPage from './pages/OltDetailPage';
 import PackageCopyPage from './pages/PackageCopyPage';
 import PlaceholderPage from './pages/PlaceholderPage';
+import PppoeLogsPage from './pages/PppoeLogsPage';
 import ChangePasswordPage from './pages/ChangePasswordPage';
 import ProfilePage from './pages/ProfilePage';
 import MerchantPaymentsPage from './pages/MerchantPaymentsPage';
@@ -186,8 +187,9 @@ function AppContent() {
               }
             >
               <Route index element={<TenantDashboard />} />
+              <Route path="pppoe-logs" element={<PppoeLogsPage />} />
               <Route path="customers" element={<Navigate to="/dashboard/customers/all" replace />} />
-              <Route path="customers/pppoe-logs" element={<PlaceholderPage title="PPPoE Logs" description="View PPPoE connection logs, session history, and authentication records." />} />
+              <Route path="customers/pppoe-logs" element={<Navigate to="/dashboard/pppoe-logs" replace />} />
               <Route path="customers/task-logs/:customerId" element={<CustomerTaskLogsPage />} />
               <Route path="customers/:type" element={<CustomersPage />} />
               <Route path="customers/view/:id" element={<CustomerDetailPage />} />

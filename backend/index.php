@@ -373,6 +373,9 @@ if ($method === 'DELETE' && preg_match('#^/network/devices/([^/]+)$#', $uri, $m)
 if ($method === 'GET' && $uri === '/network/mikrotik/live-traffic') {
     NetworkController::liveTraffic();
 }
+if ($method === 'GET' && ($uri === '/network/mikrotik/pppoe-logs' || $uri === '/network/pppoe-logs')) {
+    NetworkController::pppoeLogs();
+}
 
 // ---------------------------------------------------------------------
 // SERVICE AREAS & SUB-AREAS

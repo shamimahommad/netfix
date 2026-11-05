@@ -669,5 +669,184 @@ class NetworkController {
 
         Response::json(['success' => true, 'message' => 'Device deleted successfully']);
     }
+
+    public static function pppoeLogs(): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        // 1. Get all routers for this tenant
+        $rStmt = $db->prepare("SELECT network_device_id, device_name, management_ip, management_port, status 
+                               FROM network_devices 
+                               WHERE tenant_id = :tid AND device_type = 'router' 
+                               ORDER BY network_device_id ASC");
+        $rStmt->execute(['tid' => $tenantId]);
+        $routers = $rStmt->fetchAll() ?: [];
+
+        // If no routers for this tenant, fallback to all routers if saas admin
+        if (empty($routers) && $user['role'] === 'saas_admin') {
+            $routers = $db->query("SELECT network_device_id, device_name, management_ip, management_port, status FROM network_devices WHERE device_type = 'router' ORDER BY network_device_id ASC")->fetchAll() ?: [];
+        }
+
+        if (empty($routers)) {
+            Response::json([
+                'success' => true,
+                'is_online' => false,
+                'current_router' => null,
+                'routers' => [],
+                'total' => 0,
+                'logs' => [],
+                'status_message' => 'No MikroTik routers configured yet.'
+            ]);
+            return;
+        }
+
+        // 2. Determine target router
+        $targetRouterId = $_GET['router_id'] ?? null;
+        $targetRouter = null;
+
+        if ($targetRouterId) {
+            foreach ($routers as $r) {
+                if ((string)$r['network_device_id'] === (string)$targetRouterId) {
+                    $targetRouter = $r;
+                    break;
+                }
+            }
+        }
+
+        if (!$targetRouter) {
+            $targetRouter = $routers[0];
+        }
+
+        // Fetch full router details including credentials
+        $dStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id LIMIT 1");
+        $dStmt->execute(['id' => $targetRouter['network_device_id']]);
+        $routerFull = $dStmt->fetch();
+
+        if (!$routerFull) {
+            Response::error('Selected router not found', 404);
+            return;
+        }
+
+        require_once __DIR__ . '/../lib/RouterosAPI.php';
+        $api = new RouterosAPI();
+        $api->port = (int)($routerFull['management_port'] ?: 8728);
+        $api->timeout = 3;
+
+        $connected = @$api->connect(
+            $routerFull['management_ip'],
+            $routerFull['api_username'] ?: 'admin',
+            $routerFull['api_password'] ?: ''
+        );
+
+        $parsedLogs = [];
+
+        if ($connected) {
+            $rawLogs = $api->comm('/log/print');
+            $api->disconnect();
+
+            // Filter for PPP & PPPoE logs
+            $filtered = array_reverse(array_filter($rawLogs ?: [], function($l) {
+                $topics = strtolower($l['topics'] ?? '');
+                $msg = strtolower($l['message'] ?? '');
+                return str_contains($topics, 'ppp') || str_contains($topics, 'pppoe') || str_contains($msg, 'pppoe');
+            }));
+
+            // Fetch known customer pppoe usernames for this tenant to cross-match
+            $cStmt = $db->prepare("SELECT na.username, na.mac_address, na.remote_address, c.customer_id, c.customer_code, c.full_name, c.phone 
+                                   FROM customer_network_accounts na 
+                                   JOIN customers c ON c.customer_id = na.customer_id 
+                                   WHERE na.tenant_id = :tid AND na.username IS NOT NULL");
+            $cStmt->execute(['tid' => $tenantId]);
+            $customersMap = [];
+            foreach ($cStmt->fetchAll() as $c) {
+                if (!empty($c['username'])) {
+                    $customersMap[strtolower(trim($c['username']))] = $c;
+                }
+            }
+
+            foreach ($filtered as $item) {
+                $msg = $item['message'] ?? '';
+                $topics = $item['topics'] ?? '';
+                $time = $item['time'] ?? '';
+
+                $username = null;
+                if (preg_match('/<pppoe-([^>]+)>/i', $msg, $m)) {
+                    $username = $m[1];
+                } elseif (preg_match('/^([a-zA-Z0-9_.-]+)\s+logged\s+in/i', $msg, $m)) {
+                    $username = $m[1];
+                } elseif (preg_match('/user\s+([a-zA-Z0-9_.-]+)/i', $msg, $m)) {
+                    $username = $m[1];
+                }
+
+                $mac = null;
+                if (preg_match('/((?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})/', $msg, $m)) {
+                    $mac = strtoupper(str_replace('-', ':', $m[1]));
+                }
+
+                $ip = null;
+                if (preg_match('/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/', $msg, $m)) {
+                    $ip = $m[1];
+                }
+
+                $action = 'info';
+                if (stripos($msg, 'logged in') !== false) {
+                    $action = 'login';
+                } elseif (stripos($msg, 'logged out') !== false || stripos($msg, 'disconnected') !== false || stripos($msg, 'terminated') !== false) {
+                    $action = 'logout';
+                } elseif (stripos($msg, 'authentication failed') !== false || stripos($msg, 'failed') !== false) {
+                    $action = 'failed';
+                } elseif (stripos($msg, 'connected') !== false || stripos($msg, 'connection established') !== false) {
+                    $action = 'connected';
+                } elseif (stripos($msg, 'authenticated') !== false) {
+                    $action = 'authenticated';
+                }
+
+                $customerInfo = null;
+                if ($username && isset($customersMap[strtolower($username)])) {
+                    $customerInfo = $customersMap[strtolower($username)];
+                }
+
+                $parsedLogs[] = [
+                    'id' => $item['.id'] ?? uniqid(),
+                    'time' => $time,
+                    'topics' => $topics,
+                    'action' => $action,
+                    'username' => $username,
+                    'customer' => $customerInfo ? [
+                        'customer_id' => (string)$customerInfo['customer_id'],
+                        'customer_code' => $customerInfo['customer_code'],
+                        'full_name' => $customerInfo['full_name'],
+                        'phone' => $customerInfo['phone']
+                    ] : null,
+                    'ip' => $ip,
+                    'mac' => $mac,
+                    'message' => $msg,
+                ];
+            }
+        }
+
+        Response::json([
+            'success' => true,
+            'is_online' => $connected,
+            'current_router' => [
+                'network_device_id' => (string)$targetRouter['network_device_id'],
+                'device_name' => $targetRouter['device_name'],
+                'management_ip' => $targetRouter['management_ip'],
+                'management_port' => (int)$targetRouter['management_port'],
+            ],
+            'routers' => array_map(function($r) {
+                return [
+                    'network_device_id' => (string)$r['network_device_id'],
+                    'device_name' => $r['device_name'],
+                    'management_ip' => $r['management_ip'],
+                    'status' => $r['status'],
+                ];
+            }, $routers),
+            'total' => count($parsedLogs),
+            'logs' => $parsedLogs,
+            'status_message' => $connected ? 'Logs retrieved from live router' : 'Router unreachable or API disconnected',
+        ]);
+    }
 }
 

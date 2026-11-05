@@ -65,7 +65,10 @@ export default function TenantLayout() {
       {
         label: 'Dashboard',
         icon: <DashboardIcon />,
-        path: '/dashboard',
+        submenu: [
+          { label: 'Overview', path: '/dashboard' },
+          { label: 'PPPoE Logs', path: '/dashboard/pppoe-logs' },
+        ],
       },
       {
         label: 'Customers',
@@ -75,7 +78,6 @@ export default function TenantLayout() {
           { label: 'Add Customer', path: '/dashboard/customers/add' },
           { label: 'Online Customers', path: '/dashboard/customers/online' },
           { label: 'Offline Customers', path: '/dashboard/customers/offline' },
-          { label: 'PPPoE Logs', path: '/dashboard/customers/pppoe-logs' },
           { label: 'Suspended Customers', path: '/dashboard/customers/suspended' },
           { label: 'Expiring Soon', path: '/dashboard/customers/expiring-soon' },
         ],

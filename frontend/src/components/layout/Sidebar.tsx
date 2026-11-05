@@ -40,7 +40,9 @@ function SidebarMenuItem({ item, isOpen = false, onToggle, onClose }: SidebarMen
     accentMap[item.label] ?? 'from-slate-500/15 via-slate-400/10 to-slate-500/5 text-slate-600';
 
   const hasActiveSubmenu = item.submenu?.some(subItem => 
-    location.pathname === subItem.path || (subItem.path !== '/' && location.pathname.startsWith(subItem.path))
+    subItem.path === '/dashboard' 
+      ? location.pathname === '/dashboard' 
+      : (location.pathname === subItem.path || (subItem.path !== '/' && location.pathname.startsWith(subItem.path)))
   );
   const isParentActive = item.path && location.pathname === item.path;
 
@@ -162,7 +164,9 @@ export default function Sidebar({ items, isOpen, onClose }: SidebarProps) {
     for (const item of items) {
       if (item.submenu && item.submenu.length > 0) {
         const hasMatch = item.submenu.some(sub => 
-          location.pathname === sub.path || (sub.path !== '/' && location.pathname.startsWith(sub.path))
+          sub.path === '/dashboard' 
+            ? location.pathname === '/dashboard' 
+            : (location.pathname === sub.path || (sub.path !== '/' && location.pathname.startsWith(sub.path)))
         );
         if (hasMatch) return item.label;
       }
