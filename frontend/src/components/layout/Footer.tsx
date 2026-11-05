@@ -3,10 +3,10 @@ import { ShieldCheck } from 'lucide-react';
 export default function Footer() {
   const year = new Date().getFullYear();
   return (
-    <footer className="w-full border-t border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-950/80 backdrop-blur-md px-4 lg:px-6 py-2.5 mt-auto shrink-0 transition-colors">
+    <footer className="w-full border-t border-slate-200/60 dark:border-slate-800/40 bg-transparent px-4 lg:px-6 py-2 mt-auto shrink-0 transition-colors">
       <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
         <div className="flex items-center gap-2">
-          <span className="font-bold text-slate-900 dark:text-slate-100">NetFix</span>
+          <span className="font-bold text-slate-900 dark:text-slate-200">NetFix</span>
           <span>© {year} All rights reserved.</span>
           <span className="hidden sm:inline text-slate-300 dark:text-slate-700">·</span>
           <span className="hidden sm:inline">ISP Billing & Network Automation</span>

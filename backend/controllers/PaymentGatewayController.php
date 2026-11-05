@@ -566,7 +566,22 @@ class PaymentGatewayController {
                 $params
             );
 
+            // If balance topup flow, redirect to balance topup page
+            $intentMeta = json_decode($intent['metadata'] ?? '{}', true) ?: [];
+            if (($intentMeta['flow'] ?? '') === 'balance_topup') {
+                $redirectUrl = self::getFrontendBaseUrl() . "/dashboard/billing/topup-balance?status=success&paymentID=" . urlencode($paymentId) . "&trx_id=" . urlencode($trxId);
+                header("Location: {$redirectUrl}");
+                exit;
+            }
+
             $redirectUrl = self::getFrontendBaseUrl() . "/public/topup?result=success&txn_id=" . urlencode($trxId) . "&gateway=" . urlencode($gateway) . "&amount=" . urlencode((string)$amount) . "&paymentID=" . urlencode($paymentId);
+            header("Location: {$redirectUrl}");
+            exit;
+        }
+
+        $intentMeta = json_decode($intent['metadata'] ?? '{}', true) ?: [];
+        if (($intentMeta['flow'] ?? '') === 'balance_topup') {
+            $redirectUrl = self::getFrontendBaseUrl() . "/dashboard/billing/topup-balance?status=cancel&paymentID=" . urlencode($paymentId) . "&gateway=" . urlencode($gateway);
             header("Location: {$redirectUrl}");
             exit;
         }

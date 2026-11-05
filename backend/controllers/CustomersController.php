@@ -174,8 +174,8 @@ class CustomersController {
         }
         $customer = $stmt->fetch();
 
-        // Soft fallback to find customer if tenant_id context was switched
-        if (!$customer) {
+        // Soft fallback ONLY for SaaS admin if tenant_id context was switched
+        if (!$customer && (($user['user_type'] ?? '') === 'saas' || ($user['role'] ?? '') === 'saas_admin')) {
             $stmt = $db->prepare("SELECT * FROM customers WHERE customer_id = :id OR customer_code = :id LIMIT 1");
             $stmt->execute(['id' => $id]);
             $customer = $stmt->fetch();
@@ -497,13 +497,49 @@ class CustomersController {
             $address = trim($data['address'] ?? $data['installationAddress'] ?? $data['installation_address'] ?? 'Dhaka, Bangladesh');
             $username = trim($data['username'] ?? '');
             $password = trim($data['password'] ?? 'pass123');
-            $packageId = $data['packageId'] ?? $data['access_profile_id'] ?? 1;
-            $deviceId = $data['serverId'] ?? $data['network_device_id'] ?? 1;
+            $packageId = $data['packageId'] ?? $data['access_profile_id'] ?? null;
+            $deviceId = $data['serverId'] ?? $data['network_device_id'] ?? null;
 
             if (empty($fullName) || empty($phone) || empty($username)) {
                 $db->rollBack();
                 Response::error('Full name, phone, and PPPoE username are required', 400);
                 return;
+            }
+
+            if (empty($deviceId) || empty($packageId)) {
+                $db->rollBack();
+                Response::error('Network router and internet package plan are required', 400);
+                return;
+            }
+
+            // Strictly validate that the router device belongs to this tenant
+            if (($user['role'] ?? '') !== 'saas_admin' || $tenantId !== null) {
+                $devCheck = $db->prepare("SELECT network_device_id FROM network_devices WHERE network_device_id = :did AND tenant_id = :tid LIMIT 1");
+                $devCheck->execute(['did' => $deviceId, 'tid' => $tenantId]);
+                if (!$devCheck->fetch()) {
+                    $db->rollBack();
+                    Response::error('Invalid network server: The selected router does not belong to your network.', 403);
+                    return;
+                }
+
+                $pkgCheck = $db->prepare("SELECT access_profile_id FROM access_profiles WHERE access_profile_id = :pid AND tenant_id = :tid LIMIT 1");
+                $pkgCheck->execute(['pid' => $packageId, 'tid' => $tenantId]);
+                if (!$pkgCheck->fetch()) {
+                    $db->rollBack();
+                    Response::error('Invalid package plan: The selected package does not belong to your network.', 403);
+                    return;
+                }
+
+                $ownerId = $data['ownerId'] ?? $user['user_id'];
+                if (!empty($ownerId) && (string)$ownerId !== (string)$user['user_id']) {
+                    $ownerCheck = $db->prepare("SELECT user_id FROM users WHERE user_id = :oid AND tenant_id = :tid LIMIT 1");
+                    $ownerCheck->execute(['oid' => $ownerId, 'tid' => $tenantId]);
+                    if (!$ownerCheck->fetch()) {
+                        $db->rollBack();
+                        Response::error('Invalid reseller: The selected user does not belong to your network.', 403);
+                        return;
+                    }
+                }
             }
 
             $rawCustCode = preg_replace('/\D/', '', (string)($data['customerCode'] ?? ''));
@@ -943,14 +979,28 @@ class CustomersController {
         Response::json($rows ?: []);
     }
 
+    private static function getRealCustomerId(PDO $db, string $id, ?string $tenantId, bool $isSaas): ?string {
+        if ($isSaas || $tenantId === null) {
+            $stmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
+            $stmt->execute(['id' => $id, 'code' => $id]);
+        } else {
+            $stmt = $db->prepare("SELECT customer_id FROM customers WHERE (customer_id = :id OR customer_code = :code) AND tenant_id = :tid LIMIT 1");
+            $stmt->execute(['id' => $id, 'code' => $id, 'tid' => $tenantId]);
+        }
+        $val = $stmt->fetchColumn();
+        return $val !== false ? (string)$val : null;
+    }
+
     public static function macStatus(string $id): void {
-        AuthMiddleware::requireAuth();
+        $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $cidStmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
-        $cidStmt->execute(['id' => $id, 'code' => $id]);
-        $realCid = $cidStmt->fetchColumn() ?: $id;
+        $realCid = self::getRealCustomerId($db, $id, $tenantId, ($user['role'] ?? '') === 'saas_admin');
+        if (!$realCid) {
+            Response::error('Customer not found', 404);
+            return;
+        }
 
         require_once __DIR__ . '/../lib/MikrotikSyncService.php';
         $status = MikrotikSyncService::getMacBindingStatus($db, $realCid, $tenantId);
@@ -962,13 +1012,15 @@ class CustomersController {
     }
 
     public static function syncSession(string $id): void {
-        AuthMiddleware::requireAuth();
+        $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $cidStmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
-        $cidStmt->execute(['id' => $id, 'code' => $id]);
-        $realCid = $cidStmt->fetchColumn() ?: $id;
+        $realCid = self::getRealCustomerId($db, $id, $tenantId, ($user['role'] ?? '') === 'saas_admin');
+        if (!$realCid) {
+            Response::error('Customer not found', 404);
+            return;
+        }
 
         $allowProvision = !empty($_GET['provision']);
 
@@ -979,13 +1031,15 @@ class CustomersController {
     }
 
     public static function provisionSecret(string $id): void {
-        AuthMiddleware::requireAuth();
+        $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $cidStmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
-        $cidStmt->execute(['id' => $id, 'code' => $id]);
-        $realCid = $cidStmt->fetchColumn() ?: $id;
+        $realCid = self::getRealCustomerId($db, $id, $tenantId, ($user['role'] ?? '') === 'saas_admin');
+        if (!$realCid) {
+            Response::error('Customer not found', 404);
+            return;
+        }
 
         require_once __DIR__ . '/../lib/MikrotikSyncService.php';
         $res = MikrotikSyncService::provisionSecret($db, $realCid, $tenantId);
@@ -994,13 +1048,15 @@ class CustomersController {
     }
 
     public static function disconnectSession(string $id): void {
-        AuthMiddleware::requireAuth();
+        $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $cidStmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
-        $cidStmt->execute(['id' => $id, 'code' => $id]);
-        $realCid = $cidStmt->fetchColumn() ?: $id;
+        $realCid = self::getRealCustomerId($db, $id, $tenantId, ($user['role'] ?? '') === 'saas_admin');
+        if (!$realCid) {
+            Response::error('Customer not found', 404);
+            return;
+        }
 
         require_once __DIR__ . '/../lib/MikrotikSyncService.php';
         $res = MikrotikSyncService::disconnect($db, $realCid, $tenantId);
@@ -1009,13 +1065,15 @@ class CustomersController {
     }
 
     public static function toggleSuspend(string $id): void {
-        AuthMiddleware::requireAuth();
+        $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $cidStmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
-        $cidStmt->execute(['id' => $id, 'code' => $id]);
-        $realCid = $cidStmt->fetchColumn() ?: $id;
+        $realCid = self::getRealCustomerId($db, $id, $tenantId, ($user['role'] ?? '') === 'saas_admin');
+        if (!$realCid) {
+            Response::error('Customer not found', 404);
+            return;
+        }
 
         require_once __DIR__ . '/../lib/MikrotikSyncService.php';
         $res = MikrotikSyncService::toggleSuspend($db, $realCid, $tenantId);
@@ -1024,13 +1082,15 @@ class CustomersController {
     }
 
     public static function bindMac(string $id): void {
-        AuthMiddleware::requireAuth();
+        $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $cidStmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
-        $cidStmt->execute(['id' => $id, 'code' => $id]);
-        $realCid = $cidStmt->fetchColumn() ?: $id;
+        $realCid = self::getRealCustomerId($db, $id, $tenantId, ($user['role'] ?? '') === 'saas_admin');
+        if (!$realCid) {
+            Response::error('Customer not found', 404);
+            return;
+        }
 
         $body = json_decode(file_get_contents('php://input'), true) ?: [];
         $mac = !empty($body['mac']) ? trim($body['mac']) : null;
@@ -1063,13 +1123,15 @@ class CustomersController {
     }
 
     public static function ping(string $id): void {
-        AuthMiddleware::requireAuth();
+        $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $cidStmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
-        $cidStmt->execute(['id' => $id, 'code' => $id]);
-        $realCid = $cidStmt->fetchColumn() ?: $id;
+        $realCid = self::getRealCustomerId($db, $id, $tenantId, ($user['role'] ?? '') === 'saas_admin');
+        if (!$realCid) {
+            Response::error('Customer not found', 404);
+            return;
+        }
 
         require_once __DIR__ . '/../lib/MikrotikSyncService.php';
         $res = MikrotikSyncService::pingCustomer($db, $realCid, $tenantId);

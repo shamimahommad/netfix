@@ -7,9 +7,13 @@
   RewriteEngine On
   RewriteBase /
 
-  # 1. Forward all API calls to Core PHP REST API router
-  RewriteCond %{REQUEST_URI} ^/api [NC]
-  RewriteRule ^api/(.*)$ backend/index.php [QSA,L]
+  # Pass Authorization header to PHP in FastCGI / Apache environments
+  SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+  # 1. Forward all API calls & payment callbacks to Core PHP REST API router
+  RewriteCond %{REQUEST_URI} ^/(api|public/topup|payments/callback|payments/simulator) [NC]
+  RewriteRule ^(.*)$ backend/index.php [QSA,L]
 
   # 2. Allow direct access to existing static files / assets
   RewriteCond %{REQUEST_FILENAME} -f [OR]

@@ -16,8 +16,17 @@ class NetworkController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $where = ["tenant_id = :tid"];
-        $params = ['tid' => $tenantId];
+        $where = [];
+        $params = [];
+
+        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+            if ($tenantId === null) {
+                Response::json(['success' => true, 'data' => []]);
+                return;
+            }
+            $where[] = "tenant_id = :tid";
+            $params['tid'] = $tenantId;
+        }
 
         if (!empty($_GET['type'])) {
             $type = $_GET['type'];
@@ -28,9 +37,9 @@ class NetworkController {
             }
         }
 
-        $whereSql = implode(' AND ', $where);
+        $whereSql = !empty($where) ? "WHERE " . implode(' AND ', $where) : "";
 
-        $stmt = $db->prepare("SELECT * FROM network_devices WHERE {$whereSql} ORDER BY network_device_id DESC");
+        $stmt = $db->prepare("SELECT * FROM network_devices {$whereSql} ORDER BY network_device_id DESC");
         $stmt->execute($params);
         $rows = $stmt->fetchAll();
 
@@ -76,8 +85,13 @@ class NetworkController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) AND tenant_id = :tid LIMIT 1");
-        $stmt->execute(['id' => $id, 'code' => $id, 'tid' => $tenantId]);
+        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) AND tenant_id = :tid LIMIT 1");
+            $stmt->execute(['id' => $id, 'code' => $id, 'tid' => $tenantId]);
+        } else {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id OR device_code = :code LIMIT 1");
+            $stmt->execute(['id' => $id, 'code' => $id]);
+        }
         $r = $stmt->fetch();
 
         if (!$r) {
@@ -124,21 +138,32 @@ class NetworkController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
+        $where = [];
+        $params = [];
+
+        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+            if ($tenantId === null) {
+                Response::json(['success' => true, 'data' => []]);
+                return;
+            }
+            $where[] = "tenant_id = :tid";
+            $params['tid'] = $tenantId;
+        }
+
         $type = !empty($_GET['type']) ? strtolower(trim($_GET['type'])) : 'router';
-        $sql = "SELECT network_device_id as id, device_name as name, device_type as type, vendor, status 
-            FROM network_devices WHERE tenant_id = :tid";
-        $params = ['tid' => $tenantId];
 
         if ($type === 'router' || $type === 'mikrotik') {
-            $sql .= " AND (device_type = 'router' OR vendor = 'mikrotik') AND device_type != 'olt'";
+            $where[] = "(device_type = 'router' OR vendor = 'mikrotik') AND device_type != 'olt'";
         } elseif ($type === 'olt') {
-            $sql .= " AND (device_type = 'olt' OR vendor = 'vsol' OR vendor = 'huawei' OR vendor = 'zte')";
+            $where[] = "(device_type = 'olt' OR vendor = 'vsol' OR vendor = 'huawei' OR vendor = 'zte')";
         } elseif ($type !== 'all') {
-            $sql .= " AND device_type = :dtype";
+            $where[] = "device_type = :dtype";
             $params['dtype'] = $type;
         }
 
-        $sql .= " ORDER BY device_name ASC";
+        $whereSql = !empty($where) ? "WHERE " . implode(' AND ', $where) : "";
+        $sql = "SELECT network_device_id as id, device_name as name, device_type as type, vendor, status 
+            FROM network_devices {$whereSql} ORDER BY device_name ASC";
         $stmt = $db->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll();
@@ -473,12 +498,11 @@ class NetworkController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) AND tenant_id = :tid LIMIT 1");
-        $stmt->execute(['id' => $deviceId, 'code' => $deviceId, 'tid' => $tenantId]);
-        $device = $stmt->fetch();
-
-        if (!$device) {
-            // Fallback without tenant_id
+        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) AND tenant_id = :tid LIMIT 1");
+            $stmt->execute(['id' => $deviceId, 'code' => $deviceId, 'tid' => $tenantId]);
+            $device = $stmt->fetch();
+        } else {
             $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id OR device_code = :code LIMIT 1");
             $stmt->execute(['id' => $deviceId, 'code' => $deviceId]);
             $device = $stmt->fetch();
@@ -503,11 +527,11 @@ class NetworkController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) AND tenant_id = :tid LIMIT 1");
-        $stmt->execute(['id' => $deviceId, 'code' => $deviceId, 'tid' => $tenantId]);
-        $device = $stmt->fetch();
-
-        if (!$device) {
+        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) AND tenant_id = :tid LIMIT 1");
+            $stmt->execute(['id' => $deviceId, 'code' => $deviceId, 'tid' => $tenantId]);
+            $device = $stmt->fetch();
+        } else {
             $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id OR device_code = :code LIMIT 1");
             $stmt->execute(['id' => $deviceId, 'code' => $deviceId]);
             $device = $stmt->fetch();
@@ -526,8 +550,8 @@ class NetworkController {
             $cStmt = $db->prepare("SELECT c.customer_id, c.customer_code, c.full_name, na.username, na.mac_address 
                 FROM customer_network_accounts na
                 JOIN customers c ON c.customer_id = na.customer_id
-                WHERE (na.tenant_id = :tid OR na.tenant_id = :ctid)");
-            $cStmt->execute(['tid' => $tenantId, 'ctid' => $device['tenant_id']]);
+                WHERE na.tenant_id = :tid");
+            $cStmt->execute(['tid' => $device['tenant_id']]);
             $custRows = $cStmt->fetchAll();
             foreach ($custRows as $cr) {
                 if (!empty($cr['mac_address'])) {
@@ -542,8 +566,8 @@ class NetworkController {
         } catch (\Throwable $e) {}
 
         // Query fast local DB storage
-        $sql = "SELECT * FROM olt_onus WHERE network_device_id = :did AND (tenant_id = :tid OR tenant_id = :ctid)";
-        $params = ['did' => $realDeviceId, 'tid' => $tenantId, 'ctid' => $device['tenant_id']];
+        $sql = "SELECT * FROM olt_onus WHERE network_device_id = :did AND tenant_id = :tid";
+        $params = ['did' => $realDeviceId, 'tid' => $device['tenant_id']];
         if ($pon) {
             $sql .= " AND pon_port = :pon";
             $params['pon'] = $pon;
@@ -613,11 +637,11 @@ class NetworkController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) AND tenant_id = :tid LIMIT 1");
-        $stmt->execute(['id' => $deviceId, 'code' => $deviceId, 'tid' => $tenantId]);
-        $device = $stmt->fetch();
-
-        if (!$device) {
+        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) AND tenant_id = :tid LIMIT 1");
+            $stmt->execute(['id' => $deviceId, 'code' => $deviceId, 'tid' => $tenantId]);
+            $device = $stmt->fetch();
+        } else {
             $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id OR device_code = :code LIMIT 1");
             $stmt->execute(['id' => $deviceId, 'code' => $deviceId]);
             $device = $stmt->fetch();
@@ -658,11 +682,10 @@ class NetworkController {
             // Ignore if column doesn't allow null
         }
 
-        $stmt = $db->prepare("DELETE FROM network_devices WHERE network_device_id = :id AND tenant_id = :tid");
-        $stmt->execute(['id' => $id, 'tid' => $tenantId]);
-
-        // Fallback: If not deleted because of tenant mismatch or superadmin context, delete by id
-        if ($stmt->rowCount() === 0) {
+        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+            $stmt = $db->prepare("DELETE FROM network_devices WHERE network_device_id = :id AND tenant_id = :tid");
+            $stmt->execute(['id' => $id, 'tid' => $tenantId]);
+        } else {
             $stmt = $db->prepare("DELETE FROM network_devices WHERE network_device_id = :id");
             $stmt->execute(['id' => $id]);
         }
@@ -676,15 +699,14 @@ class NetworkController {
         $db = Database::getConnection();
 
         // 1. Get all routers for this tenant
-        $rStmt = $db->prepare("SELECT network_device_id, device_name, management_ip, management_port, status 
-                               FROM network_devices 
-                               WHERE tenant_id = :tid AND device_type = 'router' 
-                               ORDER BY network_device_id ASC");
-        $rStmt->execute(['tid' => $tenantId]);
-        $routers = $rStmt->fetchAll() ?: [];
-
-        // If no routers for this tenant, fallback to all routers if saas admin
-        if (empty($routers) && $user['role'] === 'saas_admin') {
+        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+            $rStmt = $db->prepare("SELECT network_device_id, device_name, management_ip, management_port, status 
+                                   FROM network_devices 
+                                   WHERE tenant_id = :tid AND device_type = 'router' 
+                                   ORDER BY network_device_id ASC");
+            $rStmt->execute(['tid' => $tenantId]);
+            $routers = $rStmt->fetchAll() ?: [];
+        } else {
             $routers = $db->query("SELECT network_device_id, device_name, management_ip, management_port, status FROM network_devices WHERE device_type = 'router' ORDER BY network_device_id ASC")->fetchAll() ?: [];
         }
 
@@ -719,8 +741,13 @@ class NetworkController {
         }
 
         // Fetch full router details including credentials
-        $dStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id LIMIT 1");
-        $dStmt->execute(['id' => $targetRouter['network_device_id']]);
+        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+            $dStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id AND tenant_id = :tid LIMIT 1");
+            $dStmt->execute(['id' => $targetRouter['network_device_id'], 'tid' => $tenantId]);
+        } else {
+            $dStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id LIMIT 1");
+            $dStmt->execute(['id' => $targetRouter['network_device_id']]);
+        }
         $routerFull = $dStmt->fetch();
 
         if (!$routerFull) {

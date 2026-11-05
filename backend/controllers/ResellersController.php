@@ -14,8 +14,17 @@ class ResellersController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $where = ["u.tenant_id = :tid", "u.role IN ('reseller', 'sub_reseller', 'agent')"];
-        $params = ['tid' => $tenantId];
+        $where = ["u.role IN ('reseller', 'sub_reseller', 'agent')"];
+        $params = [];
+
+        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+            if ($tenantId === null) {
+                Response::json(['data' => []]);
+                return;
+            }
+            $where[] = "u.tenant_id = :tid";
+            $params['tid'] = $tenantId;
+        }
 
         if (!empty($_GET['role'])) {
             $where[] = "u.role = :role";

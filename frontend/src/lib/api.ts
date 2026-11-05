@@ -26,16 +26,24 @@ export const api: AxiosInstance = axios.create({
 // Request interceptor to add tenant context and auth token
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    // Get tenant_id from store
-    const tenantId = useTenantStore.getState().getTenantId();
+    const authUser = useAuthStore.getState().user;
+    const isSaas = authUser?.user_type === 'saas' || authUser?.role_code === 'saas_admin';
     const isPublicTopup = (config.url || '').includes('public/topup');
 
-    // Add tenant_id as query parameter for SaaS admin context switching (skip for public topup – form sends its own tenant_id)
-    if (tenantId && !isPublicTopup) {
-      if (config.params) {
-        config.params.tenant_id = tenantId;
-      } else {
-        config.params = { tenant_id: tenantId };
+    // SaaS Super Admin: allow context switching via tenantStore
+    if (isSaas) {
+      const tenantId = useTenantStore.getState().getTenantId();
+      if (tenantId && !isPublicTopup) {
+        config.params = { ...(config.params || {}), tenant_id: tenantId };
+      }
+    } else if (authUser?.tenant_id) {
+      // ISP / Tenant user: strictly attach their genuine tenant_id
+      if (config.headers) {
+        config.headers['X-Tenant-Id'] = authUser.tenant_id;
+      }
+      // Never allow an unintended query param override for tenant users
+      if (config.params && config.params.tenant_id && !isPublicTopup) {
+        delete config.params.tenant_id;
       }
     }
 

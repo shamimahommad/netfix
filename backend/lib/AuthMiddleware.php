@@ -91,34 +91,52 @@ class AuthMiddleware {
     public static function getTenantId(): ?string {
         $user = self::getUser();
         
-        // 1. Query parameter override (for SaaS Super Admin context switching)
-        if (isset($_GET['tenant_id']) && !empty($_GET['tenant_id'])) {
-            if (!$user || $user['role'] === 'saas_admin') {
+        // 1. Strict Tenant User Isolation:
+        // If an authenticated user belongs to an ISP/tenant (role is NOT saas_admin),
+        // their tenant_id is STRICTLY derived from their database record.
+        // They can NEVER switch to, view, or modify another tenant's resources!
+        if ($user && $user['role'] !== 'saas_admin') {
+            if (!empty($user['tenant_id'])) {
+                return (string)$user['tenant_id'];
+            }
+            return null;
+        }
+
+        // 2. SaaS Super Admin context switching:
+        // SaaS Super Admin can view/manage specific tenants via query param or header
+        if ($user && $user['role'] === 'saas_admin') {
+            if (isset($_GET['tenant_id']) && !empty($_GET['tenant_id']) && $_GET['tenant_id'] !== 'all') {
                 return (string)$_GET['tenant_id'];
             }
+            $headers = function_exists('getallheaders') ? getallheaders() : [];
+            $headerTid = $headers['X-Tenant-Id'] ?? $headers['x-tenant-id'] ?? $_SERVER['HTTP_X_TENANT_ID'] ?? null;
+            if (!empty($headerTid) && $headerTid !== 'all') {
+                return (string)$headerTid;
+            }
+            return null; // Global / all tenants in SaaS view
         }
 
-        // 2. User's associated tenant_id
-        if ($user && !empty($user['tenant_id'])) {
-            return (string)$user['tenant_id'];
+        // 3. Unauthenticated public requests (e.g. public topup / balance lookup):
+        // Allow explicit tenant_id from query ONLY if provided
+        if (isset($_GET['tenant_id']) && !empty($_GET['tenant_id']) && $_GET['tenant_id'] !== 'all') {
+            return (string)$_GET['tenant_id'];
         }
 
-        // 3. Header fallback
-        $headers = function_exists('getallheaders') ? getallheaders() : [];
-        if (!empty($headers['X-Tenant-Id'])) {
-            return (string)$headers['X-Tenant-Id'];
-        }
-        if (!empty($headers['x-tenant-id'])) {
-            return (string)$headers['x-tenant-id'];
-        }
-
-        // 4. Default tenant fallback
-        return '2';
+        return null;
     }
 
     private static function getBearerToken(): ?string {
         $headers = function_exists('getallheaders') ? getallheaders() : [];
-        $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
+        if (empty($headers) && function_exists('apache_request_headers')) {
+            $headers = apache_request_headers();
+        }
+
+        $authHeader = $headers['Authorization'] 
+            ?? $headers['authorization'] 
+            ?? $_SERVER['HTTP_AUTHORIZATION'] 
+            ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] 
+            ?? $_SERVER['AUTHORIZATION'] 
+            ?? '';
 
         if (!empty($authHeader) && preg_match('/Bearer\s+(\S+)/i', $authHeader, $matches)) {
             return $matches[1];
@@ -126,6 +144,10 @@ class AuthMiddleware {
 
         if (!empty($_COOKIE['access_token'])) {
             return $_COOKIE['access_token'];
+        }
+
+        if (!empty($_GET['access_token'])) {
+            return $_GET['access_token'];
         }
 
         return null;

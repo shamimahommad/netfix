@@ -27,14 +27,20 @@ if (!$routerId) {
     exit;
 }
 
+$tenantId = AuthMiddleware::getTenantId();
 $db = Database::getConnection();
 
 // Fetch router from network_devices or fallback to mikrotik_routers
-$stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id LIMIT 1");
-$stmt->execute(['id' => $routerId]);
+if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+    $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id AND tenant_id = :tid LIMIT 1");
+    $stmt->execute(['id' => $routerId, 'tid' => $tenantId]);
+} else {
+    $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id LIMIT 1");
+    $stmt->execute(['id' => $routerId]);
+}
 $router = $stmt->fetch(PDO::FETCH_ASSOC);
 
-if (!$router) {
+if (!$router && ($user['role'] === 'saas_admin' || $tenantId === null)) {
     $stmt2 = $db->prepare("SELECT * FROM mikrotik_routers WHERE id = :id LIMIT 1");
     $stmt2->execute(['id' => $routerId]);
     $router = $stmt2->fetch(PDO::FETCH_ASSOC);

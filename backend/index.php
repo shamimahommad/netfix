@@ -260,10 +260,10 @@ if ($method === 'POST' && $uri === '/payments/bkash/callback') {
 if (preg_match('#^/payments/callback/([^/]+)$#', $uri, $m)) {
     PaymentGatewayController::handleGatewayCallback($m[1]);
 }
-if ($method === 'POST' && $uri === '/payments/initiate-balance-topup') {
+if ($method === 'POST' && ($uri === '/payments/initiate-balance-topup' || $uri === '/initiate-balance-topup')) {
     PaymentGatewayController::initiateBalanceTopup();
 }
-if ($method === 'POST' && $uri === '/payments/confirm-balance-topup') {
+if ($method === 'POST' && ($uri === '/payments/confirm-balance-topup' || $uri === '/confirm-balance-topup')) {
     PaymentGatewayController::confirmBalanceTopup();
 }
 if ($method === 'POST' && $uri === '/payments/simulator/confirm') {
@@ -532,6 +532,9 @@ if ($method === 'POST' && $uri === '/customer/tickets') {
 // ---------------------------------------------------------------------
 // USERS & SEARCH & TASK LOGS
 // ---------------------------------------------------------------------
+if ($method === 'GET' && $uri === '/users') {
+    UsersController::index();
+}
 if ($method === 'GET' && $uri === '/users/received-by-options') {
     UsersController::receivedByOptions();
 }

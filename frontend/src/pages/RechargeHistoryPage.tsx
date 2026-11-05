@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Wallet, ArrowDown, ArrowUp, Search, Download } from 'lucide-react';
 import { resellerService, PopOption } from '@/services/reseller.service';
 import { paymentsService } from '@/services/payments.service';
+import { usersService } from '@/services/users.service';
 import { useToastContext } from '@/contexts/ToastContext';
 import { formatInvoiceIdDisplay } from '@/lib/formatInvoiceId';
 import { PageHeader, MetricCard } from '@/components/common';
@@ -57,13 +58,13 @@ export default function RechargeHistoryPage() {
 
   const loadInitiators = useCallback(async () => {
     try {
-      const res = await paymentsService.getReceivedByOptions();
-      const list = (res.data ?? []).map((u: any) => ({
-        userId: String(u.user_id),
-        name: u.name || `${u.first_name || ''} ${u.last_name || ''}`.trim(),
+      const list = await usersService.getReceivedByOptions();
+      const formatted = (list ?? []).map((u: any) => ({
+        userId: String(u.userId || u.user_id),
+        name: u.fullName || u.name || `${u.first_name || ''} ${u.last_name || ''}`.trim(),
         username: u.username || '',
       }));
-      setInitiatorOptions(list);
+      setInitiatorOptions(formatted);
     } catch {
       setInitiatorOptions([]);
     }
