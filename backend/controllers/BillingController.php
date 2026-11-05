@@ -403,4 +403,174 @@ class BillingController {
             ],
         ]);
     }
+
+    /**
+     * GET /billing/customers/{customerId}/invoices
+     * GET /customers/{customerId}/invoices
+     */
+    public static function customerInvoices(string $customerId): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        // 1. Resolve Customer
+        $stmtCust = $db->prepare("SELECT customer_id, customer_code, full_name, phone, tenant_id FROM customers WHERE (customer_id = :cid OR customer_code = :ccode) LIMIT 1");
+        $stmtCust->execute(['cid' => is_numeric($customerId) ? (int)$customerId : 0, 'ccode' => $customerId]);
+        $customer = $stmtCust->fetch();
+
+        $resolvedCid = $customer ? (int)$customer['customer_id'] : (is_numeric($customerId) ? (int)$customerId : 0);
+
+        // 2. Query invoices
+        $where = ["(i.customer_id = :cid" . ($customer ? " OR c.customer_code = :ccode" : "") . ")"];
+        $params = ['cid' => $resolvedCid];
+        if ($customer) {
+            $params['ccode'] = $customer['customer_code'];
+        }
+
+        if (!empty($_GET['status']) && $_GET['status'] !== 'all') {
+            $where[] = "i.status = :status";
+            $params['status'] = strtolower(trim($_GET['status']));
+        }
+
+        $whereSql = implode(' AND ', $where);
+
+        $query = "SELECT 
+            i.*,
+            c.customer_code,
+            c.full_name as customer_name,
+            c.phone as customer_phone,
+            ap.profile_name as package_name,
+            u.first_name as collected_by_name,
+            u.last_name as collected_by_last_name
+            FROM invoices i
+            LEFT JOIN customers c ON c.customer_id = i.customer_id
+            LEFT JOIN customer_services cs ON cs.customer_service_id = i.customer_service_id
+            LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
+            LEFT JOIN users u ON u.user_id = i.collected_by
+            WHERE {$whereSql}
+            ORDER BY i.invoice_id DESC";
+
+        $stmt = $db->prepare($query);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+
+        // Determine last paid invoice for cancel/return action permission
+        $lastPaidInvoiceId = null;
+        foreach ($rows as $r) {
+            if (strtolower($r['status'] ?? '') === 'paid') {
+                $lastPaidInvoiceId = (string)$r['invoice_id'];
+                break;
+            }
+        }
+
+        $items = array_map(function($r) use ($lastPaidInvoiceId) {
+            $collector = trim(($r['collected_by_name'] ?? '') . ' ' . ($r['collected_by_last_name'] ?? ''));
+            $invId = (string)$r['invoice_id'];
+            return [
+                'invoiceId' => $invId,
+                'invoice_id' => $invId,
+                'invoiceNumber' => $r['invoice_number'],
+                'invoice_number' => $r['invoice_number'],
+                'customerId' => (string)$r['customer_id'],
+                'customer_id' => (string)$r['customer_id'],
+                'customerName' => $r['customer_name'] ?? '',
+                'customer_name' => $r['customer_name'] ?? '',
+                'customerCode' => $r['customer_code'] ?? '',
+                'customer_code' => $r['customer_code'] ?? '',
+                'customerPhone' => $r['customer_phone'] ?? '',
+                'packageName' => $r['package_name'] ?? '',
+                'totalAmount' => (float)$r['total_amount'],
+                'total_amount' => (float)$r['total_amount'],
+                'paidAmount' => (float)$r['paid_amount'],
+                'paid_amount' => (float)$r['paid_amount'],
+                'balanceDue' => (float)($r['balance_due'] ?? ($r['total_amount'] - $r['paid_amount'])),
+                'balance_due' => (float)($r['balance_due'] ?? ($r['total_amount'] - $r['paid_amount'])),
+                'status' => $r['status'],
+                'paymentMethod' => $r['payment_method'] ?? 'Cash',
+                'payment_method' => $r['payment_method'] ?? 'Cash',
+                'invoiceDate' => $r['invoice_date'] ?? $r['created_at'],
+                'invoice_date' => $r['invoice_date'] ?? $r['created_at'],
+                'dueDate' => $r['due_date'] ?? null,
+                'due_date' => $r['due_date'] ?? null,
+                'notes' => $r['notes'] ?? '',
+                'renewMode' => $r['renew_mode'] ?? 'REGULAR',
+                'renew_mode' => $r['renew_mode'] ?? 'REGULAR',
+                'doneBy' => !empty($collector) ? $collector : ($r['renew_mode'] === 'RESELLER' ? 'Reseller' : 'Admin'),
+                'isLastPaidInvoice' => ($invId === $lastPaidInvoiceId),
+                'createdAt' => $r['created_at'],
+                'created_at' => $r['created_at'],
+            ];
+        }, $rows);
+
+        Response::json([
+            'success' => true,
+            'customer' => $customer ? [
+                'customer_id' => (string)$customer['customer_id'],
+                'customer_code' => $customer['customer_code'],
+                'full_name' => $customer['full_name'],
+                'phone' => $customer['phone'],
+            ] : null,
+            'data' => $items,
+        ]);
+    }
+
+    /**
+     * POST /billing/invoices/{id}/cancel
+     */
+    public static function cancelInvoice(string $id): void {
+        $user = AuthMiddleware::requireAuth();
+        $db = Database::getConnection();
+
+        $stmt = $db->prepare("SELECT * FROM invoices WHERE invoice_id = :id LIMIT 1");
+        $stmt->execute(['id' => $id]);
+        $inv = $stmt->fetch();
+
+        if (!$inv) {
+            Response::error('Invoice not found', 404);
+        }
+
+        $stmtUp = $db->prepare("UPDATE invoices SET status = 'cancelled', notes = CONCAT(COALESCE(notes, ''), ' [Cancelled on " . date('Y-m-d H:i') . "]') WHERE invoice_id = :id");
+        $stmtUp->execute(['id' => $id]);
+
+        Response::json([
+            'success' => true,
+            'message' => 'Invoice cancelled successfully',
+            'data' => [
+                'invoiceId' => (string)$inv['invoice_id'],
+                'status' => 'cancelled',
+            ],
+        ]);
+    }
+
+    /**
+     * POST /billing/invoices/{id}/return
+     */
+    public static function returnInvoice(string $id): void {
+        $user = AuthMiddleware::requireAuth();
+        $db = Database::getConnection();
+
+        $stmt = $db->prepare("SELECT * FROM invoices WHERE invoice_id = :id LIMIT 1");
+        $stmt->execute(['id' => $id]);
+        $inv = $stmt->fetch();
+
+        if (!$inv) {
+            Response::error('Invoice not found', 404);
+        }
+
+        $returnAmount = (float)$inv['paid_amount'];
+
+        $stmtUp = $db->prepare("UPDATE invoices SET status = 'cancelled', paid_amount = 0, balance_due = total_amount, notes = CONCAT(COALESCE(notes, ''), ' [Returned ৳" . $returnAmount . " on " . date('Y-m-d H:i') . "]') WHERE invoice_id = :id");
+        $stmtUp->execute(['id' => $id]);
+
+        Response::json([
+            'success' => true,
+            'message' => 'Invoice return processed successfully',
+            'returnAmount' => $returnAmount,
+            'data' => [
+                'invoiceId' => (string)$inv['invoice_id'],
+                'status' => 'cancelled',
+                'returnAmount' => $returnAmount,
+            ],
+        ]);
+    }
 }

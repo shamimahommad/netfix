@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { LoadingProvider } from './contexts/LoadingContext';
@@ -112,6 +112,21 @@ function AppContent() {
     };
   }, []);
 
+  function RedirectCustomerInvoices() {
+    const { id } = useParams<{ id: string }>();
+    return <Navigate to={`/dashboard/customers/view/${id}/invoices`} replace />;
+  }
+
+  function RedirectCustomerView() {
+    const { id } = useParams<{ id: string }>();
+    return <Navigate to={`/dashboard/customers/view/${id}`} replace />;
+  }
+
+  function RedirectCustomerEdit() {
+    const { id } = useParams<{ id: string }>();
+    return <Navigate to={`/dashboard/customers/edit/${id}`} replace />;
+  }
+
   return (
     <BrowserRouter>
       <div className="h-screen flex flex-col overflow-hidden">
@@ -138,6 +153,10 @@ function AppContent() {
             <Route path="/payments/simulator" element={<MockGatewayCheckoutPage />} />
             <Route path="/topup" element={<PublicTopupPage />} />
             <Route path="/public/topup" element={<PublicTopupPage />} />
+            <Route path="/customers/view/:id/invoices" element={<RedirectCustomerInvoices />} />
+            <Route path="/customers/view/:id" element={<RedirectCustomerView />} />
+            <Route path="/customers/edit/:id" element={<RedirectCustomerEdit />} />
+            <Route path="/customers" element={<Navigate to="/dashboard/customers/all" replace />} />
             <Route path="/" element={<Navigate to="/login" replace />} />
 
             {/* Customer portal: layout with sidebar + nested pages */}

@@ -226,6 +226,15 @@ if ($method === 'POST' && $uri === '/billing/change-package') {
 if ($method === 'GET' && $uri === '/billing/invoices') {
     BillingController::invoices();
 }
+if ($method === 'GET' && (preg_match('#^/billing/customers/([^/]+)/invoices$#', $uri, $m) || preg_match('#^/customers/([^/]+)/invoices$#', $uri, $m))) {
+    BillingController::customerInvoices($m[1]);
+}
+if ($method === 'POST' && preg_match('#^/billing/invoices/([^/]+)/cancel$#', $uri, $m)) {
+    BillingController::cancelInvoice($m[1]);
+}
+if ($method === 'POST' && preg_match('#^/billing/invoices/([^/]+)/return$#', $uri, $m)) {
+    BillingController::returnInvoice($m[1]);
+}
 if ($method === 'GET' && preg_match('#^/billing/invoices/([^/]+)$#', $uri, $m)) {
     BillingController::invoiceDetail($m[1]);
 }

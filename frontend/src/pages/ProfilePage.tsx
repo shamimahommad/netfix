@@ -174,7 +174,7 @@ export default function ProfilePage() {
       {/* Profile Card */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden">
         {/* Banner with Avatar */}
-        <div className="px-6 py-8 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex items-center justify-between gap-5">
+        <div className="px-6 py-8 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
           <div className="flex items-center gap-5 min-w-0">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white text-xl font-bold shadow-md shrink-0">
               {initials}
@@ -201,12 +201,37 @@ export default function ProfilePage() {
               </div>
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={handleOpenEditModal}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/20 text-xs sm:text-sm font-semibold transition-all shrink-0 self-start sm:self-auto"
+          >
+            <Edit className="w-4 h-4" /> Edit Name
+          </button>
         </div>
 
         {/* Info Rows */}
         <div className="p-6 divide-y divide-slate-100 dark:divide-slate-800">
+          <InfoRow 
+            label="Full Name" 
+            value={
+              <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-slate-100">
+                <span>{fullName}</span>
+                <button
+                  type="button"
+                  onClick={handleOpenEditModal}
+                  className="text-xs text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-1 font-normal"
+                >
+                  (Edit)
+                </button>
+              </div>
+            } 
+          />
           <InfoRow label="User ID" value={`#${user.user_id}`} />
           {username && <InfoRow label="Username" value={username} />}
+          <InfoRow label="Email" value={user.email || '—'} />
+          <InfoRow label="Phone" value={(user as any).phone || me?.phone || '—'} />
           <InfoRow label="Role Assigned" value={roleLabel} />
           <InfoRow label="Account Category" value={userTypeLabel} />
           {(user.user_type === 'isp' || user.user_type === 'tenant') && balance != null && (
