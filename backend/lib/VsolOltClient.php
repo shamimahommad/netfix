@@ -95,7 +95,8 @@ class VsolOltClient {
         curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, $this->timeout);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 4);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 6);
+        curl_setopt($ch, CURLOPT_COOKIEJAR, $this->cookieFile);
         curl_setopt($ch, CURLOPT_COOKIEFILE, $this->cookieFile);
 
         if ($isPost) {
@@ -168,28 +169,82 @@ class VsolOltClient {
         $html = $this->request('poninfo.html');
         if (!$html) return [];
 
-        $ports = [];
-
-        // Parse Optical Transceiver Table: Port ID, Temperature, Voltage, Bias Current, Transmit Power
         $txPowers = [];
         $temperatures = [];
-        if (preg_match_all('/<tr>\s*<td[^>]*>\s*(PON\d+)\s*<\/td>\s*<td[^>]*>\s*([0-9\.]+|N\/A)\s*<\/td>\s*<td[^>]*>\s*([0-9\.]+|N\/A)\s*<\/td>\s*<td[^>]*>\s*([0-9\.]+|N\/A)\s*<\/td>\s*<td[^>]*>\s*([0-9\.\-]+|N\/A)\s*<\/td>/i', $html, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $m) {
-                $pName = strtoupper(trim($m[1]));
-                $txPowers[$pName] = ($m[5] !== 'N/A') ? (float)$m[5] : null;
-                $temperatures[$pName] = ($m[2] !== 'N/A') ? (float)$m[2] : null;
-            }
-        }
-
-        // Parse Traffic / Link Status Table: Port ID, Link Status (Up / Down)
         $linkStatuses = [];
-        if (preg_match_all('/<tr>\s*<td[^>]*>\s*(PON\d+)\s*<\/td>\s*<td[^>]*>\s*(?:<font[^>]*>)?\s*(Up|Down)\s*(?:<\/font>)?\s*<\/td>/i', $html, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $m) {
-                $pName = strtoupper(trim($m[1]));
-                $linkStatuses[$pName] = strtolower($m[2]);
+
+        // 1. Primary robust row-by-row cell extractor (immune to inner tags, fonts, whitespace, + signs)
+        if (preg_match_all('/<tr[^>]*>(.*?)<\/tr>/is', $html, $rowMatches)) {
+            foreach ($rowMatches[1] as $rowHtml) {
+                if (preg_match_all('/<td[^>]*>(.*?)<\/td>/is', $rowHtml, $cellMatches)) {
+                    $cells = array_map(function($c) {
+                        return trim(strip_tags($c));
+                    }, $cellMatches[1]);
+
+                    if (empty($cells[0])) continue;
+
+                    // Match PON identifier in first cell: "PON1", "PON 1", "EPON0/1", "EPON 0/1", etc.
+                    if (preg_match('/^(?:E?PON|GPON)?\s*0?\/?:?\s*(\d+)$/i', $cells[0], $pm)) {
+                        $pKey = 'PON' . (int)$pm[1];
+
+                        // Optical Transceiver Table:
+                        // [0] Port ID (PON1)
+                        // [1] Temperature (32.92)
+                        // [2] Voltage (3.27)
+                        // [3] Bias Current (8.48)
+                        // [4] Transmit Power (8.03 or +8.03 or N/A)
+                        if (isset($cells[4]) && !isset($txPowers[$pKey])) {
+                            $rawTx = trim($cells[4]);
+                            if (preg_match('/([+-]?\d+(?:\.\d+)?)/', $rawTx, $txMatch)) {
+                                $txPowers[$pKey] = (float)$txMatch[1];
+                            } elseif (strtoupper($rawTx) === 'N/A') {
+                                $txPowers[$pKey] = null;
+                            }
+                        }
+
+                        if (isset($cells[1]) && !isset($temperatures[$pKey])) {
+                            $rawTemp = trim($cells[1]);
+                            if (preg_match('/([+-]?\d+(?:\.\d+)?)/', $rawTemp, $tempMatch)) {
+                                $temperatures[$pKey] = (float)$tempMatch[1];
+                            }
+                        }
+
+                        // Traffic / Link Status Table:
+                        // [0] Port ID (PON1)
+                        // [1] Link Status (Up / Down)
+                        if (isset($cells[1])) {
+                            $rawStatus = strtolower(trim($cells[1]));
+                            if ($rawStatus === 'up' || $rawStatus === 'down') {
+                                $linkStatuses[$pKey] = $rawStatus;
+                            }
+                        }
+                    }
+                }
             }
         }
 
+        // 2. Secondary fallback regex
+        if (empty($txPowers)) {
+            if (preg_match_all('/<tr>\s*<td[^>]*>\s*(PON\d+)\s*<\/td>\s*<td[^>]*>\s*([0-9\.]+|N\/A)\s*<\/td>\s*<td[^>]*>\s*([0-9\.]+|N\/A)\s*<\/td>\s*<td[^>]*>\s*([0-9\.]+|N\/A)\s*<\/td>\s*<td[^>]*>\s*([0-9\.\-+]+|N\/A)\s*<\/td>/i', $html, $matches, PREG_SET_ORDER)) {
+                foreach ($matches as $m) {
+                    $pName = strtoupper(trim($m[1]));
+                    $txPowers[$pName] = ($m[5] !== 'N/A') ? (float)$m[5] : null;
+                    $temperatures[$pName] = ($m[2] !== 'N/A') ? (float)$m[2] : null;
+                }
+            }
+        }
+
+        // 3. Link status secondary fallback regex
+        if (empty($linkStatuses)) {
+            if (preg_match_all('/<tr>\s*<td[^>]*>\s*(PON\d+)\s*<\/td>\s*<td[^>]*>\s*(?:<font[^>]*>)?\s*(Up|Down)\s*(?:<\/font>)?\s*<\/td>/i', $html, $matches, PREG_SET_ORDER)) {
+                foreach ($matches as $m) {
+                    $pName = strtoupper(trim($m[1]));
+                    $linkStatuses[$pName] = strtolower($m[2]);
+                }
+            }
+        }
+
+        $ports = [];
         for ($p = 1; $p <= 4; $p++) {
             $key = "PON$p";
             $status = $linkStatuses[$key] ?? 'down';
@@ -203,6 +258,7 @@ class VsolOltClient {
                 'status' => $status === 'up' ? 'online' : 'offline',
                 'operStatus' => $status,
                 'txPowerDbm' => $tx,
+                'txPower' => $tx,
                 'temperature' => $temp,
             ];
         }

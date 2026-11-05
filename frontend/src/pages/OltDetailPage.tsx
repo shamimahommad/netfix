@@ -77,6 +77,8 @@ export default function OltDetailPage() {
       }
       if (statusRes?.success && statusRes.data) {
         setTelemetry(statusRes.data);
+      } else if (devRes?.success && devRes.data?.telemetry) {
+        setTelemetry(devRes.data.telemetry);
       }
       if (onusRes?.success && onusRes.data) {
         setOnus(onusRes.data.onus || []);
@@ -349,11 +351,23 @@ export default function OltDetailPage() {
         {[1, 2, 3, 4].map((ponNum) => {
           const count = ponCounts[ponNum] || 0;
           const isSelected = selectedPon === ponNum;
-          const portInfo = telemetry?.ponPorts?.find((p: any) => p.portNum === ponNum);
+          const portInfo = (telemetry?.ponPorts || []).find((p: any) => p.portNum === ponNum || p.port === `PON${ponNum}` || p.portName === `EPON 0/${ponNum}`) 
+            || ((device as any)?.telemetry?.ponPorts || []).find((p: any) => p.portNum === ponNum || p.port === `PON${ponNum}` || p.portName === `EPON 0/${ponNum}`);
+
           const isOnline = portInfo ? portInfo.status === 'online' : (count > 0);
-          const txPower = portInfo?.txPowerDbm !== null && portInfo?.txPowerDbm !== undefined
-            ? `+${portInfo.txPowerDbm} dBm`
-            : (count > 0 ? 'Active' : '—');
+          
+          const rawTx = portInfo?.txPowerDbm ?? portInfo?.tx_power_dbm ?? portInfo?.txPower ?? portInfo?.tx_power ?? portInfo?.tx;
+          let txPower = '—';
+          if (rawTx !== null && rawTx !== undefined && rawTx !== '' && rawTx !== 'N/A') {
+            const num = parseFloat(String(rawTx).replace(/[^\d.-]/g, ''));
+            if (!isNaN(num)) {
+              txPower = `${num >= 0 ? '+' : ''}${num.toFixed(2)} dBm`;
+            } else {
+              txPower = String(rawTx);
+            }
+          } else if (count > 0) {
+            txPower = 'Active';
+          }
 
           return (
             <button
