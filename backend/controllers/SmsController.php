@@ -117,6 +117,14 @@ class SmsController {
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
         $toNumbers = $data['toNumbers'] ?? [];
+        if (empty($toNumbers)) {
+            $single = $data['recipient'] ?? $data['phone'] ?? $data['toNumber'] ?? null;
+            if ($single) {
+                $toNumbers = [$single];
+            }
+        } elseif (is_string($toNumbers)) {
+            $toNumbers = [$toNumbers];
+        }
         $message = trim($data['message'] ?? '');
 
         if (empty($toNumbers) || empty($message)) {

@@ -604,20 +604,42 @@ class CustomersController {
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $db = Database::getConnection();
 
+        // 1. Locate customer by customer_id or customer_code
+        $stmtC = $db->prepare("SELECT * FROM customers WHERE (customer_id = :id OR customer_code = :id) LIMIT 1");
+        $stmtC->execute(['id' => $id]);
+        $customer = $stmtC->fetch();
+        if (!$customer) {
+            Response::error('Customer not found', 404);
+        }
+        $realCid = (int)$customer['customer_id'];
+        $customerTenantId = (int)$customer['tenant_id'];
+
         $fields = [];
-        $params = ['id' => $id, 'tid' => $tenantId];
+        $params = ['cid' => $realCid];
 
         if (isset($data['fullName']) || isset($data['full_name'])) {
             $fields[] = "full_name = :name";
-            $params['name'] = $data['fullName'] ?? $data['full_name'];
+            $params['name'] = trim($data['fullName'] ?? $data['full_name']);
         }
-        if (isset($data['phone'])) {
+        if (isset($data['phone']) || isset($data['mobileNumber'])) {
             $fields[] = "phone = :phone";
-            $params['phone'] = $data['phone'];
+            $params['phone'] = trim($data['phone'] ?? $data['mobileNumber']);
         }
-        if (isset($data['email'])) {
+        if (isset($data['alternatePhone']) || isset($data['alternate_phone'])) {
+            $fields[] = "alternate_phone = :alt_phone";
+            $params['alt_phone'] = trim($data['alternatePhone'] ?? $data['alternate_phone']);
+        }
+        if (array_key_exists('email', $data)) {
             $fields[] = "email = :email";
-            $params['email'] = $data['email'];
+            $params['email'] = $data['email'] ? trim($data['email']) : null;
+        }
+        if (array_key_exists('nationalId', $data) || array_key_exists('national_id', $data)) {
+            $fields[] = "national_id = :nid";
+            $params['nid'] = $data['nationalId'] ?? $data['national_id'] ?? null;
+        }
+        if (array_key_exists('taxIdentifier', $data) || array_key_exists('tax_identifier', $data)) {
+            $fields[] = "tax_identifier = :tax";
+            $params['tax'] = $data['taxIdentifier'] ?? $data['tax_identifier'] ?? null;
         }
         if (isset($data['status'])) {
             $fields[] = "status = :status";
@@ -627,18 +649,123 @@ class CustomersController {
             $fields[] = "billing_status = :bstatus";
             $params['bstatus'] = $data['billingStatus'] ?? $data['billing_status'];
         }
-        if (isset($data['installationAddress']) || isset($data['address'])) {
+        if (isset($data['installationAddress']) || isset($data['address']) || isset($data['installation_address'])) {
             $fields[] = "installation_address = :addr";
-            $params['addr'] = $data['installationAddress'] ?? $data['address'];
+            $params['addr'] = trim($data['installationAddress'] ?? $data['address'] ?? $data['installation_address']);
+        }
+        if (isset($data['billingAddress']) || isset($data['billing_address'])) {
+            $fields[] = "billing_address = :baddr";
+            $params['baddr'] = trim($data['billingAddress'] ?? $data['billing_address']);
+        }
+        if (isset($data['district']) || isset($data['city'])) {
+            $fields[] = "city = :city";
+            $params['city'] = trim($data['district'] ?? $data['city']);
+        }
+        if (isset($data['thana']) || isset($data['state_province'])) {
+            $fields[] = "state_province = :thana";
+            $params['thana'] = trim($data['thana'] ?? $data['state_province']);
+        }
+        if (isset($data['postalCode']) || isset($data['postal_code'])) {
+            $fields[] = "postal_code = :pcode";
+            $params['pcode'] = trim($data['postalCode'] ?? $data['postal_code']);
+        }
+        if (isset($data['connectionDate']) || isset($data['connection_date'])) {
+            $fields[] = "connection_date = :cdate";
+            $params['cdate'] = $data['connectionDate'] ?? $data['connection_date'];
+        }
+        if (array_key_exists('internalNotes', $data) || array_key_exists('internal_notes', $data)) {
+            $fields[] = "internal_notes = :notes";
+            $params['notes'] = $data['internalNotes'] ?? $data['internal_notes'] ?? null;
         }
 
-        if (empty($fields)) {
-            Response::json(['success' => true, 'message' => 'No changes provided']);
+        // Handle metadata (merge existing with new area, subArea, dob, etc.)
+        $meta = json_decode($customer['metadata'] ?? '{}', true) ?: [];
+        if (isset($data['metadata']) && is_array($data['metadata'])) {
+            $meta = array_merge($meta, $data['metadata']);
+        }
+        if (isset($data['area'])) $meta['area_name'] = $data['area'];
+        if (isset($data['subArea'])) $meta['sub_area_name'] = $data['subArea'];
+        if (isset($data['dob'])) $meta['dob'] = $data['dob'];
+        if (isset($data['district'])) $meta['district'] = $data['district'];
+        if (isset($data['thana'])) $meta['thana'] = $data['thana'];
+
+        $fields[] = "metadata = :meta";
+        $params['meta'] = json_encode($meta, JSON_UNESCAPED_UNICODE);
+
+        if (!empty($fields)) {
+            $sql = "UPDATE customers SET " . implode(', ', $fields) . " WHERE customer_id = :cid";
+            $stmt = $db->prepare($sql);
+            $stmt->execute($params);
         }
 
-        $sql = "UPDATE customers SET " . implode(', ', $fields) . " WHERE customer_id = :id AND tenant_id = :tid";
-        $stmt = $db->prepare($sql);
-        $stmt->execute($params);
+        // 2. Handle Network Account (password, mac, ip, router)
+        $netFields = [];
+        $netParams = ['cid' => $realCid];
+
+        if (isset($data['password']) && strlen(trim($data['password'])) > 0) {
+            $newPassword = trim($data['password']);
+            $netFields[] = "password = :pwd";
+            $netParams['pwd'] = $newPassword;
+
+            // Also sync new password to MikroTik router secret if available
+            try {
+                require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+                $router = MikrotikSyncService::getRouter($db, $realCid, $customerTenantId);
+                if ($router) {
+                    $api = MikrotikSyncService::connect($router, 2);
+                    if ($api) {
+                        $stmtU = $db->prepare("SELECT username FROM customer_network_accounts WHERE customer_id = :cid");
+                        $stmtU->execute(['cid' => $realCid]);
+                        $currUser = $stmtU->fetchColumn();
+                        if ($currUser) {
+                            $secrets = $api->comm('/ppp/secret/print', ['?name' => $currUser]);
+                            if (!empty($secrets[0]['.id'])) {
+                                $api->comm('/ppp/secret/set', [
+                                    '.id' => $secrets[0]['.id'],
+                                    'password' => $newPassword
+                                ]);
+                            }
+                        }
+                        $api->disconnect();
+                    }
+                }
+            } catch (\Throwable $e) {}
+        }
+
+        if (isset($data['macAddress']) || isset($data['mac_address'])) {
+            $newMac = trim($data['macAddress'] ?? $data['mac_address']);
+            $netFields[] = "mac_address = :mac";
+            $netParams['mac'] = $newMac ?: null;
+
+            if (!empty($newMac)) {
+                require_once __DIR__ . '/../lib/MacVendorService.php';
+                $vendor = MacVendorService::resolveVendor($newMac, $db);
+                if ($vendor && $vendor !== 'Unknown') {
+                    $netFields[] = "device_vendor = :dvendor";
+                    $netParams['dvendor'] = $vendor;
+                    $netFields[] = "vendor_source = 'macvendors.com'";
+                }
+            }
+        }
+
+        if (isset($data['ipAddress']) || isset($data['ip_address']) || isset($data['remote_address'])) {
+            $newIp = trim($data['ipAddress'] ?? $data['ip_address'] ?? $data['remote_address']);
+            $netFields[] = "remote_address = :rip";
+            $netParams['rip'] = $newIp ?: null;
+        }
+
+        if (!empty($netFields)) {
+            $netSql = "UPDATE customer_network_accounts SET " . implode(', ', $netFields) . " WHERE customer_id = :cid";
+            $stmtNet = $db->prepare($netSql);
+            $stmtNet->execute($netParams);
+        }
+
+        // 3. Handle Package / Access Profile update if passed
+        $newPlanId = $data['planId'] ?? $data['plan_id'] ?? $data['access_profile_id'] ?? null;
+        if (!empty($newPlanId)) {
+            $stmtPlan = $db->prepare("UPDATE customer_services SET access_profile_id = :pid WHERE customer_id = :cid");
+            $stmtPlan->execute(['pid' => $newPlanId, 'cid' => $realCid]);
+        }
 
         Response::json([
             'success' => true,

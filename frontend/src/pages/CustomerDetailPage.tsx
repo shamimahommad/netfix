@@ -6,6 +6,7 @@ import { CustomerDetailResponse } from '@/types/customer.types';
 import { serviceAreaService } from '@/services/service-area.service';
 import { ServiceArea } from '@/types/service-area.types';
 import { useToastContext } from '@/contexts/ToastContext';
+import { smsService } from '@/services/sms.service';
 import { billingService } from '@/services/billing.service';
 import { networkPackagesService } from '@/services/network-packages.service';
 import { NetworkPackage } from '@/types/network.types';
@@ -366,6 +367,10 @@ export default function CustomerDetailPage() {
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [slowLoad, setSlowLoad] = useState(false);
   const [copiedMac, setCopiedMac] = useState<string | null>(null);
+  const [isSmsModalOpen, setIsSmsModalOpen] = useState(false);
+  const [smsPhone, setSmsPhone] = useState('');
+  const [smsMessage, setSmsMessage] = useState('');
+  const [isSendingSms, setIsSendingSms] = useState(false);
 
   const handleCopy = (text: string) => {
     if (!text || text === '—') return;
@@ -934,12 +939,39 @@ export default function CustomerDetailPage() {
   };
 
   const handleRouterLogin = () => {
-    if (!routerData.routerIp || !routerData.routerPort) {
-      alert('Please enter Router IP and Port first.');
+    if (!routerData.routerIp) {
+      alert('Please enter Router IP first.');
       return;
     }
-    const url = `http://${routerData.routerIp}:${routerData.routerPort}`;
+    const port = (routerData.routerPort || '80').trim();
+    const url = port === '80' ? `http://${routerData.routerIp}` : `http://${routerData.routerIp}:${port}`;
     window.open(url, '_blank');
+  };
+
+  const handleSendQuickSms = async () => {
+    const targetPhone = smsPhone.trim() || customerData?.customer.mobileNumber || customerData?.customer.phone;
+    if (!targetPhone) {
+      toast.error('Recipient phone number is required');
+      return;
+    }
+    if (!smsMessage.trim()) {
+      toast.error('Please enter SMS message body');
+      return;
+    }
+
+    setIsSendingSms(true);
+    try {
+      await smsService.send({
+        toNumbers: [targetPhone],
+        message: smsMessage.trim(),
+      });
+      toast.success(`SMS successfully dispatched to ${targetPhone}`);
+      setIsSmsModalOpen(false);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || 'Failed to send SMS');
+    } finally {
+      setIsSendingSms(false);
+    }
   };
 
   const handleBindMac = async () => {
@@ -1342,7 +1374,18 @@ export default function CustomerDetailPage() {
                   <DocumentTextIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                   <span className="truncate">Edit</span>
                 </button>
-                <button className="flex items-center justify-center gap-1 sm:gap-2 px-1.5 py-1.5 sm:px-3 sm:py-2.5 bg-teal-500 hover:bg-teal-600 dark:bg-teal-600 dark:hover:bg-teal-500 text-white rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg shadow-md min-w-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const phone = customerData?.customer.phone || customerData?.customer.mobileNumber || '';
+                    setSmsPhone(phone);
+                    if (!smsMessage) {
+                      setSmsMessage(`Dear ${customerData?.customer.fullName || 'Customer'}, your monthly internet bill is due. Please pay to ensure continuous high-speed service. Thank you, NetFix.`);
+                    }
+                    setIsSmsModalOpen(true);
+                  }}
+                  className="flex items-center justify-center gap-1 sm:gap-2 px-1.5 py-1.5 sm:px-3 sm:py-2.5 bg-teal-500 hover:bg-teal-600 dark:bg-teal-600 dark:hover:bg-teal-500 text-white rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg shadow-md min-w-0"
+                >
                   <DevicePhoneMobileIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                   <span className="truncate">SMS</span>
                 </button>
@@ -2863,6 +2906,154 @@ export default function CustomerDetailPage() {
                     <>
                       <BanknotesIcon className="w-4 h-4" />
                       Record Cash
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Quick SMS Notification Modal */}
+      {isSmsModalOpen && customerData && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-5 md:p-6 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-sky-200/80 dark:border-slate-700 max-w-lg w-full overflow-hidden">
+            <div className="bg-gradient-to-r from-teal-500 to-emerald-600 px-5 py-4 flex items-center justify-between text-white">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-white/20 rounded-xl backdrop-blur-sm">
+                  <DevicePhoneMobileIcon className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base">Send Quick SMS</h3>
+                  <p className="text-xs text-teal-100">Direct instant notification via SMS gateway</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSmsModalOpen(false)}
+                className="p-1.5 rounded-lg hover:bg-white/20 transition-colors text-white"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Recipient Phone */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                  Recipient Mobile Number
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                    <PhoneIcon className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="tel"
+                    value={smsPhone}
+                    onChange={(e) => setSmsPhone(e.target.value)}
+                    placeholder="01XXXXXXXXX"
+                    className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/50 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-teal-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Quick Template Chips */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                  Quick Message Templates
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const name = customerData.customer.fullName || 'Customer';
+                      const due = customerData.billing.planPrice || 'bill';
+                      setSmsMessage(`Dear ${name}, your monthly internet bill of BDT ${due} is due. Please pay promptly to avoid interruption. - NetFix`);
+                    }}
+                    className="px-2.5 py-1 text-xs rounded-lg font-medium bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 hover:bg-sky-100 transition-colors"
+                  >
+                    💳 Bill Due
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const name = customerData.customer.fullName || 'Customer';
+                      const amt = customerData.billing.planPrice || '';
+                      setSmsMessage(`Dear ${name}, we have received your internet bill payment of BDT ${amt}. Thank you for staying with us! - NetFix`);
+                    }}
+                    className="px-2.5 py-1 text-xs rounded-lg font-medium bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 transition-colors"
+                  >
+                    ✅ Payment Received
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const name = customerData.customer.fullName || 'Customer';
+                      setSmsMessage(`Dear ${name}, scheduled fiber optic maintenance is in progress in your area. Service will resume shortly. We regret any inconvenience. - NetFix`);
+                    }}
+                    className="px-2.5 py-1 text-xs rounded-lg font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 transition-colors"
+                  >
+                    ⚠️ Maintenance
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const name = customerData.customer.fullName || 'Customer';
+                      const user = customerData.network.username || '';
+                      const pass = customerData.network.password || '';
+                      setSmsMessage(`Dear ${name}, welcome to NetFix! Your PPPoE Username: ${user}, Password: ${pass}. Helpline: 01800000000.`);
+                    }}
+                    className="px-2.5 py-1 text-xs rounded-lg font-medium bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 hover:bg-purple-100 transition-colors"
+                  >
+                    🔑 Credentials
+                  </button>
+                </div>
+              </div>
+
+              {/* Message Content */}
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                    Message Body
+                  </label>
+                  <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                    {smsMessage.length} chars ({(Math.ceil(smsMessage.length / 160) || 1)} SMS)
+                  </span>
+                </div>
+                <textarea
+                  rows={4}
+                  value={smsMessage}
+                  onChange={(e) => setSmsMessage(e.target.value)}
+                  placeholder="Type your message here..."
+                  className="w-full p-3 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-teal-500 resize-none shadow-inner"
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setIsSmsModalOpen(false)}
+                  disabled={isSendingSms}
+                  className="px-4 py-2 text-sm font-semibold rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSendQuickSms}
+                  disabled={isSendingSms || !smsPhone.trim() || !smsMessage.trim()}
+                  className="flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-xl bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white shadow-md hover:shadow-lg disabled:opacity-50 transition-all"
+                >
+                  {isSendingSms ? (
+                    <>
+                      <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <DevicePhoneMobileIcon className="w-4 h-4" />
+                      Send SMS
                     </>
                   )}
                 </button>
