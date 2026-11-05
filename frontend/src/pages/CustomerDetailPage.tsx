@@ -1459,7 +1459,16 @@ export default function CustomerDetailPage() {
                   </span>
                 }
               />
-              <InfoRow label="Connected By" value={billing.connectedBy || '—'} />
+              <InfoRow 
+                label="Connected By" 
+                value={
+                  billing.connectedBy ? (
+                    <span className="font-semibold text-slate-800 dark:text-slate-100">
+                      {billing.connectedBy}
+                    </span>
+                  ) : 'Admin'
+                } 
+              />
               <InfoRow label="Location" value={billing.location || '—'} />
 
               <div className="pt-3 border-t border-sky-200/60 dark:border-slate-600 mt-3 grid grid-cols-3 gap-1 sm:gap-2">

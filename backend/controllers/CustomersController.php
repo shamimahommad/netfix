@@ -311,6 +311,19 @@ class CustomersController {
             $onuData['onuVendor'] = MacVendorService::resolveVendor($onuData['onuMac'], $db);
         }
 
+        // Resolve Connected By / Creator User Name
+        $connectedByName = 'Admin';
+        $creatorId = $customer['created_by'] ?? $customer['owner_id'] ?? null;
+        if (!empty($creatorId)) {
+            $stmtCreator = $db->prepare("SELECT first_name, last_name, username, role FROM users WHERE user_id = :uid LIMIT 1");
+            $stmtCreator->execute(['uid' => $creatorId]);
+            $creator = $stmtCreator->fetch();
+            if ($creator) {
+                $creatorFullName = trim(($creator['first_name'] ?? '') . ' ' . ($creator['last_name'] ?? ''));
+                $connectedByName = $creatorFullName ?: ($creator['username'] ?: 'Admin');
+            }
+        }
+
         Response::json([
             'success' => true,
             'data' => [
@@ -381,7 +394,8 @@ class CustomersController {
                     'accountStatus' => ($customer['status'] === 'suspended' ? 'suspended' : ($customer['status'] === 'inactive' ? 'expired' : 'active')),
                     'expiryDate' => $service['expires_at'] ?? null,
                     'lastPaymentDate' => $inv['invoice_date'] ?? null,
-                    'connectedBy' => $customer['created_by'] ?? 'Admin',
+                    'connectedBy' => $connectedByName,
+                    'connectedById' => $customer['created_by'] ?? null,
                     'location' => $customer['installation_address'] ?? '',
                 ],
                 'onu' => $onuData,
