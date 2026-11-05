@@ -169,7 +169,7 @@ function AddISPModal({ isOpen, onClose, onSuccess }: AddISPModalProps) {
         payload.businessAddress = formData.businessAddress.trim();
       }
       if (formData.adminPassword?.trim()) {
-        payload.adminPassword = formData.adminPassword;
+        payload.adminPassword = formData.adminPassword.trim();
       }
 
       await tenantsService.createTenant(payload);
@@ -616,6 +616,9 @@ function EditISPModal({ isOpen, tenant, onClose, onSuccess }: EditISPModalProps)
       if (formData.businessAddress?.trim()) {
         payload.businessAddress = formData.businessAddress.trim();
       }
+      if (formData.adminPassword?.trim()) {
+        payload.adminPassword = formData.adminPassword.trim();
+      }
 
       await tenantsService.updateTenant(tenant.tenantId, payload);
       await tenantsService.updateTenantLimits(tenant.tenantId, formData.limits);
@@ -723,6 +726,20 @@ function EditISPModal({ isOpen, tenant, onClose, onSuccess }: EditISPModalProps)
               value={formData.businessAddress}
               onChange={(e) => setFormData((p) => ({ ...p, businessAddress: e.target.value }))}
               className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block font-semibold text-slate-700 dark:text-slate-300">Reset Admin Password</label>
+              <span className="text-[11px] text-slate-400">Leave blank to keep existing password</span>
+            </div>
+            <input
+              type="password"
+              value={formData.adminPassword}
+              onChange={(e) => setFormData((p) => ({ ...p, adminPassword: e.target.value }))}
+              placeholder="Enter new password (min. 6 chars) to reset admin login"
+              className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 placeholder:text-slate-400"
             />
           </div>
 

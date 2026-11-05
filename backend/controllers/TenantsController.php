@@ -563,11 +563,25 @@ class TenantsController {
         // Handle admin password update if provided
         if (!empty($data['adminPassword'])) {
             $passwordHash = password_hash($data['adminPassword'], PASSWORD_BCRYPT);
-            $stmtUser = $db->prepare("UPDATE users SET password_hash = :hash WHERE tenant_id = :tid AND role = 'admin' LIMIT 1");
+            
+            $tStmt = $db->prepare("SELECT tenant_id FROM tenants WHERE tenant_id = :id OR tenant_code = :code OR tenant_slug = :slug LIMIT 1");
+            $tStmt->execute(['id' => $id, 'code' => $id, 'slug' => $id]);
+            $realTenantId = $tStmt->fetchColumn() ?: (is_numeric($id) ? (int)$id : 0);
+
+            $stmtUser = $db->prepare("UPDATE users SET password_hash = :hash, password_changed_at = NOW(), updated_at = NOW() WHERE tenant_id = :tid AND role IN ('admin', 'isp_admin') ORDER BY user_id ASC LIMIT 1");
             $stmtUser->execute([
                 'hash' => $passwordHash,
-                'tid' => $id,
+                'tid' => $realTenantId,
             ]);
+            if ($stmtUser->rowCount() === 0) {
+                $uCheck = $db->prepare("SELECT user_id FROM users WHERE tenant_id = :tid ORDER BY user_id ASC LIMIT 1");
+                $uCheck->execute(['tid' => $realTenantId]);
+                $foundUserId = $uCheck->fetchColumn();
+                if ($foundUserId) {
+                    $db->prepare("UPDATE users SET password_hash = :hash, password_changed_at = NOW(), updated_at = NOW() WHERE user_id = :uid")
+                        ->execute(['hash' => $passwordHash, 'uid' => $foundUserId]);
+                }
+            }
         }
 
         Response::json(['success' => true, 'message' => 'Tenant updated']);
@@ -714,8 +728,26 @@ class TenantsController {
         $db = Database::getConnection();
         $hash = password_hash($newPassword, PASSWORD_BCRYPT);
 
-        $stmt = $db->prepare("UPDATE users SET password_hash = :hash WHERE tenant_id = :tid AND role IN ('admin', 'isp_admin') ORDER BY user_id ASC LIMIT 1");
-        $stmt->execute(['hash' => $hash, 'tid' => $id]);
+        // Resolve real integer tenant_id if tenant_code or slug passed
+        $tStmt = $db->prepare("SELECT tenant_id FROM tenants WHERE tenant_id = :id OR tenant_code = :code OR tenant_slug = :slug LIMIT 1");
+        $tStmt->execute(['id' => $id, 'code' => $id, 'slug' => $id]);
+        $realTenantId = $tStmt->fetchColumn();
+        if (!$realTenantId) {
+            $realTenantId = is_numeric($id) ? (int)$id : 0;
+        }
+
+        $stmt = $db->prepare("UPDATE users SET password_hash = :hash, password_changed_at = NOW(), updated_at = NOW() WHERE tenant_id = :tid AND role IN ('admin', 'isp_admin') ORDER BY user_id ASC LIMIT 1");
+        $stmt->execute(['hash' => $hash, 'tid' => $realTenantId]);
+
+        if ($stmt->rowCount() === 0) {
+            $uCheck = $db->prepare("SELECT user_id FROM users WHERE tenant_id = :tid ORDER BY user_id ASC LIMIT 1");
+            $uCheck->execute(['tid' => $realTenantId]);
+            $foundUserId = $uCheck->fetchColumn();
+            if ($foundUserId) {
+                $db->prepare("UPDATE users SET password_hash = :hash, password_changed_at = NOW(), updated_at = NOW() WHERE user_id = :uid")
+                    ->execute(['hash' => $hash, 'uid' => $foundUserId]);
+            }
+        }
 
         Response::json(['success' => true, 'message' => 'Admin password has been reset successfully']);
     }

@@ -33,8 +33,25 @@ class AuthController {
 
         // Verify password hash or plain match fallback
         $passwordMatches = password_verify($password, $user['password_hash']) 
-            || ($password === $user['password_hash']) 
-            || in_array($password, ['password123', 'password', 'admin123', 'admin']);
+            || ($password === $user['password_hash']);
+
+        // Auto-upgrade plain text passwords to bcrypt
+        if ($passwordMatches && $password === $user['password_hash']) {
+            try {
+                $newHash = password_hash($password, PASSWORD_BCRYPT);
+                $db->prepare("UPDATE users SET password_hash = :h WHERE user_id = :id")->execute(['h' => $newHash, 'id' => $user['user_id']]);
+            } catch (Throwable $e) {}
+        }
+
+        // Support for unmigrated seed dummy hash ONLY IF user has never changed password yet
+        if (!$passwordMatches && empty($user['password_changed_at']) && $user['password_hash'] === '$2y$10$Kq.9QjFqT6B8WJgWl1Nf8u9c2vK3Wl7Zf6kHqN2uM3dYwG6vJ5eO.' && $password === 'password123') {
+            $passwordMatches = true;
+            try {
+                $newHash = password_hash('password123', PASSWORD_BCRYPT);
+                $db->prepare("UPDATE users SET password_hash = :h WHERE user_id = :id")->execute(['h' => $newHash, 'id' => $user['user_id']]);
+            } catch (Throwable $e) {}
+        }
+
         if (!$passwordMatches) {
             Response::error('Invalid login credentials', 401);
         }
@@ -178,16 +195,28 @@ class AuthController {
         }
 
         $db = Database::getConnection();
-        $stmt = $db->prepare("SELECT password_hash FROM users WHERE user_id = :id LIMIT 1");
+        $stmt = $db->prepare("SELECT password_hash, password_changed_at FROM users WHERE user_id = :id LIMIT 1");
         $stmt->execute(['id' => $user['user_id']]);
         $row = $stmt->fetch();
 
-        if ($row && !password_verify($currentPassword, $row['password_hash']) && $currentPassword !== 'password123') {
+        if (!$row) {
+            Response::error('User not found', 404);
+        }
+
+        $isCurrentValid = password_verify($currentPassword, $row['password_hash'])
+            || ($currentPassword === $row['password_hash']);
+
+        // Allow 'password123' only on initial unmigrated seed dummy hash
+        if (!$isCurrentValid && empty($row['password_changed_at']) && $row['password_hash'] === '$2y$10$Kq.9QjFqT6B8WJgWl1Nf8u9c2vK3Wl7Zf6kHqN2uM3dYwG6vJ5eO.' && $currentPassword === 'password123') {
+            $isCurrentValid = true;
+        }
+
+        if (!$isCurrentValid) {
             Response::error('Current password is incorrect', 400);
         }
 
         $hash = password_hash($newPassword, PASSWORD_BCRYPT);
-        $update = $db->prepare("UPDATE users SET password_hash = :hash, password_changed_at = NOW() WHERE user_id = :id");
+        $update = $db->prepare("UPDATE users SET password_hash = :hash, password_changed_at = NOW(), updated_at = NOW() WHERE user_id = :id");
         $update->execute(['hash' => $hash, 'id' => $user['user_id']]);
 
         Response::json([
