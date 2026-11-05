@@ -37,7 +37,8 @@ class OltSyncService {
         $pass = $oltDev['api_password'] ?: 'star321';
         $proto = ($port == 80) ? 'http' : 'https';
 
-        $client = new VsolOltClient($ip, $port, $user, $pass, $proto, 8);
+        // 20 second timeout for reliable cloud server to physical OLT latency
+        $client = new VsolOltClient($ip, $port, $user, $pass, $proto, 20);
         $sysInfo = $client->getSystemInfo();
         $ponPorts = $client->getPonPorts();
         $onus = $client->getOnus(null, true);
@@ -55,6 +56,9 @@ class OltSyncService {
             $local['isOnline'] = false;
             return $local;
         }
+
+        // Auto-migrate olt_onus schema if missing columns (router_mac, vlan_id, pppoe_username)
+        self::ensureOltSchema($db);
 
         // Update network_devices table with telemetry JSON & last_sync_at
         $telemetry = [
@@ -95,22 +99,22 @@ class OltSyncService {
                 }
             } catch (\Throwable $e) {}
 
-            $sql = "INSERT INTO olt_onus (tenant_id, network_device_id, pon_port, pon_port_name, onu_id, mac_address, router_mac, vlan_id, pppoe_username, rx_power_dbm, status, last_sync_at) 
-                    VALUES (:tid, :did, :pon, :pname, :onuid, :mac, :rmac, :vlan, :pppoe, :rx, 'online', NOW())
-                    ON DUPLICATE KEY UPDATE 
-                        pon_port = VALUES(pon_port),
-                        pon_port_name = VALUES(pon_port_name),
-                        onu_id = VALUES(onu_id),
-                        router_mac = COALESCE(VALUES(router_mac), router_mac),
-                        vlan_id = COALESCE(VALUES(vlan_id), vlan_id),
-                        pppoe_username = COALESCE(VALUES(pppoe_username), pppoe_username),
-                        rx_power_dbm = VALUES(rx_power_dbm),
-                        status = 'online',
-                        last_sync_at = NOW()";
-            $insStmt = $db->prepare($sql);
-
-            $db->beginTransaction();
             try {
+                $sql = "INSERT INTO olt_onus (tenant_id, network_device_id, pon_port, pon_port_name, onu_id, mac_address, router_mac, vlan_id, pppoe_username, rx_power_dbm, status, last_sync_at) 
+                        VALUES (:tid, :did, :pon, :pname, :onuid, :mac, :rmac, :vlan, :pppoe, :rx, 'online', NOW())
+                        ON DUPLICATE KEY UPDATE 
+                            pon_port = VALUES(pon_port),
+                            pon_port_name = VALUES(pon_port_name),
+                            onu_id = VALUES(onu_id),
+                            router_mac = COALESCE(VALUES(router_mac), router_mac),
+                            vlan_id = COALESCE(VALUES(vlan_id), vlan_id),
+                            pppoe_username = COALESCE(VALUES(pppoe_username), pppoe_username),
+                            rx_power_dbm = VALUES(rx_power_dbm),
+                            status = 'online',
+                            last_sync_at = NOW()";
+                $insStmt = $db->prepare($sql);
+
+                $db->beginTransaction();
                 foreach ($onus as $onu) {
                     $onuId = $onu['onuId'];
                     $macEntry = $macTable[$onuId] ?? null;
@@ -138,6 +142,38 @@ class OltSyncService {
                 $db->commit();
             } catch (\Throwable $e) {
                 if ($db->inTransaction()) $db->rollBack();
+                error_log("OLT ONU detailed sync error: " . $e->getMessage() . " - attempting basic fallback");
+
+                // Fallback: insert with basic columns guaranteed in standard schema
+                try {
+                    $basicSql = "INSERT INTO olt_onus (tenant_id, network_device_id, pon_port, pon_port_name, onu_id, mac_address, rx_power_dbm, status, last_sync_at) 
+                                 VALUES (:tid, :did, :pon, :pname, :onuid, :mac, :rx, 'online', NOW())
+                                 ON DUPLICATE KEY UPDATE 
+                                     pon_port = VALUES(pon_port),
+                                     pon_port_name = VALUES(pon_port_name),
+                                     onu_id = VALUES(onu_id),
+                                     rx_power_dbm = VALUES(rx_power_dbm),
+                                     status = 'online',
+                                     last_sync_at = NOW()";
+                    $basicStmt = $db->prepare($basicSql);
+
+                    $db->beginTransaction();
+                    foreach ($onus as $onu) {
+                        $basicStmt->execute([
+                            'tid' => $tenantId,
+                            'did' => $deviceId,
+                            'pon' => $onu['ponPort'],
+                            'pname' => $onu['ponPortName'],
+                            'onuid' => $onu['onuId'],
+                            'mac' => $onu['macAddress'],
+                            'rx' => $onu['rxPowerDbm'],
+                        ]);
+                    }
+                    $db->commit();
+                } catch (\Throwable $e2) {
+                    if ($db->inTransaction()) $db->rollBack();
+                    error_log("OLT ONU basic fallback sync failed: " . $e2->getMessage());
+                }
             }
         }
 
@@ -158,8 +194,9 @@ class OltSyncService {
         $syncAgeMinutes = $lastSync ? round((time() - strtotime($lastSync)) / 60) : null;
 
         // Fetch stored ONUs count by PON port
-        $stmtCounts = $db->prepare("SELECT pon_port, COUNT(*) as count FROM olt_onus WHERE tenant_id = :tid AND network_device_id = :did GROUP BY pon_port");
-        $stmtCounts->execute(['tid' => $tenantId, 'did' => $deviceId]);
+        $devTid = (int)($oltDev['tenant_id'] ?? $tenantId);
+        $stmtCounts = $db->prepare("SELECT pon_port, COUNT(*) as count FROM olt_onus WHERE (tenant_id = :tid OR tenant_id = :dtid) AND network_device_id = :did GROUP BY pon_port");
+        $stmtCounts->execute(['tid' => $tenantId, 'dtid' => $devTid, 'did' => $deviceId]);
         $countsByPon = [];
         $totalStored = 0;
         foreach ($stmtCounts->fetchAll() as $row) {
@@ -206,6 +243,35 @@ class OltSyncService {
             'ponPorts' => $ponPorts,
             'totalOnus' => $totalStored,
         ];
+    }
+
+    /**
+     * Ensures all modern schema columns exist in olt_onus table
+     */
+    public static function ensureOltSchema(PDO $db): void {
+        static $checked = false;
+        if ($checked) return;
+
+        try {
+            $colsStmt = $db->query("SHOW COLUMNS FROM olt_onus");
+            $existingCols = [];
+            while ($c = $colsStmt->fetch(PDO::FETCH_ASSOC)) {
+                $existingCols[] = strtolower($c['Field']);
+            }
+
+            if (!in_array('router_mac', $existingCols)) {
+                $db->exec("ALTER TABLE olt_onus ADD COLUMN router_mac VARCHAR(30) NULL AFTER mac_address");
+            }
+            if (!in_array('vlan_id', $existingCols)) {
+                $db->exec("ALTER TABLE olt_onus ADD COLUMN vlan_id INT NULL AFTER router_mac");
+            }
+            if (!in_array('pppoe_username', $existingCols)) {
+                $db->exec("ALTER TABLE olt_onus ADD COLUMN pppoe_username VARCHAR(100) NULL AFTER vlan_id");
+            }
+            $checked = true;
+        } catch (\Throwable $e) {
+            error_log("Failed to auto-migrate olt_onus table: " . $e->getMessage());
+        }
     }
 }
 

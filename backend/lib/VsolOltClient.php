@@ -15,7 +15,7 @@ class VsolOltClient {
     private ?string $cookieFile = null;
     private bool $isLoggedIn = false;
 
-    public function __construct(string $host, int $port = 80, string $username = 'admin', string $password = '', string $protocol = 'https', int $timeout = 8) {
+    public function __construct(string $host, int $port = 80, string $username = 'admin', string $password = '', string $protocol = 'https', int $timeout = 20) {
         $this->host = trim($host);
         $this->port = $port > 0 ? $port : 80;
         $this->username = $username;
