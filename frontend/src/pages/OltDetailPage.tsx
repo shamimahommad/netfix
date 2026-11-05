@@ -30,7 +30,7 @@ interface OnuRecord {
   routerMac?: string | null;
   vlanId?: number | null;
   pppoe?: string | null;
-  rxPowerDbm: number;
+  rxPowerDbm?: number | null;
   status: string;
   lastSyncAt: string;
   customer?: {
@@ -195,9 +195,15 @@ export default function OltDetailPage() {
       if (selectedPon !== 'all' && onu.ponPort !== selectedPon) return false;
 
       // Optical Signal filter
-      if (signalFilter === 'good' && onu.rxPowerDbm < -24) return false;
-      if (signalFilter === 'fair' && (onu.rxPowerDbm >= -24 || onu.rxPowerDbm < -27)) return false;
-      if (signalFilter === 'low' && onu.rxPowerDbm >= -27) return false;
+      if (signalFilter === 'good') {
+        if (onu.rxPowerDbm === null || onu.rxPowerDbm === undefined || isNaN(onu.rxPowerDbm) || onu.rxPowerDbm < -24) return false;
+      }
+      if (signalFilter === 'fair') {
+        if (onu.rxPowerDbm === null || onu.rxPowerDbm === undefined || isNaN(onu.rxPowerDbm) || onu.rxPowerDbm >= -24 || onu.rxPowerDbm < -27) return false;
+      }
+      if (signalFilter === 'low') {
+        if (onu.rxPowerDbm === null || onu.rxPowerDbm === undefined || isNaN(onu.rxPowerDbm) || onu.rxPowerDbm >= -27) return false;
+      }
 
       // Search query
       if (!searchQuery.trim()) return true;
@@ -215,7 +221,14 @@ export default function OltDetailPage() {
     });
   }, [onus, selectedPon, signalFilter, searchQuery]);
 
-  const getPowerColor = (power: number) => {
+  const getPowerColor = (power: number | null | undefined) => {
+    if (power === null || power === undefined || isNaN(power)) {
+      return {
+        badge: 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700',
+        text: 'text-slate-500 dark:text-slate-400 font-medium',
+        label: 'No Signal',
+      };
+    }
     if (power >= -24) {
       return {
         badge: 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60',
@@ -696,18 +709,31 @@ export default function OltDetailPage() {
 
                       {/* Optical Rx Power */}
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs border ${pwr.badge}`}>
-                          <span className={pwr.text}>{onu.rxPowerDbm.toFixed(2)} dBm</span>
-                          <span className="text-[10px] opacity-75">({pwr.label})</span>
-                        </span>
+                        {onu.rxPowerDbm !== null && onu.rxPowerDbm !== undefined && !isNaN(onu.rxPowerDbm) ? (
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs border ${pwr.badge}`}>
+                            <span className={pwr.text}>{onu.rxPowerDbm.toFixed(2)} dBm</span>
+                            <span className="text-[10px] opacity-75">({pwr.label})</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                            — (No Signal)
+                          </span>
+                        )}
                       </td>
 
                       {/* Status */}
                       <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                          {onu.status.toUpperCase()}
-                        </span>
+                        {onu.status?.toLowerCase() === 'online' ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            ONLINE
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                            OFFLINE
+                          </span>
+                        )}
                       </td>
 
                       {/* Router MAC & VLAN */}

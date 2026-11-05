@@ -41,8 +41,9 @@ class OltSyncService {
         if ($totalPonPorts <= 0) $totalPonPorts = 8;
         $ponType = strtolower($oltDev['pon_type'] ?? 'epon');
 
-        // 20 second timeout for reliable cloud server to physical OLT latency
-        $client = new VsolOltClient($ip, $port, $user, $pass, $proto, 20);
+        // Dynamic timeout: 45s for 8+ port OLTs with hundreds of ONUs, 25s for 4-port
+        $timeout = ($totalPonPorts > 4) ? 45 : 25;
+        $client = new VsolOltClient($ip, $port, $user, $pass, $proto, $timeout);
         $sysInfo = $client->getSystemInfo($totalPonPorts);
         $ponPorts = $client->getPonPorts($totalPonPorts, $ponType);
         $onus = $client->getOnus(null, true);
@@ -68,6 +69,13 @@ class OltSyncService {
             ? "VSOL " . strtoupper($ponType) . " {$totalPonPorts}-Port OLT" 
             : 'V1601E04-DP';
 
+        $onlineCount = 0;
+        foreach ($onus as $o) {
+            if (($o['status'] ?? 'online') === 'online') {
+                $onlineCount++;
+            }
+        }
+
         // Update network_devices table with telemetry JSON & last_sync_at
         $telemetry = [
             'system' => $sysInfo,
@@ -82,7 +90,8 @@ class OltSyncService {
             'temperatureC' => !empty($sysInfo['cpuTemp']) ? (float)str_replace('°C', '', $sysInfo['cpuTemp']) : null,
             'totalPonPorts' => $totalPonPorts,
             'ponPorts' => $ponPorts,
-            'totalOnusOnline' => count($onus),
+            'totalOnus' => count($onus),
+            'totalOnusOnline' => $onlineCount,
             'lastHardwareSync' => date('Y-m-d H:i:s'),
         ];
 
@@ -110,7 +119,7 @@ class OltSyncService {
 
             try {
                 $sql = "INSERT INTO olt_onus (tenant_id, network_device_id, pon_port, pon_port_name, onu_id, mac_address, router_mac, vlan_id, pppoe_username, rx_power_dbm, status, last_sync_at) 
-                        VALUES (:tid, :did, :pon, :pname, :onuid, :mac, :rmac, :vlan, :pppoe, :rx, 'online', NOW())
+                        VALUES (:tid, :did, :pon, :pname, :onuid, :mac, :rmac, :vlan, :pppoe, :rx, :status, NOW())
                         ON DUPLICATE KEY UPDATE 
                             pon_port = VALUES(pon_port),
                             pon_port_name = VALUES(pon_port_name),
@@ -119,14 +128,15 @@ class OltSyncService {
                             vlan_id = COALESCE(VALUES(vlan_id), vlan_id),
                             pppoe_username = COALESCE(VALUES(pppoe_username), pppoe_username),
                             rx_power_dbm = VALUES(rx_power_dbm),
-                            status = 'online',
+                            status = VALUES(status),
                             last_sync_at = NOW()";
                 $insStmt = $db->prepare($sql);
 
                 $db->beginTransaction();
                 foreach ($onus as $onu) {
                     $onuId = $onu['onuId'];
-                    $macEntry = $macTable[$onuId] ?? null;
+                    $onuMac = $onu['macAddress'];
+                    $macEntry = $macTable[$onuId] ?? ($macTable[$onuMac] ?? null);
                     $routerMac = $macEntry['routerMac'] ?? null;
                     $vlanId = $macEntry['vlanId'] ?? null;
                     $pppoeUser = null;
@@ -146,6 +156,7 @@ class OltSyncService {
                         'vlan' => $vlanId,
                         'pppoe' => $pppoeUser,
                         'rx' => $onu['rxPowerDbm'],
+                        'status' => $onu['status'] ?? 'online',
                     ]);
                 }
                 $db->commit();
@@ -156,13 +167,13 @@ class OltSyncService {
                 // Fallback: insert with basic columns guaranteed in standard schema
                 try {
                     $basicSql = "INSERT INTO olt_onus (tenant_id, network_device_id, pon_port, pon_port_name, onu_id, mac_address, rx_power_dbm, status, last_sync_at) 
-                                 VALUES (:tid, :did, :pon, :pname, :onuid, :mac, :rx, 'online', NOW())
+                                 VALUES (:tid, :did, :pon, :pname, :onuid, :mac, :rx, :status, NOW())
                                  ON DUPLICATE KEY UPDATE 
                                      pon_port = VALUES(pon_port),
                                      pon_port_name = VALUES(pon_port_name),
                                      onu_id = VALUES(onu_id),
                                      rx_power_dbm = VALUES(rx_power_dbm),
-                                     status = 'online',
+                                     status = VALUES(status),
                                      last_sync_at = NOW()";
                     $basicStmt = $db->prepare($basicSql);
 
@@ -176,6 +187,7 @@ class OltSyncService {
                             'onuid' => $onu['onuId'],
                             'mac' => $onu['macAddress'],
                             'rx' => $onu['rxPowerDbm'],
+                            'status' => $onu['status'] ?? 'online',
                         ]);
                     }
                     $db->commit();
@@ -204,13 +216,18 @@ class OltSyncService {
 
         // Fetch stored ONUs count by PON port
         $devTid = (int)($oltDev['tenant_id'] ?? $tenantId);
-        $stmtCounts = $db->prepare("SELECT pon_port, COUNT(*) as count FROM olt_onus WHERE (tenant_id = :tid OR tenant_id = :dtid) AND network_device_id = :did GROUP BY pon_port");
+        $stmtCounts = $db->prepare("SELECT pon_port, COUNT(*) as count, SUM(CASE WHEN status = 'online' THEN 1 ELSE 0 END) as online_count FROM olt_onus WHERE (tenant_id = :tid OR tenant_id = :dtid) AND network_device_id = :did GROUP BY pon_port");
         $stmtCounts->execute(['tid' => $tenantId, 'dtid' => $devTid, 'did' => $deviceId]);
         $countsByPon = [];
+        $onlineByPon = [];
         $totalStored = 0;
+        $totalOnline = 0;
         foreach ($stmtCounts->fetchAll() as $row) {
-            $countsByPon[(int)$row['pon_port']] = (int)$row['count'];
+            $p = (int)$row['pon_port'];
+            $countsByPon[$p] = (int)$row['count'];
+            $onlineByPon[$p] = (int)($row['online_count'] ?? $row['count']);
             $totalStored += (int)$row['count'];
+            $totalOnline += (int)($row['online_count'] ?? $row['count']);
         }
 
         $totalPonPorts = (int)($oltDev['total_pon_ports'] ?? 8);
@@ -264,6 +281,7 @@ class OltSyncService {
             foreach ($ponPorts as &$pp) {
                 $pNum = (int)($pp['portNum'] ?? str_replace('PON', '', $pp['port']));
                 $pp['connectedOnus'] = $countsByPon[$pNum] ?? 0;
+                $pp['onlineOnus'] = $onlineByPon[$pNum] ?? 0;
             }
             unset($pp);
         }
@@ -305,6 +323,7 @@ class OltSyncService {
             'totalPonPorts' => $totalPonPorts,
             'ponPorts' => $ponPorts,
             'totalOnus' => $totalStored,
+            'totalOnusOnline' => $totalOnline,
         ];
     }
 

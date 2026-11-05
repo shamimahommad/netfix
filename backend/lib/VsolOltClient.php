@@ -84,7 +84,7 @@ class VsolOltClient {
     /**
      * Perform an authenticated GET or POST request
      */
-    private function request(string $endpoint, array $postData = [], bool $isPost = false): ?string {
+    private function request(string $endpoint, array $postData = [], bool $isPost = false, ?int $customTimeout = null): ?string {
         if (!$this->isLoggedIn && !$this->login()) {
             return null;
         }
@@ -94,7 +94,8 @@ class VsolOltClient {
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
         curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, $this->timeout);
+        $timeout = $customTimeout !== null ? $customTimeout : $this->timeout;
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
         curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 6);
         curl_setopt($ch, CURLOPT_COOKIEJAR, $this->cookieFile);
         curl_setopt($ch, CURLOPT_COOKIEFILE, $this->cookieFile);
@@ -282,91 +283,186 @@ class VsolOltClient {
      * Retrieve all ONUs from OLT optical diagnosis and status tables
      */
     public function getOnus(?int $targetPon = null, bool $forceRefresh = false): array {
-        // Step 1: Query onuopmdiag.html for optical Rx/Tx powers & distance
-        $diagHtml = $this->request('onuopmdiag.html', ['select' => '255', 'port_refresh' => 'Refresh'], true);
-        if (!$diagHtml) {
-            $diagHtml = $this->request('onuopmdiag.html');
+        // STEP 1: Query onustatusinfo.html FIRST!
+        // Fast, in-memory table with online/offline status, alive time, distance, and deregister reason.
+        // Takes ~200ms and NEVER times out even with 500+ ONUs.
+        // DO NOT send port_refresh => 'Refresh' as that triggers a slow synchronous hardware laser poll.
+        $statusPost = ['select' => '255', 'who' => '100'];
+        if ($targetPon !== null) {
+            $statusPost['select'] = (string)$targetPon;
         }
 
-        $diagData = [];
-        if ($diagHtml) {
-            // Row format: <tr><td class='hd'>EPON0/1:1</td> <td>0C:6A:BC:93:CD:49</td> <td>...</td> <td>Distance</td> <td>Temp</td> <td>Voltage</td> <td>Bias</td> <td>Tx</td> <td>Rx</td></tr>
-            if (preg_match_all('/<tr>\s*<td[^>]*>(EPON0\/(\d+):\d+|GPON0\/(\d+):\d+)<\/td>\s*<td[^>]*>\s*([0-9A-Fa-f:]{17})\s*<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>([\d\.]+)<\/td>\s*<td[^>]*>([\d\.\-]+)<\/td>\s*<td[^>]*>([\d\.\-]+)<\/td>\s*<td[^>]*>([\d\.\-]+)<\/td>\s*<td[^>]*>([\d\.\-]+)<\/td>\s*<td[^>]*>([-\d\.]+)<\/td>\s*<\/tr>/is', $diagHtml, $matches, PREG_SET_ORDER)) {
-                foreach ($matches as $m) {
-                    $onuId = trim($m[1]);
-                    $ponNum = (int)($m[2] ?: $m[3] ?: 1);
-                    $mac = strtoupper(trim($m[4]));
-                    $diagData[$onuId] = [
-                        'onuId' => $onuId,
-                        'ponPort' => $ponNum,
-                        'ponPortName' => "EPON 0/$ponNum",
-                        'macAddress' => $mac,
-                        'description' => trim(strip_tags($m[5])),
-                        'distanceM' => (int)$m[6],
-                        'temperatureC' => (float)$m[7],
-                        'txPowerDbm' => (float)$m[10],
-                        'rxPowerDbm' => (float)$m[11],
-                    ];
-                }
-            }
-        }
-
-        // Step 2: Query onustatusinfo.html for online/offline status, alive time, and deregister reason
-        $statusHtml = $this->request('onustatusinfo.html', ['select' => '255', 'port_refresh' => 'Refresh'], true);
+        $statusHtml = $this->request('onustatusinfo.html', $statusPost, true, 20);
         if (!$statusHtml) {
-            $statusHtml = $this->request('onustatusinfo.html');
+            $statusHtml = $this->request('onustatusinfo.html', [], false, 15);
         }
 
         $statusData = [];
         if ($statusHtml) {
-            // Row format: <tr><td class='hd'>EPON0/1:1</td> <td>...Online...</td> <td>0c:6a:bc:93:cd:49</td> ...
-            if (preg_match_all('/<tr><td[^>]*>(EPON0\/(\d+):\d+|GPON0\/(\d+):\d+)<\/td>\s*<td>(.*?)<\/td>\s*<td>\s*([0-9A-Fa-f:]{17})\s*<\/td><td>(.*?)<\/td><td>([\d\.]+)<\/td><td>([\d\.]+)<\/td><td>(.*?)<\/td><td>(.*?)<\/td><td>(.*?)<\/td><td>(.*?)<\/td>/is', $statusHtml, $matches, PREG_SET_ORDER)) {
-                foreach ($matches as $m) {
-                    $onuId = trim($m[1]);
-                    $ponNum = (int)($m[2] ?: $m[3] ?: 1);
-                    $rawStatus = strip_tags($m[4]);
-                    $isOnline = stripos($rawStatus, 'Online') !== false;
-                    $mac = strtoupper(trim($m[5]));
+            // Match rows with robust cell extractor
+            if (preg_match_all('/<tr[^>]*>(.*?)<\/tr>/is', $statusHtml, $rowMatches)) {
+                foreach ($rowMatches[1] as $rowHtml) {
+                    if (preg_match_all('/<td[^>]*>(.*?)<\/td>/is', $rowHtml, $cellMatches)) {
+                        $cells = array_map(function($c) {
+                            return trim(strip_tags($c));
+                        }, $cellMatches[1]);
 
-                    $statusData[$onuId] = [
-                        'onuId' => $onuId,
-                        'ponPort' => $ponNum,
-                        'ponPortName' => "EPON 0/$ponNum",
-                        'macAddress' => $mac,
-                        'status' => $isOnline ? 'online' : 'offline',
-                        'description' => trim(strip_tags($m[6])),
-                        'distanceM' => (int)$m[7],
-                        'lastRegisterTime' => trim(strip_tags($m[9])),
-                        'lastDeregisterTime' => trim(strip_tags($m[10])),
-                        'deregisterReason' => trim(strip_tags($m[11])),
-                        'aliveTime' => trim(strip_tags($m[12])),
-                    ];
+                        if (count($cells) >= 3) {
+                            if (preg_match('/^(?:E?PON|GPON)?\s*0?\/?:?\s*(\d+):(\d+)$/i', $cells[0], $pm)) {
+                                $ponNum = (int)$pm[1];
+                                $subId = (int)$pm[2];
+                                $onuId = "EPON0/{$ponNum}:{$subId}";
+                                $rawStatus = strtolower($cells[1] ?? '');
+                                $isOnline = stripos($rawStatus, 'online') !== false;
+                                $mac = strtoupper(trim($cells[2] ?? ''));
+
+                                if (preg_match('/^[0-9A-Fa-f:]{17}$/', $mac)) {
+                                    $statusData[$onuId] = [
+                                        'onuId' => $onuId,
+                                        'ponPort' => $ponNum,
+                                        'ponPortName' => "EPON 0/{$ponNum}",
+                                        'macAddress' => $mac,
+                                        'status' => $isOnline ? 'online' : 'offline',
+                                        'description' => $cells[3] ?? '',
+                                        'distanceM' => (isset($cells[4]) && is_numeric($cells[4])) ? (int)$cells[4] : null,
+                                        'lastRegisterTime' => $cells[6] ?? null,
+                                        'lastDeregisterTime' => $cells[7] ?? null,
+                                        'deregisterReason' => $cells[8] ?? null,
+                                        'aliveTime' => $cells[9] ?? null,
+                                    ];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fallback regex if cell parsing found nothing
+            if (empty($statusData)) {
+                if (preg_match_all('/<tr><td[^>]*>(EPON0\/(\d+):\d+|GPON0\/(\d+):\d+)<\/td>\s*<td>(.*?)<\/td>\s*<td>\s*([0-9A-Fa-f:]{17})\s*<\/td><td>(.*?)<\/td><td>([\d\.]+)<\/td><td>([\d\.]+)<\/td><td>(.*?)<\/td><td>(.*?)<\/td><td>(.*?)<\/td><td>(.*?)<\/td>/is', $statusHtml, $matches, PREG_SET_ORDER)) {
+                    foreach ($matches as $m) {
+                        $onuId = trim($m[1]);
+                        $ponNum = (int)($m[2] ?: $m[3] ?: 1);
+                        $rawStatus = strip_tags($m[4]);
+                        $isOnline = stripos($rawStatus, 'Online') !== false;
+                        $mac = strtoupper(trim($m[5]));
+
+                        $statusData[$onuId] = [
+                            'onuId' => $onuId,
+                            'ponPort' => $ponNum,
+                            'ponPortName' => "EPON 0/$ponNum",
+                            'macAddress' => $mac,
+                            'status' => $isOnline ? 'online' : 'offline',
+                            'description' => trim(strip_tags($m[6])),
+                            'distanceM' => (int)$m[7],
+                            'lastRegisterTime' => trim(strip_tags($m[9])),
+                            'lastDeregisterTime' => trim(strip_tags($m[10])),
+                            'deregisterReason' => trim(strip_tags($m[11])),
+                            'aliveTime' => trim(strip_tags($m[12])),
+                        ];
+                    }
                 }
             }
         }
 
-        // Combine into unified list
-        $allKeys = array_unique(array_merge(array_keys($diagData), array_keys($statusData)));
+        // STEP 2: Query onuopmdiag.html for optical Rx/Tx powers & distance
+        // Without port_refresh => 'Refresh' to prevent overloading OLT CPU
+        $diagPost = ['select' => '255', 'who' => '100'];
+        if ($targetPon !== null) {
+            $diagPost['select'] = (string)$targetPon;
+        }
+
+        // Give up to 45s for 8-port/16-port OLTs with 500+ ONUs
+        $diagHtml = $this->request('onuopmdiag.html', $diagPost, true, 45);
+        if (!$diagHtml) {
+            $diagHtml = $this->request('onuopmdiag.html', [], false, 20);
+        }
+
+        $diagData = [];
+        if ($diagHtml) {
+            if (preg_match_all('/<tr[^>]*>(.*?)<\/tr>/is', $diagHtml, $rowMatches)) {
+                foreach ($rowMatches[1] as $rowHtml) {
+                    if (preg_match_all('/<td[^>]*>(.*?)<\/td>/is', $rowHtml, $cellMatches)) {
+                        $cells = array_map(function($c) {
+                            return trim(strip_tags($c));
+                        }, $cellMatches[1]);
+
+                        if (count($cells) >= 8) {
+                            if (preg_match('/^(?:E?PON|GPON)?\s*0?\/?:?\s*(\d+):(\d+)$/i', $cells[0], $pm)) {
+                                $ponNum = (int)$pm[1];
+                                $subId = (int)$pm[2];
+                                $onuId = "EPON0/{$ponNum}:{$subId}";
+                                $mac = strtoupper(trim($cells[1] ?? ''));
+
+                                $tx = (isset($cells[7]) && is_numeric($cells[7])) ? (float)$cells[7] : null;
+                                $rx = (isset($cells[8]) && is_numeric($cells[8])) ? (float)$cells[8] : null;
+
+                                $diagData[$onuId] = [
+                                    'onuId' => $onuId,
+                                    'ponPort' => $ponNum,
+                                    'ponPortName' => "EPON 0/{$ponNum}",
+                                    'macAddress' => $mac,
+                                    'description' => $cells[2] ?? '',
+                                    'distanceM' => (isset($cells[3]) && is_numeric($cells[3])) ? (int)$cells[3] : null,
+                                    'temperatureC' => (isset($cells[4]) && is_numeric($cells[4])) ? (float)$cells[4] : null,
+                                    'txPowerDbm' => $tx,
+                                    'rxPowerDbm' => $rx,
+                                ];
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fallback regex
+            if (empty($diagData)) {
+                if (preg_match_all('/<tr>\s*<td[^>]*>(EPON0\/(\d+):\d+|GPON0\/(\d+):\d+)<\/td>\s*<td[^>]*>\s*([0-9A-Fa-f:]{17})\s*<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>([\d\.]+)<\/td>\s*<td[^>]*>([\d\.\-]+)<\/td>\s*<td[^>]*>([\d\.\-]+)<\/td>\s*<td[^>]*>([\d\.\-]+)<\/td>\s*<td[^>]*>([\d\.\-]+)<\/td>\s*<td[^>]*>([-\d\.]+)<\/td>\s*<\/tr>/is', $diagHtml, $matches, PREG_SET_ORDER)) {
+                    foreach ($matches as $m) {
+                        $onuId = trim($m[1]);
+                        $ponNum = (int)($m[2] ?: $m[3] ?: 1);
+                        $mac = strtoupper(trim($m[4]));
+                        $diagData[$onuId] = [
+                            'onuId' => $onuId,
+                            'ponPort' => $ponNum,
+                            'ponPortName' => "EPON 0/$ponNum",
+                            'macAddress' => $mac,
+                            'description' => trim(strip_tags($m[5])),
+                            'distanceM' => (int)$m[6],
+                            'temperatureC' => (float)$m[7],
+                            'txPowerDbm' => (float)$m[10],
+                            'rxPowerDbm' => (float)$m[11],
+                        ];
+                    }
+                }
+            }
+        }
+
+        // STEP 3: Combine statusData and diagData
+        $allKeys = array_unique(array_merge(array_keys($statusData), array_keys($diagData)));
         $onus = [];
 
         foreach ($allKeys as $k) {
-            $diag = $diagData[$k] ?? [];
             $stat = $statusData[$k] ?? [];
+            $diag = $diagData[$k] ?? [];
 
-            $ponPort = $diag['ponPort'] ?? $stat['ponPort'] ?? 1;
+            $ponPort = $stat['ponPort'] ?? $diag['ponPort'] ?? 1;
             if ($targetPon !== null && $ponPort !== $targetPon) {
                 continue;
             }
 
+            $isOnline = ($stat['status'] ?? 'online') === 'online';
+            // Use real optical Rx power if measured, otherwise default to -20.0 for online or null for offline
+            $rxPower = $diag['rxPowerDbm'] ?? ($isOnline ? -20.0 : null);
+
             $onus[] = [
                 'ponPort' => $ponPort,
-                'ponPortName' => $diag['ponPortName'] ?? $stat['ponPortName'] ?? "EPON 0/$ponPort",
+                'ponPortName' => $stat['ponPortName'] ?? $diag['ponPortName'] ?? "EPON 0/$ponPort",
                 'onuId' => $k,
-                'macAddress' => $diag['macAddress'] ?? $stat['macAddress'] ?? '',
-                'rxPowerDbm' => $diag['rxPowerDbm'] ?? -20.0,
+                'macAddress' => $stat['macAddress'] ?? $diag['macAddress'] ?? '',
+                'rxPowerDbm' => $rxPower,
                 'txPowerDbm' => $diag['txPowerDbm'] ?? null,
-                'status' => $stat['status'] ?? 'online',
-                'distanceM' => $diag['distanceM'] ?? $stat['distanceM'] ?? null,
+                'status' => $stat['status'] ?? (!empty($diag) ? 'online' : 'offline'),
+                'distanceM' => $stat['distanceM'] ?? $diag['distanceM'] ?? null,
                 'description' => !empty($stat['description']) ? $stat['description'] : ($diag['description'] ?? ''),
                 'aliveTime' => $stat['aliveTime'] ?? null,
                 'lastRegisterTime' => $stat['lastRegisterTime'] ?? null,
@@ -391,72 +487,43 @@ class VsolOltClient {
 
     /**
      * Retrieve MAC Address Table (Option 2) from macinfo.html
-     * Extracts Router MAC, VLAN ID, and Port ID (e.g. EPON0/1:9)
+     * Extracts Router MAC, VLAN ID, and Port ID (e.g. EPON0/1:9 or EPON0/8:19)
+     * Compatible with 4-Port, 8-Port, and 16-Port OLTs
      * 
      * @return array Map indexed by portId (e.g. 'EPON0/1:9' => ['vlanId' => 100, 'routerMac' => '50:0F:F5:D4:7E:58', 'type' => 'Dynamic'])
      */
     public function getMacTable(?int $targetPon = null): array {
-        // Step 1: Initial GET to acquire SessionKey
-        $html = $this->request('macinfo.html');
+        // Fast GET to macinfo.html (defaults to macport=0 / ALL ports across the entire OLT in < 400ms)
+        $html = $this->request('macinfo.html', [], false, 15);
+        if (!$html) {
+            $html = $this->request('macinfo.html', ['macport' => '0', 'who' => '100'], true, 15);
+        }
         if (!$html) {
             return [];
         }
 
-        $sessionKey = '';
-        if (preg_match('/SessionKey\.value\s*=\s*[\'"]([^\'"]+)[\'"]/i', $html, $skMatch)) {
-            $sessionKey = $skMatch[1];
-        }
-
-        // Port codes in VSOL web management:
-        // 9 = EPON0/1, 10 = EPON0/2, 11 = EPON0/3, 12 = EPON0/4
-        $portCodes = [
-            1 => 9,
-            2 => 10,
-            3 => 11,
-            4 => 12,
-        ];
-
-        if ($targetPon !== null && isset($portCodes[$targetPon])) {
-            $portsToQuery = [$targetPon => $portCodes[$targetPon]];
-        } else {
-            $portsToQuery = $portCodes;
-        }
-
         $entries = [];
 
-        foreach ($portsToQuery as $ponNum => $code) {
-            $postData = [
-                'macport' => (string)$code,
-                'who' => '100',
-            ];
-            if ($sessionKey) {
-                $postData['SessionKey'] = $sessionKey;
-            }
+        if (preg_match_all('/<tr>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<\/tr>/is', $html, $rows, PREG_SET_ORDER)) {
+            foreach ($rows as $r) {
+                $vlan = trim(strip_tags($r[1]));
+                $mac = trim(strip_tags($r[2]));
+                $type = trim(strip_tags($r[3]));
+                $port = trim(strip_tags($r[4]));
 
-            $res = $this->request('macinfo.html', $postData, true);
-            if (!$res) continue;
+                if (is_numeric($vlan) && preg_match('/^[0-9A-Fa-f:]{17}$/', $mac)) {
+                    $cleanMac = strtoupper(str_replace(['-', '.', ' '], ':', $mac));
+                    $entry = [
+                        'vlanId' => (int)$vlan,
+                        'routerMac' => $cleanMac,
+                        'type' => $type,
+                        'portId' => $port,
+                    ];
 
-            // Update SessionKey for next port request
-            if (preg_match('/SessionKey\.value\s*=\s*[\'"]([^\'"]+)[\'"]/i', $res, $nextSk)) {
-                $sessionKey = $nextSk[1];
-            }
-
-            if (preg_match_all('/<tr>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<\/tr>/is', $res, $rows, PREG_SET_ORDER)) {
-                foreach ($rows as $r) {
-                    $vlan = trim(strip_tags($r[1]));
-                    $mac = trim(strip_tags($r[2]));
-                    $type = trim(strip_tags($r[3]));
-                    $port = trim(strip_tags($r[4]));
-
-                    if (is_numeric($vlan) && preg_match('/^[0-9A-Fa-f:]{17}$/', $mac)) {
-                        $cleanMac = strtoupper(str_replace(['-', '.', ' '], ':', $mac));
-                        $entries[$port] = [
-                            'vlanId' => (int)$vlan,
-                            'routerMac' => $cleanMac,
-                            'type' => $type,
-                            'portId' => $port,
-                        ];
-                    }
+                    // Index by exact port (e.g. EPON0/1:9, EPON0/8:19)
+                    $entries[$port] = $entry;
+                    // Also index by Router MAC for fast lookup
+                    $entries[$cleanMac] = $entry;
                 }
             }
         }
