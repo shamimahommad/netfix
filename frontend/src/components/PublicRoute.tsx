@@ -12,24 +12,10 @@ interface PublicRouteProps {
  */
 export default function PublicRoute({ children }: PublicRouteProps) {
   const { isAuthenticated, user } = useAuthStore();
-  const location = useLocation();
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
 
-  // Replace history entry to prevent back navigation to login
-  useEffect(() => {
-    if (isAuthenticated && user && location.pathname === '/login') {
-      // Replace current history entry
-      const target =
-        user.user_type === 'saas'
-          ? '/saas/dashboard'
-          : user.user_type === 'isp'
-          ? '/dashboard'
-          : '/customer/dashboard';
-      window.history.replaceState(null, '', target);
-    }
-  }, [isAuthenticated, user, location.pathname]);
-
-  // If user is authenticated, redirect to their dashboard
-  if (isAuthenticated && user) {
+  // If user is authenticated and has active token, redirect to their dashboard
+  if (token && isAuthenticated && user) {
     const target =
       user.user_type === 'saas'
         ? '/saas/dashboard'

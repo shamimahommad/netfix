@@ -39,6 +39,8 @@ export default function CustomerLoginPage() {
 
   // Redirect if already authenticated
   useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    if (!token) return;
     if (isAuthenticated && user) {
       if (user.role_code === 'customer' || user.user_type === 'customer') {
         navigate('/customer/dashboard', { replace: true });

@@ -242,7 +242,11 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
   const handleLogout = () => {
     logout();
     clearSelectedTenant();
-    navigate('/login', { replace: true });
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('auth_user');
+    localStorage.removeItem('auth-storage');
+    sessionStorage.clear();
+    window.location.replace('/login');
   };
 
   // Load balance on mount and on refresh for reseller-type (isp) users

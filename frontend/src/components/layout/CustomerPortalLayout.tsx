@@ -58,7 +58,11 @@ export default function CustomerPortalLayout() {
   const handleLogout = () => {
     authService.logout();
     logout();
-    navigate('/customer/login', { replace: true });
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('auth_user');
+    localStorage.removeItem('auth-storage');
+    sessionStorage.clear();
+    window.location.replace('/customer/login');
   };
 
   const copyId = (text: string) => {

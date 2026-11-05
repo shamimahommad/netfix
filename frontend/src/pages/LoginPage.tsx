@@ -51,8 +51,10 @@ export default function LoginPage() {
   const [demoFilled, setDemoFilled] = useState<string | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
 
-  // Redirect if already authenticated
+  // Redirect if already authenticated with a valid token
   useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    if (!token) return;
     if (isAuthenticated && user) {
       if (user.user_type === 'saas') {
         navigate('/saas/dashboard', { replace: true });

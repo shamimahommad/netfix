@@ -75,9 +75,12 @@ api.interceptors.response.use(
           isHandling401 = true;
           useAuthStore.getState().logout();
           localStorage.removeItem('access_token');
+          localStorage.removeItem('auth_user');
+          localStorage.removeItem('auth-storage');
+          sessionStorage.clear();
           const path = window.location.pathname;
           if (path !== '/login' && path !== '/' && !path.startsWith('/customer/login')) {
-            window.location.href = path.startsWith('/customer') ? '/customer/login' : '/login';
+            window.location.replace(path.startsWith('/customer') ? '/customer/login' : '/login');
           }
           // Reset so next login can handle 401 again
           setTimeout(() => { isHandling401 = false; }, 1000);

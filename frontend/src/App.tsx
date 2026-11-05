@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider } from './contexts/ToastContext';
@@ -78,6 +79,37 @@ function ErrorPageFromLocation() {
 }
 
 function AppContent() {
+  // Global protection: Prevent restoring protected views from bfcache or browser Back button after logout
+  useEffect(() => {
+    const checkAuthOnNavigation = () => {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+      const path = window.location.pathname;
+      const isProtected =
+        path.startsWith('/dashboard') ||
+        path.startsWith('/saas') ||
+        (path.startsWith('/customer') &&
+          !path.startsWith('/customer/login') &&
+          !path.startsWith('/customer/payment-callback'));
+
+      if (isProtected && !token) {
+        window.location.replace(path.startsWith('/customer') ? '/customer/login' : '/login');
+      }
+    };
+
+    const handlePageShow = (event: PageTransitionEvent) => {
+      // Handles page restore from bfcache (Back-Forward Cache)
+      checkAuthOnNavigation();
+    };
+
+    window.addEventListener('pageshow', handlePageShow);
+    window.addEventListener('popstate', checkAuthOnNavigation);
+
+    return () => {
+      window.removeEventListener('pageshow', handlePageShow);
+      window.removeEventListener('popstate', checkAuthOnNavigation);
+    };
+  }, []);
+
   return (
     <BrowserRouter>
       <div className="h-screen flex flex-col overflow-hidden">

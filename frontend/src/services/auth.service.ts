@@ -112,11 +112,10 @@ export const authService = {
   },
 
   async logout(): Promise<void> {
-    // Clear token from localStorage
     localStorage.removeItem('access_token');
-    // Since JWT is stateless and stored in httpOnly cookies,
-    // logout is handled client-side by clearing auth state
-    // The cookie will expire naturally or can be cleared by backend if needed
+    localStorage.removeItem('auth_user');
+    localStorage.removeItem('auth-storage');
+    sessionStorage.clear();
     return Promise.resolve();
   },
 

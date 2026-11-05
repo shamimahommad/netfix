@@ -36,8 +36,13 @@ export default function AppLayout({ sidebarItems, userType, children }: AppLayou
   const { selectedTenant, clearSelectedTenant } = useTenantStore();
 
   useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    if (!token) {
+      window.location.replace('/login');
+      return;
+    }
     refreshMe();
-  }, [refreshMe]);
+  }, [refreshMe, location.pathname]);
 
   // On mobile, lock body scroll when sidebar is open so content behind doesn't scroll
   useEffect(() => {

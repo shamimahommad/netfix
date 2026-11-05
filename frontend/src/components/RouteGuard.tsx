@@ -11,9 +11,11 @@ export function RouteGuard({ allow, children }: RouteGuardProps) {
   const location = useLocation();
   const { user, isAuthenticated } = useAuthStore();
   const userType = user?.user_type;
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
 
-  if (!isAuthenticated || !userType) {
-    return <Navigate to="/login" replace state={{ from: location }} />;
+  if (!token || !isAuthenticated || !user || !userType) {
+    const redirectPath = allow.includes('customer') ? '/customer/login' : '/login';
+    return <Navigate to={redirectPath} replace state={{ from: location }} />;
   }
 
   // SaaS Super Admin has master access across portals (including tenant ISP dashboard when inspecting/impersonating)

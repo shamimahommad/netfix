@@ -30,6 +30,10 @@ interface AuthState {
 // Initialize from localStorage if available
 const getInitialUser = (): LoginResponse['user'] | null => {
   try {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    if (!token) {
+      return null;
+    }
     const stored = localStorage.getItem('auth_user');
     if (stored) {
       return JSON.parse(stored);
@@ -45,30 +49,38 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       user: getInitialUser(),
       balance: null,
-      isAuthenticated: !!getInitialUser(),
+      isAuthenticated: !!getInitialUser() && typeof window !== 'undefined' && !!localStorage.getItem('access_token'),
       isSaas: () => {
         const user = getInitialUser();
-        return user?.user_type === 'saas';
+        return typeof window !== 'undefined' && !!localStorage.getItem('access_token') && user?.user_type === 'saas';
       },
       isIsp: () => {
         const user = getInitialUser();
-        return user?.user_type === 'isp';
+        return typeof window !== 'undefined' && !!localStorage.getItem('access_token') && user?.user_type === 'isp';
       },
       isCustomer: () => {
         const user = getInitialUser();
-        return user?.user_type === 'customer';
+        return typeof window !== 'undefined' && !!localStorage.getItem('access_token') && user?.user_type === 'customer';
       },
       setUser: (user) => {
-        set({ user, isAuthenticated: !!user });
+        const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+        set({ user, isAuthenticated: !!user && !!token });
         if (user) {
           localStorage.setItem('auth_user', JSON.stringify(user));
         } else {
           localStorage.removeItem('auth_user');
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('auth-storage');
         }
       },
       setBalance: (balance) => set({ balance }),
       setImpersonation: (impersonated, impersonatedBy) => set({ impersonated, impersonatedBy }),
       refreshMe: async () => {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+        if (!token) {
+          set({ user: null, balance: null, isAuthenticated: false, impersonated: false, impersonatedBy: null });
+          return;
+        }
         try {
           const me = await authService.getMe();
           const existing = getInitialUser();
@@ -103,13 +115,18 @@ export const useAuthStore = create<AuthState>()(
             }
           }
         } catch {
-          set({ balance: null });
+          set({ user: null, balance: null, isAuthenticated: false, impersonated: false, impersonatedBy: null });
+          localStorage.removeItem('auth_user');
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('auth-storage');
         }
       },
       logout: () => {
         set({ user: null, balance: null, isAuthenticated: false, impersonated: false, impersonatedBy: null });
         localStorage.removeItem('auth_user');
-        localStorage.removeItem('access_token'); // Clear token
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('auth-storage');
+        sessionStorage.clear();
         useTenantStore.getState().clearSelectedTenant();
       },
     }),
