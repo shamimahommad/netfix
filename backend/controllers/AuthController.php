@@ -102,23 +102,43 @@ class AuthController {
         $phone = trim($data['phone'] ?? $data['password'] ?? '');
 
         if (empty($login) || empty($phone)) {
-            Response::error('Customer ID/email and mobile number are required', 400);
+            Response::error('Customer ID/email and mobile number or password are required', 400);
         }
 
         $db = Database::getConnection();
-        $stmt = $db->prepare("SELECT * FROM customers WHERE (customer_code = :l1 OR email = :l2 OR phone = :l3) AND status = 'active' LIMIT 1");
-        $stmt->execute(['l1' => $login, 'l2' => $login, 'l3' => $login]);
+        // Support login by customer_code, email, phone, OR PPPoE username
+        $stmt = $db->prepare("
+            SELECT c.*, na.username as pppoe_username, na.password as pppoe_password 
+            FROM customers c
+            LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
+            WHERE (c.customer_code = :l1 OR c.email = :l2 OR c.phone = :l3 OR na.username = :l4) 
+              AND c.status != 'cancelled' 
+            LIMIT 1
+        ");
+        $stmt->execute([
+            'l1' => $login,
+            'l2' => $login,
+            'l3' => $login,
+            'l4' => $login,
+        ]);
         $customer = $stmt->fetch();
 
         if (!$customer) {
             Response::error('Customer not found with provided credentials', 401);
         }
 
-        // Phone check (strip country code prefix if needed)
+        // Credentials check:
+        // 1. Phone number (last 10 digits match)
+        // 2. PPPoE network password match
+        // 3. Fallback demo password 'password123'
         $cleanInputPhone = preg_replace('/[^\d]/', '', $phone);
-        $cleanDbPhone = preg_replace('/[^\d]/', '', $customer['phone']);
-        if (!str_ends_with($cleanDbPhone, substr($cleanInputPhone, -10)) && $phone !== 'password123') {
-            Response::error('Invalid mobile number or credentials', 401);
+        $cleanDbPhone = preg_replace('/[^\d]/', '', $customer['phone'] ?? '');
+        $isPhoneMatch = !empty($cleanInputPhone) && !empty($cleanDbPhone) && str_ends_with($cleanDbPhone, substr($cleanInputPhone, -10));
+        $isPppoePasswordMatch = !empty($customer['pppoe_password']) && ($phone === $customer['pppoe_password']);
+        $isDemoMatch = ($phone === 'password123');
+
+        if (!$isPhoneMatch && !$isPppoePasswordMatch && !$isDemoMatch) {
+            Response::error('Invalid mobile number or password', 401);
         }
 
         $payload = [
@@ -181,6 +201,79 @@ class AuthController {
             'impersonated_by' => $user['impersonated_by'] ?? null,
             'impersonated_by_role' => $user['impersonated_by_role'] ?? null,
             'impersonated_by_email' => $user['impersonated_by_email'] ?? null,
+        ]);
+    }
+
+    public static function updateProfile(): void {
+        $user = AuthMiddleware::requireAuth();
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+        $db = Database::getConnection();
+
+        $userId = $user['user_id'];
+        $firstName = trim($data['first_name'] ?? $data['firstName'] ?? '');
+        $lastName = trim($data['last_name'] ?? $data['lastName'] ?? '');
+        $fullName = trim($data['full_name'] ?? $data['fullName'] ?? $data['name'] ?? '');
+
+        if (!empty($fullName) && empty($firstName) && empty($lastName)) {
+            $parts = explode(' ', $fullName, 2);
+            $firstName = $parts[0];
+            $lastName = $parts[1] ?? '';
+        }
+
+        if (empty($firstName)) {
+            Response::error('First name or full name is required', 400);
+        }
+
+        $email = isset($data['email']) ? trim($data['email']) : null;
+        $phone = isset($data['phone']) ? trim($data['phone']) : null;
+
+        // If email is changing, ensure uniqueness
+        if (!empty($email) && $email !== $user['email']) {
+            $checkStmt = $db->prepare("SELECT user_id FROM users WHERE email = :email AND user_id != :uid LIMIT 1");
+            $checkStmt->execute(['email' => $email, 'uid' => $userId]);
+            if ($checkStmt->fetch()) {
+                Response::error('Email is already registered by another user', 409);
+            }
+        }
+
+        $fields = ["first_name = :fn", "last_name = :ln"];
+        $params = [
+            'fn' => $firstName,
+            'ln' => $lastName,
+            'uid' => $userId,
+        ];
+
+        if ($email !== null) {
+            $fields[] = "email = :email";
+            $params['email'] = $email;
+        }
+        if ($phone !== null) {
+            $fields[] = "phone = :phone";
+            $params['phone'] = $phone;
+        }
+
+        $sql = "UPDATE users SET " . implode(', ', $fields) . ", updated_at = NOW() WHERE user_id = :uid";
+        $stmt = $db->prepare($sql);
+        $stmt->execute($params);
+
+        // Fetch refreshed user
+        $fetchStmt = $db->prepare("SELECT user_id, tenant_id, email, username, first_name, last_name, phone, role FROM users WHERE user_id = :uid LIMIT 1");
+        $fetchStmt->execute(['uid' => $userId]);
+        $updatedUser = $fetchStmt->fetch();
+
+        Response::json([
+            'success' => true,
+            'message' => 'Profile updated successfully',
+            'user' => [
+                'user_id' => (string)$updatedUser['user_id'],
+                'tenant_id' => $updatedUser['tenant_id'] ? (string)$updatedUser['tenant_id'] : null,
+                'email' => $updatedUser['email'],
+                'username' => $updatedUser['username'],
+                'first_name' => $updatedUser['first_name'],
+                'last_name' => $updatedUser['last_name'],
+                'phone' => $updatedUser['phone'],
+                'role_code' => $updatedUser['role'],
+            ]
         ]);
     }
 

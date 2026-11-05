@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Key, Edit, CreditCard } from 'lucide-react';
+import { User, Key, Edit, CreditCard, X, Check, Mail, Phone, ShieldCheck } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { authService, MeResponse } from '@/services/auth.service';
 import { PageHeader, StatusBadge } from '@/components/common';
+import { useToastContext } from '@/contexts/ToastContext';
 
 const getRoleLabel = (roleCode: string | undefined): string => {
   if (!roleCode) return 'User';
@@ -31,9 +32,21 @@ const getUserTypeLabel = (userType: string | undefined): string => {
 
 export default function ProfilePage() {
   const navigate = useNavigate();
-  const { user, balance, refreshMe, impersonated, impersonatedBy } = useAuthStore();
+  const toast = useToastContext();
+  const { user, setUser, balance, refreshMe, impersonated, impersonatedBy } = useAuthStore();
   const [me, setMe] = useState<MeResponse | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Edit Modal State
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -51,6 +64,55 @@ export default function ProfilePage() {
     })();
     return () => { cancelled = true; };
   }, [refreshMe]);
+
+  const handleOpenEditModal = () => {
+    if (!user) return;
+    setEditForm({
+      firstName: user.first_name || '',
+      lastName: user.last_name || '',
+      email: user.email || '',
+      phone: (user as any).phone || '',
+    });
+    setEditError(null);
+    setIsEditModalOpen(true);
+  };
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editForm.firstName.trim()) {
+      setEditError('First Name is required');
+      return;
+    }
+
+    setIsSaving(true);
+    setEditError(null);
+
+    try {
+      const res = await authService.updateProfile({
+        first_name: editForm.firstName.trim(),
+        last_name: editForm.lastName.trim(),
+        email: editForm.email.trim(),
+        phone: editForm.phone.trim(),
+      });
+
+      if (res.user && user) {
+        setUser({
+          ...user,
+          ...res.user,
+        });
+      }
+
+      await refreshMe();
+      toast.success('Profile updated successfully!');
+      setIsEditModalOpen(false);
+    } catch (err: any) {
+      const msg = err.response?.data?.message || err.message || 'Failed to update profile.';
+      setEditError(msg);
+      toast.error(msg);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   if (loading || !user) {
     return (
@@ -80,6 +142,13 @@ export default function ProfilePage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={handleOpenEditModal}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-sm font-semibold shadow-sm transition-colors"
+            >
+              <Edit className="w-4 h-4 text-sky-600 dark:text-teal-400" /> Edit Profile
+            </button>
+            <button
+              type="button"
               onClick={() => navigate('/dashboard/topup-balance')}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-sm font-medium shadow-sm transition-colors"
             >
@@ -105,19 +174,31 @@ export default function ProfilePage() {
       {/* Profile Card */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden">
         {/* Banner with Avatar */}
-        <div className="px-6 py-8 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex items-center gap-5">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white text-xl font-bold shadow-md shrink-0">
-            {initials}
-          </div>
-          <div className="min-w-0">
-            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 truncate">
-              {fullName}
-            </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400 truncate">
-              {user.email || 'No email associated'}
-            </p>
-            <div className="mt-2 flex items-center gap-2">
-              <StatusBadge role={user.role_code || 'isp_admin'} />
+        <div className="px-6 py-8 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex items-center justify-between gap-5">
+          <div className="flex items-center gap-5 min-w-0">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white text-xl font-bold shadow-md shrink-0">
+              {initials}
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 truncate">
+                  {fullName}
+                </h2>
+                <button
+                  type="button"
+                  onClick={handleOpenEditModal}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  title="Edit Name & Profile"
+                >
+                  <Edit className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-sm text-slate-500 dark:text-slate-400 truncate">
+                {user.email || 'No email associated'}
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <StatusBadge role={user.role_code || 'isp_admin'} />
+              </div>
             </div>
           </div>
         </div>
@@ -137,6 +218,134 @@ export default function ProfilePage() {
           )}
         </div>
       </div>
+
+      {/* EDIT PROFILE MODAL */}
+      {isEditModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-md w-full border border-sky-200/80 dark:border-slate-700 overflow-hidden">
+            <div className="bg-gradient-to-r from-sky-500 to-teal-600 px-5 py-4 flex items-center justify-between text-white">
+              <h3 className="font-bold text-base flex items-center gap-2">
+                <User className="w-5 h-5" />
+                Edit Personal Profile
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsEditModalOpen(false)}
+                className="p-1 rounded-lg hover:bg-white/20 transition-colors text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveProfile} className="p-5 space-y-4">
+              {editError && (
+                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-xs font-medium">
+                  {editError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                    First Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editForm.firstName}
+                    onChange={(e) => setEditForm({ ...editForm, firstName: e.target.value })}
+                    placeholder="First Name"
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-sky-500 transition-all font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                    Last Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.lastName}
+                    onChange={(e) => setEditForm({ ...editForm, lastName: e.target.value })}
+                    placeholder="Last Name"
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-sky-500 transition-all font-medium"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                  Email Address
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                    <Mail className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="email"
+                    value={editForm.email}
+                    onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                    placeholder="admin@netfix.com"
+                    className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-sky-500 transition-all"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                  Phone Number
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                    <Phone className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="tel"
+                    value={editForm.phone}
+                    onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                    placeholder="+8801XXXXXXXXX"
+                    className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-sky-500 font-mono transition-all"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span>
+                  Preview: <strong className="text-slate-800 dark:text-slate-200">{[editForm.firstName, editForm.lastName].filter(Boolean).join(' ') || '—'}</strong> ({roleLabel})
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setIsEditModalOpen(false)}
+                  disabled={isSaving}
+                  className="px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving || !editForm.firstName.trim()}
+                  className="flex items-center gap-1.5 px-5 py-2 text-xs sm:text-sm font-semibold rounded-xl bg-gradient-to-r from-sky-500 to-teal-600 hover:from-sky-600 hover:to-teal-700 text-white shadow-md hover:shadow-lg disabled:opacity-50 transition-all"
+                >
+                  {isSaving ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Save Profile</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

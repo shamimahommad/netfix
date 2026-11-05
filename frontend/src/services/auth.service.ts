@@ -127,4 +127,10 @@ export const authService = {
     });
     return response.data;
   },
+
+  /** Update profile name, email, and phone for current user */
+  async updateProfile(payload: { first_name?: string; last_name?: string; full_name?: string; email?: string; phone?: string }): Promise<{ success: boolean; message: string; user: LoginResponse['user'] }> {
+    const response = await api.put<{ success: boolean; message: string; user: LoginResponse['user'] }>('/auth/profile', payload);
+    return response.data;
+  },
 };

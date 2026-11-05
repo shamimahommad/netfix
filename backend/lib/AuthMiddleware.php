@@ -26,6 +26,36 @@ class AuthMiddleware {
         }
 
         $db = Database::getConnection();
+
+        // Check if customer portal subscriber token
+        if ((!empty($payload['role_code']) && $payload['role_code'] === 'customer') || (!empty($payload['user_type']) && $payload['user_type'] === 'customer')) {
+            $cid = $payload['customer_id'] ?? $payload['user_id'];
+            $stmtCust = $db->prepare("SELECT customer_id, tenant_id, customer_code, full_name, email, phone, status FROM customers WHERE customer_id = :id AND status != 'cancelled' LIMIT 1");
+            $stmtCust->execute(['id' => $cid]);
+            $cust = $stmtCust->fetch();
+            if (!$cust) {
+                return null;
+            }
+            $user = [
+                'user_id' => (string)$cust['customer_id'],
+                'customer_id' => (string)$cust['customer_id'],
+                'tenant_id' => (string)$cust['tenant_id'],
+                'email' => $cust['email'] ?? ($cust['customer_code'] . '@portal.local'),
+                'username' => $cust['customer_code'],
+                'first_name' => $cust['full_name'],
+                'last_name' => '',
+                'phone' => $cust['phone'],
+                'status' => $cust['status'],
+                'role' => 'customer',
+                'role_code' => 'customer',
+                'user_type' => 'customer',
+                'role_level' => 0,
+                'parent_id' => null,
+            ];
+            self::$currentUser = $user;
+            return self::$currentUser;
+        }
+
         $stmt = $db->prepare("SELECT user_id, tenant_id, email, username, first_name, last_name, phone, status, role, role_level, parent_id FROM users WHERE user_id = :id AND status = 'active' LIMIT 1");
         $stmt->execute(['id' => $payload['user_id']]);
         $user = $stmt->fetch();

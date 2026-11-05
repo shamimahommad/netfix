@@ -349,7 +349,7 @@ export default function CustomerLoginPage() {
                     htmlFor="customer-login"
                     className="block text-xs sm:text-sm font-semibold text-slate-300 mb-1.5"
                   >
-                    Customer ID or Email
+                    Customer ID / PPPoE Username / Email
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -362,7 +362,7 @@ export default function CustomerLoginPage() {
                       required
                       value={login}
                       onChange={(e) => setLogin(e.target.value)}
-                      placeholder="e.g. 100001 or you@example.com"
+                      placeholder="e.g. 100001, AimTurn, or you@example.com"
                       disabled={isLoading}
                       className="w-full h-12 pl-10 pr-10 rounded-2xl bg-slate-950/80 border border-slate-800 text-slate-100 placeholder-slate-500 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/60 focus:border-cyan-500 transition-all"
                     />
@@ -385,9 +385,9 @@ export default function CustomerLoginPage() {
                       htmlFor="customer-phone"
                       className="block text-xs sm:text-sm font-semibold text-slate-300"
                     >
-                      Registered Mobile Number
+                      Registered Mobile Number or Password
                     </label>
-                    <span className="text-[11px] text-slate-500">Used as Password</span>
+                    <span className="text-[11px] text-cyan-400 font-medium">Mobile or PPPoE Password</span>
                   </div>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -400,7 +400,7 @@ export default function CustomerLoginPage() {
                       required
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
-                      placeholder="017xxxxxxxx"
+                      placeholder="017xxxxxxxx or password"
                       disabled={isLoading}
                       className="w-full h-12 pl-10 pr-11 rounded-2xl bg-slate-950/80 border border-slate-800 text-slate-100 placeholder-slate-500 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/60 focus:border-cyan-500 transition-all font-mono"
                     />

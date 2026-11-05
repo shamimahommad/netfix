@@ -100,6 +100,9 @@ if ($method === 'POST' && $uri === '/auth/customer-login') {
 if ($method === 'GET' && $uri === '/auth/me') {
     AuthController::me();
 }
+if ($method === 'PUT' && ($uri === '/auth/profile' || $uri === '/users/profile' || $uri === '/users/me')) {
+    AuthController::updateProfile();
+}
 if ($method === 'POST' && $uri === '/auth/change-password') {
     AuthController::changePassword();
 }
