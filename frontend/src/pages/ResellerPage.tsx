@@ -1,6 +1,27 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Users, Filter, Plus, Download, Search } from 'lucide-react';
+import {
+  ArrowLeft,
+  Users,
+  Filter,
+  Plus,
+  Download,
+  Search,
+  UserPlus,
+  User,
+  AtSign,
+  Lock,
+  Eye,
+  EyeOff,
+  Phone,
+  Server,
+  Shield,
+  CreditCard,
+  Wallet,
+  X,
+  CheckCircle2,
+  RotateCw,
+} from 'lucide-react';
 import { PageHeader } from '@/components/common';
 import {
   resellerService,
@@ -287,6 +308,7 @@ export default function ResellerPage() {
     credit_limit: 0,
     opening_balance: 0,
   });
+  const [showAddPassword, setShowAddPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [userPanelUser, setUserPanelUser] = useState<Reseller | null>(null);
   const [addBalanceUserId, setAddBalanceUserId] = useState<string | null>(null);
@@ -605,9 +627,9 @@ export default function ResellerPage() {
               <button
                 type="button"
                 onClick={() => setAddOpen(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm shadow-sm transition-all active:scale-95"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm shadow-sm transition-all active:scale-95"
               >
-                <PlusIcon /> Add User
+                <UserPlus className="w-4 h-4" /> Add Reseller
               </button>
             )}
           </div>
@@ -1190,175 +1212,313 @@ export default function ResellerPage() {
         </div>
       )}
 
-      {/* Add User Modal — modern, sky/teal, colorful icons, close only via Cancel or X */}
+      {/* Redesigned Add Reseller / User Modal */}
       {addOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-md">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-hidden flex flex-col border border-sky-200/60 dark:border-teal-500/30 ring-1 ring-slate-900/5 dark:ring-white/5">
-            <div className="flex items-center justify-between gap-3 px-4 py-3 bg-gradient-to-r from-sky-500 to-teal-600 dark:from-sky-600 dark:to-teal-700 shrink-0">
-              <div className="flex items-center gap-2.5">
-                <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-white/20 text-white">
-                  <UserIcon className="w-5 h-5" />
-                </span>
-                <h2 className="text-lg font-semibold text-white">Add User</h2>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => !submitting && setAddOpen(false)}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl shadow-2xl max-w-2xl w-full max-h-[92vh] overflow-hidden flex flex-col border border-slate-200 dark:border-slate-800 ring-1 ring-slate-900/5 dark:ring-white/10"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-5 sm:px-6 py-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 dark:from-blue-700 dark:via-indigo-700 dark:to-blue-800 text-white shrink-0 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/15 backdrop-blur-md flex items-center justify-center text-white shadow-inner">
+                  <UserPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-bold leading-tight">Add New Reseller / User</h2>
+                  <p className="text-xs text-blue-100/90 mt-0.5">
+                    Configure profile, access role, POP router and financial limit
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => !submitting && setAddOpen(false)}
-                className="flex items-center justify-center w-9 h-9 rounded-xl bg-white/20 text-white hover:bg-white/30 transition-colors"
+                className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors"
                 aria-label="Close"
               >
-                <XMarkIcon className="w-5 h-5" />
+                <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-3 space-y-2 overflow-y-auto flex-1 min-h-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sky-500 shrink-0" aria-hidden><UserIcon /></span>
-                <div className="flex-1 min-w-0">
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-0.5">Name *</label>
-                  <input
-                    value={addForm.name}
-                    onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))}
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                    placeholder="Full name"
-                  />
+
+            {/* Modal Scrollable Form Body */}
+            <div className="p-5 sm:p-6 space-y-5 overflow-y-auto flex-1 min-h-0">
+              
+              {/* Section 1: Basic & Login Credentials */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100 dark:border-slate-800 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  <User className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  <span>Account Credentials</span>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-teal-500 shrink-0" aria-hidden><AtSymbolIcon /></span>
-                <div className="flex-1 min-w-0">
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-0.5">Username *</label>
-                  <input
-                    value={addForm.username}
-                    onChange={(e) => setAddForm((f) => ({ ...f, username: e.target.value }))}
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                    placeholder="Unique per tenant"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-amber-500 shrink-0" aria-hidden><LockIcon /></span>
-                <div className="flex-1 min-w-0">
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-0.5">Password *</label>
-                  <input
-                    type="password"
-                    value={addForm.password}
-                    onChange={(e) => setAddForm((f) => ({ ...f, password: e.target.value }))}
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                    placeholder="Password"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-emerald-500 shrink-0" aria-hidden><PhoneIcon /></span>
-                <div className="flex-1 min-w-0">
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-0.5">Phone</label>
-                  <input
-                    value={addForm.phone ?? ''}
-                    onChange={(e) => setAddForm((f) => ({ ...f, phone: e.target.value }))}
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                    placeholder="Optional"
-                  />
-                </div>
-              </div>
-              {isAdmin && (
-                <div className="flex items-center gap-2">
-                  <span className="text-violet-500 shrink-0" aria-hidden><ServerIcon /></span>
-                  <div className="flex-1 min-w-0">
-                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-0.5">Server (POP)</label>
-                    <select
-                      value={addForm.serverId ?? ''}
-                      onChange={(e) => setAddForm((f) => ({ ...f, serverId: e.target.value || undefined }))}
-                      className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                    >
-                      <option value="">— Optional for Admin —</option>
-                      {servers.map((s) => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                <span className="text-indigo-500 shrink-0" aria-hidden><BadgeIcon /></span>
-                <div className="flex-1 min-w-0">
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-0.5">Role</label>
-                  <select
-                    value={allowedAddRoles.includes(addForm.role) ? addForm.role : (allowedAddRoles[0] ?? 'agent')}
-                    onChange={(e) => setAddForm((f) => ({ ...f, role: e.target.value as ResellerRole }))}
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                  >
-                    {allowedAddRoles.map((r) => (
-                      <option key={r} value={r}>{RESELLER_ROLE_LABELS[r]}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              {isAdmin && (
-                <>
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-500 shrink-0" aria-hidden><CurrencyIcon /></span>
-                    <div className="flex-1 min-w-0">
-                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-0.5">Credit limit</label>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Full Name */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Full Name <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                        <User className="w-4 h-4" />
+                      </span>
                       <input
-                        type="number"
-                        min={0}
-                        value={addForm.credit_limit ?? ''}
-                        onChange={(e) =>
-                          setAddForm((f) => ({ ...f, credit_limit: e.target.value ? Number(e.target.value) : 0 }))
-                        }
-                        className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                        type="text"
+                        value={addForm.name}
+                        onChange={(e) => setAddForm((f) => ({ ...f, name: e.target.value }))}
+                        className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/60 text-slate-900 dark:text-white placeholder:text-slate-400 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                        placeholder="e.g. Hasan Mahmud"
                       />
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-fuchsia-500 shrink-0" aria-hidden><WalletIcon /></span>
-                    <div className="flex-1 min-w-0">
-                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-0.5">Opening balance</label>
+
+                  {/* Username */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Username <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                        <AtSign className="w-4 h-4" />
+                      </span>
                       <input
-                        type="number"
-                        min={0}
-                        value={addForm.opening_balance ?? ''}
-                        onChange={(e) =>
-                          setAddForm((f) => ({ ...f, opening_balance: e.target.value ? Number(e.target.value) : 0 }))
-                        }
-                        className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                        type="text"
+                        value={addForm.username}
+                        onChange={(e) => setAddForm((f) => ({ ...f, username: e.target.value }))}
+                        className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/60 text-slate-900 dark:text-white placeholder:text-slate-400 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-mono"
+                        placeholder="e.g. hasan_reseller"
+                      />
+                    </div>
+                    <span className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 block">Unique system username (no @ allowed)</span>
+                  </div>
+
+                  {/* Password */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Password <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                        <Lock className="w-4 h-4" />
+                      </span>
+                      <input
+                        type={showAddPassword ? 'text' : 'password'}
+                        value={addForm.password}
+                        onChange={(e) => setAddForm((f) => ({ ...f, password: e.target.value }))}
+                        className="w-full pl-9 pr-10 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/60 text-slate-900 dark:text-white placeholder:text-slate-400 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                        placeholder="Login password"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAddPassword((v) => !v)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                      >
+                        {showAddPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Phone */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Phone Number <span className="text-slate-400 text-[11px] font-normal">(Optional)</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                        <Phone className="w-4 h-4" />
+                      </span>
+                      <input
+                        type="text"
+                        value={addForm.phone ?? ''}
+                        onChange={(e) => setAddForm((f) => ({ ...f, phone: e.target.value }))}
+                        className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/60 text-slate-900 dark:text-white placeholder:text-slate-400 focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-mono"
+                        placeholder="e.g. 01712345678"
                       />
                     </div>
                   </div>
-                </>
-              )}
-              <div className="flex items-center gap-2">
-                <span className="text-rose-500 shrink-0" aria-hidden><StatusIcon /></span>
-                <div className="flex-1 min-w-0">
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-0.5">Status</label>
-                  <select
-                    value={addForm.status ?? 'active'}
-                    onChange={(e) => setAddForm((f) => ({ ...f, status: e.target.value as 'active' | 'suspended' }))}
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                  >
-                    <option value="active">Active</option>
-                    <option value="suspended">Suspended</option>
-                  </select>
                 </div>
               </div>
+
+              {/* Section 2: Role & System Assignment */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center gap-2 pb-1.5 border-b border-slate-100 dark:border-slate-800 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  <Shield className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                  <span>Role & Network Permissions</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Role Selector */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Role <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                        <Shield className="w-4 h-4" />
+                      </span>
+                      <select
+                        value={allowedAddRoles.includes(addForm.role) ? addForm.role : (allowedAddRoles[0] ?? 'agent')}
+                        onChange={(e) => setAddForm((f) => ({ ...f, role: e.target.value as ResellerRole }))}
+                        className="w-full pl-9 pr-8 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/60 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all capitalize"
+                      >
+                        {allowedAddRoles.map((r) => (
+                          <option key={r} value={r}>
+                            {RESELLER_ROLE_LABELS[r] || r}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Status */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Initial Status <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                        <CheckCircle2 className="w-4 h-4" />
+                      </span>
+                      <select
+                        value={addForm.status ?? 'active'}
+                        onChange={(e) => setAddForm((f) => ({ ...f, status: e.target.value as 'active' | 'suspended' }))}
+                        className="w-full pl-9 pr-8 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/60 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                      >
+                        <option value="active">Active (Access Granted)</option>
+                        <option value="suspended">Suspended (Access Disabled)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Server (POP) */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Server (POP Router) {addForm.role !== 'admin' ? <span className="text-rose-500">*</span> : <span className="text-slate-400 text-[11px] font-normal">(Optional for Admin)</span>}
+                    </label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                        <Server className="w-4 h-4" />
+                      </span>
+                      <select
+                        value={addForm.serverId ?? ''}
+                        onChange={(e) => setAddForm((f) => ({ ...f, serverId: e.target.value || undefined }))}
+                        className="w-full pl-9 pr-8 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/60 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                      >
+                        <option value="">{addForm.role === 'admin' ? '— All Routers / Global Access —' : '— Select Assigned MikroTik / POP Router —'}</option>
+                        {servers.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {addForm.role !== 'admin' && (
+                      <span className="text-[11px] text-amber-600 dark:text-amber-400 mt-1 block">
+                        Assigned router controls customer creation & PPPoE authentication for this reseller.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 3: Financial & Credit Settings (Admin only) */}
+              {isAdmin && (
+                <div className="pt-2">
+                  <div className="bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-4 sm:p-5 space-y-3">
+                    <div className="flex items-center gap-2 pb-1.5 border-b border-slate-200/60 dark:border-slate-700/60 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                      <Wallet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                      <span>Financial & Wallet Allocation</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Credit Limit */}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Postpaid Credit Limit (৳)
+                        </label>
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                            <CreditCard className="w-4 h-4" />
+                          </span>
+                          <input
+                            type="number"
+                            min={0}
+                            value={addForm.credit_limit ?? ''}
+                            onChange={(e) =>
+                              setAddForm((f) => ({ ...f, credit_limit: e.target.value ? Number(e.target.value) : 0 }))
+                            }
+                            className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-mono"
+                            placeholder="0"
+                          />
+                        </div>
+                        <span className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 block">Max negative balance allowed for customer recharge</span>
+                      </div>
+
+                      {/* Opening Balance */}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Opening Balance (৳)
+                        </label>
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                            <Wallet className="w-4 h-4" />
+                          </span>
+                          <input
+                            type="number"
+                            min={0}
+                            value={addForm.opening_balance ?? ''}
+                            onChange={(e) =>
+                              setAddForm((f) => ({ ...f, opening_balance: e.target.value ? Number(e.target.value) : 0 }))
+                            }
+                            className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-mono"
+                            placeholder="0"
+                          />
+                        </div>
+                        <span className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 block">Initial wallet balance immediately credited</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
             </div>
-            <div className="px-3 py-2.5 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2 bg-slate-50/80 dark:bg-slate-800/80 shrink-0">
-              <button
-                type="button"
-                onClick={() => !submitting && setAddOpen(false)}
-                className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 text-sm font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleCreate}
-                disabled={submitting}
-                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium shadow-sm hover:shadow active:scale-95 disabled:opacity-50 transition-all"
-              >
-                Create
-              </button>
+
+            {/* Modal Footer */}
+            <div className="px-5 sm:px-6 py-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80 flex items-center justify-between gap-3 shrink-0">
+              <div className="text-xs text-slate-400 dark:text-slate-500 hidden sm:flex items-center gap-1.5 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Passwords hashed with secure bcrypt
+              </div>
+              <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => !submitting && setAddOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm font-semibold transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreate}
+                  disabled={submitting}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-sm shadow-blue-500/20 active:scale-95 disabled:opacity-50 transition-all min-w-[130px]"
+                >
+                  {submitting ? (
+                    <>
+                      <RotateCw className="w-4 h-4 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-4 h-4" />
+                      Create User
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
+
           </div>
         </div>
       )}
