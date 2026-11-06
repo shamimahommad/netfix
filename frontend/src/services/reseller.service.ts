@@ -406,3 +406,5 @@ export const resellerService = {
     return res.data;
   },
 };
+
+export default resellerService;

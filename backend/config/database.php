@@ -94,6 +94,14 @@ class Database {
                             require_once $migFile;
                         }
                     }
+
+                    $ledgerCheck = $pdo->query("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'wallet_ledger' LIMIT 1");
+                    if (!$ledgerCheck || !$ledgerCheck->fetchColumn()) {
+                        $ledgerMig = __DIR__ . '/../database/run_payment_split_migration.php';
+                        if (file_exists($ledgerMig)) {
+                            require_once $ledgerMig;
+                        }
+                    }
                 } catch (Throwable $t) {
                     error_log('Multi-tier tables ensure notice: ' . $t->getMessage());
                 }

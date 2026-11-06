@@ -38,3 +38,4 @@ Response::json([
     'downlines' => $flat,
     'total_downlines' => count($flat),
 ]);
+

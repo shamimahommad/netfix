@@ -99,3 +99,4 @@ INSERT IGNORE INTO `permissions` (`permission_code`, `name`, `category`, `descri
 ('can_manage_sub_tier', 'Manage Sub-Tier', 'reseller', 'Permission to create and manage downline resellers, dealers, agents'),
 ('can_assign_package', 'Assign Packages', 'packages', 'Permission to set package commissions and sell prices for downlines'),
 ('can_transfer_balance', 'Transfer Balance', 'wallet', 'Permission to transfer wallet balance to downlines');
+

@@ -163,3 +163,4 @@ Response::json([
         'can_manage_sub_tier' => HierarchySecurityService::hasPermission($callerId, 'can_manage_sub_tier'),
     ],
 ]);
+

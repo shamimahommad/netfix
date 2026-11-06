@@ -170,6 +170,8 @@ export default function TenantLayout() {
           ...(canSeeServerWiseReport(user?.role_code, user?.user_type)
             ? [{ label: 'Server Wise Customers', path: '/dashboard/report/server-wise-customers' }]
             : []),
+          { label: 'Financial Statement / Ledger', path: '/dashboard/report/ledger' },
+          { label: 'Reconciliation Audit', path: '/dashboard/report/reconciliation' },
           { label: 'Online Transactions', path: '/dashboard/report/online-transactions' },
           { label: 'Merchant Payments', path: '/dashboard/report/merchant-payments' },
           { label: 'Customer Payments', path: '/dashboard/report/customer-payments' },

@@ -695,6 +695,29 @@ class PaymentGatewayService {
                 } catch (\Throwable $mke) {
                     $mikrotikResult = ['success' => false, 'message' => $mke->getMessage()];
                 }
+
+                // 4. Double-Entry Multi-Tier Margin Split Disbursement
+                $splitResult = null;
+                $splitTargetInvId = $invoiceId;
+                if (!$splitTargetInvId) {
+                    $sInv = $db->prepare("SELECT invoice_id FROM invoices WHERE customer_id = :cid AND tenant_id = :tid ORDER BY invoice_id DESC LIMIT 1");
+                    $sInv->execute(['cid' => $customerId, 'tid' => $tenantId]);
+                    $splitTargetInvId = $sInv->fetchColumn() ?: null;
+                }
+
+                if ($splitTargetInvId) {
+                    try {
+                        require_once __DIR__ . '/../services/PaymentSplitService.php';
+                        $splitEngine = new PaymentSplitService($db);
+                        $splitResult = $splitEngine->processCustomerPayment($splitTargetInvId, $amount, $gateway, [
+                            'trx_id' => $transRef,
+                            'gateway' => $gateway,
+                            'payment_id' => $gatewayPaymentId,
+                        ]);
+                    } catch (\Throwable $se) {
+                        error_log("PaymentSplitService integration notice: " . $se->getMessage());
+                    }
+                }
             }
 
             $db->commit();
@@ -706,6 +729,8 @@ class PaymentGatewayService {
                 'amount' => $amount,
                 'transaction_id' => $transactionId,
                 'mikrotik' => $mikrotikResult,
+                'payment_split' => $splitResult,
+            ];
             ];
         } catch (\Throwable $e) {
             $db->rollBack();

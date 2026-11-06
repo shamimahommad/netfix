@@ -304,6 +304,22 @@ if ($method === 'GET' && ($uri === '/customers/list' || $uri === '/customers/lis
 }
 
 // ---------------------------------------------------------------------
+// FINANCIAL STATEMENTS & DOUBLE-ENTRY LEDGER AUDIT APIS
+// ---------------------------------------------------------------------
+if ($method === 'GET' && ($uri === '/reports/ledger_statement' || $uri === '/reports/ledger-statement' || $uri === '/api/reports/ledger_statement.php' || $uri === '/reports/ledger_statement.php')) {
+    require __DIR__ . '/api/reports/ledger_statement.php';
+    exit;
+}
+if ($method === 'GET' && ($uri === '/reports/reconciliation' || $uri === '/api/reports/reconciliation.php' || $uri === '/reports/reconciliation.php')) {
+    require __DIR__ . '/api/reports/reconciliation.php';
+    exit;
+}
+if (($method === 'POST' || $method === 'GET') && ($uri === '/payment/webhook' || $uri === '/payments/webhook' || $uri === '/api/payment/webhook.php' || $uri === '/payment/webhook.php')) {
+    require __DIR__ . '/api/payment/webhook.php';
+    exit;
+}
+
+// ---------------------------------------------------------------------
 // RESELLERS & POP HIERARCHY
 // ---------------------------------------------------------------------
 if ($method === 'GET' && $uri === '/resellers') {

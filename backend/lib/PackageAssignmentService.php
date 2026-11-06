@@ -284,3 +284,4 @@ class PackageAssignmentService {
         return $matrix;
     }
 }
+

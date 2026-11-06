@@ -174,3 +174,4 @@ try {
     $db->rollBack();
     Response::error("Failed to create downline: " . $e->getMessage(), 500);
 }
+

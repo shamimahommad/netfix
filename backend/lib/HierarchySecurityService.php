@@ -370,3 +370,4 @@ class HierarchySecurityService {
         return $buildSubtree($rootNode);
     }
 }
+

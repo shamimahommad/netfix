@@ -50,6 +50,8 @@ import MyPackagesPage from './pages/MyPackagesPage';
 import AreaWiseCustomersPage from './pages/AreaWiseCustomersPage';
 import ServerWiseCustomersPage from './pages/ServerWiseCustomersPage';
 import InvoicesReportPage from './pages/InvoicesReportPage';
+import FinancialLedgerPage from './pages/FinancialLedgerPage';
+import ReconciliationReportPage from './pages/ReconciliationReportPage';
 import OnlineTransactionsPage from './pages/OnlineTransactionsPage';
 import MapPage from './pages/MapPage';
 import PaymentCallbackPage from './pages/PaymentCallbackPage';
@@ -237,6 +239,9 @@ function AppContent() {
               <Route path="report/reseller-wise-customers" element={<ResellerWiseCustomersPage />} />
               <Route path="report/area-wise-customers" element={<AreaWiseCustomersPage />} />
               <Route path="report/server-wise-customers" element={<AdminOnlyGuard><ServerWiseCustomersPage /></AdminOnlyGuard>} />
+              <Route path="report/ledger" element={<FinancialLedgerPage />} />
+              <Route path="report/financial-ledger" element={<FinancialLedgerPage />} />
+              <Route path="report/reconciliation" element={<ReconciliationReportPage />} />
               <Route path="report/online-transactions" element={<OnlineTransactionsPage />} />
               <Route path="report/merchant-payments" element={<MerchantPaymentsPage />} />
               <Route path="report/customer-payments" element={<CustomerPaymentsPage />} />
