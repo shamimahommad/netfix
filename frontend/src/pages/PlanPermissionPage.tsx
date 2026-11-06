@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import {
-  ArrowLeft,
   ShieldCheck,
   Save,
   Wallet,
@@ -283,31 +282,22 @@ export default function PlanPermissionPage() {
           </span>
         }
         actions={
-          <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => navigate('/dashboard/reseller')}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 text-xs font-semibold shadow-2xs transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" /> Back to Resellers
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold shadow-sm shadow-blue-500/20 disabled:opacity-50 transition-all cursor-pointer"
-            >
-              {saving ? (
-                <>
-                  <RotateCw className="w-4 h-4 animate-spin" /> Saving...
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4" /> Save Permissions
-                </>
-              )}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold shadow-sm shadow-blue-500/20 disabled:opacity-50 transition-all cursor-pointer"
+          >
+            {saving ? (
+              <>
+                <RotateCw className="w-4 h-4 animate-spin" /> Saving...
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" /> Save Permissions
+              </>
+            )}
+          </button>
         }
       />
 
