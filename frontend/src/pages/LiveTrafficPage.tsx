@@ -12,20 +12,15 @@ import {
   Tooltip,
 } from 'recharts';
 import {
-  ArrowLeft,
-  RotateCw,
-  Play,
-  Pause,
-  Trash2,
-  BarChart2,
   Activity,
-  Server,
-  User,
-  Wifi,
-  ShieldCheck,
-  Search,
+  RotateCw,
+  ArrowDownCircle,
+  ArrowUpCircle,
+  TrendingUp,
+  Radio,
 } from 'lucide-react';
-import { monitoringService, ActiveInterface } from '@/services/monitoring.service';
+import PageHeader from '@/components/common/PageHeader';
+import { monitoringService } from '@/services/monitoring.service';
 import { networkService } from '@/services/network.service';
 import { useToastContext } from '@/contexts/ToastContext';
 
@@ -50,7 +45,7 @@ export default function LiveTrafficPage() {
   const [searchParams] = useSearchParams();
   const toast = useToastContext();
 
-  // Query params
+  // Query parameters passed from Customer View or Router
   const paramServerId = searchParams.get('serverId') || searchParams.get('router_id');
   const paramServerName = searchParams.get('serverName');
   const paramUsername = searchParams.get('username');
@@ -58,13 +53,11 @@ export default function LiveTrafficPage() {
 
   // State
   const [servers, setServers] = useState<NetworkDevice[]>([]);
-  const [selectedServerId, setSelectedServerId] = useState<string>('');
-  const [routerName, setRouterName] = useState<string>('');
-  const [activeSessions, setActiveSessions] = useState<ActiveInterface[]>([]);
-  const [selectedUsername, setSelectedUsername] = useState<string>('');
-  const [selectedInterface, setSelectedInterface] = useState<string>('');
+  const [selectedServerId, setSelectedServerId] = useState<string>(paramServerId || '');
+  const [routerName, setRouterName] = useState<string>(paramServerName || '');
+  const [username, setUsername] = useState<string>(paramUsername || '');
   const [trafficData, setTrafficData] = useState<TrafficDataPoint[]>([]);
-  
+
   // Real-time rates
   const [currentTx, setCurrentTx] = useState<number>(0); // Upload bps
   const [currentRx, setCurrentRx] = useState<number>(0); // Download bps
@@ -77,18 +70,13 @@ export default function LiveTrafficPage() {
   const [sessionMac, setSessionMac] = useState<string>('');
   const [sessionUptime, setSessionUptime] = useState<string>('');
 
-  // UI Settings
+  // UI state
   const [chartType, setChartType] = useState<'bar' | 'area'>('bar');
-  const [pollIntervalMs, setPollIntervalMs] = useState<number>(2000); // 2s default
-  const [isPaused, setIsPaused] = useState<boolean>(false);
   const [isPolling, setIsPolling] = useState<boolean>(false);
-  const [isLoadingServers, setIsLoadingServers] = useState<boolean>(true);
-  const [isLoadingSessions, setIsLoadingSessions] = useState<boolean>(false);
-  const [sessionSearch, setSessionSearch] = useState<string>('');
 
   const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isFetchingRef = useRef<boolean>(false);
-  const maxHistoryPoints = 40; // Number of bars/points to show on X axis
+  const maxHistoryPoints = 40; // Number of bars shown on graph
 
   // Format speed (bps -> kbps / mbps / gbps) matching the user's demo graph
   const formatSpeed = (bps: number): string => {
@@ -116,101 +104,65 @@ export default function LiveTrafficPage() {
     return String(val);
   };
 
-  // 1. Initial Load: Fetch MikroTik routers
+  // 1. Initial Load: Fetch MikroTik routers if needed
   useEffect(() => {
+    const loadRouters = async () => {
+      try {
+        const res = await networkService.getNetworkDevices('mikrotik');
+        if (res.success && res.data) {
+          setServers(res.data);
+
+          let targetRouter: NetworkDevice | undefined;
+          if (paramServerId) {
+            targetRouter = res.data.find(
+              (d) => String(d.networkDeviceId) === String(paramServerId) || d.deviceCode === paramServerId
+            );
+          }
+          if (!targetRouter && paramServerName) {
+            targetRouter = res.data.find(
+              (d) => d.deviceName?.toLowerCase() === paramServerName.toLowerCase() ||
+                     d.deviceCode?.toLowerCase() === paramServerName.toLowerCase()
+            );
+          }
+
+          if (targetRouter) {
+            setSelectedServerId(String(targetRouter.networkDeviceId));
+            setRouterName(targetRouter.deviceName || targetRouter.deviceCode);
+          } else if (!routerName && res.data.length > 0) {
+            setSelectedServerId(String(res.data[0].networkDeviceId));
+            setRouterName(res.data[0].deviceName || res.data[0].deviceCode);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to load routers:', err);
+      }
+    };
+
     loadRouters();
-  }, []);
+  }, [paramServerId, paramServerName]);
 
-  const loadRouters = async () => {
-    try {
-      setIsLoadingServers(true);
-      const res = await networkService.getNetworkDevices('mikrotik');
-      if (res.success && res.data) {
-        setServers(res.data);
-
-        // Auto-select router from URL param if available
-        let targetRouter: NetworkDevice | undefined;
-        if (paramServerId) {
-          targetRouter = res.data.find(
-            (d) => String(d.networkDeviceId) === String(paramServerId) || d.deviceCode === paramServerId
-          );
-        }
-        if (!targetRouter && paramServerName) {
-          targetRouter = res.data.find(
-            (d) => d.deviceName?.toLowerCase() === paramServerName.toLowerCase() ||
-                   d.deviceCode?.toLowerCase() === paramServerName.toLowerCase()
-          );
-        }
-
-        if (targetRouter) {
-          setSelectedServerId(String(targetRouter.networkDeviceId));
-          setRouterName(targetRouter.deviceName || targetRouter.deviceCode);
-        } else if (res.data.length > 0) {
-          setSelectedServerId(String(res.data[0].networkDeviceId));
-          setRouterName(res.data[0].deviceName || res.data[0].deviceCode);
-        }
-      }
-    } catch (err: any) {
-      console.error('Failed to load routers:', err);
-      toast.error('Failed to load MikroTik routers');
-    } finally {
-      setIsLoadingServers(false);
-    }
-  };
-
-  // 2. Set username from URL param
+  // Sync params when URL changes
   useEffect(() => {
-    if (paramUsername) {
-      setSelectedUsername(paramUsername);
-    }
-  }, [paramUsername]);
+    if (paramUsername) setUsername(paramUsername);
+    if (paramServerName) setRouterName(paramServerName);
+    if (paramServerId) setSelectedServerId(paramServerId);
+  }, [paramUsername, paramServerName, paramServerId]);
 
-  // 3. Load active PPPoE sessions whenever selected server changes
+  // 2. Real-time Live Polling Loop
   useEffect(() => {
-    if (selectedServerId) {
-      loadSessions(selectedServerId);
-      const r = servers.find((s) => String(s.networkDeviceId) === String(selectedServerId));
-      if (r) setRouterName(r.deviceName || r.deviceCode);
-    } else {
-      setActiveSessions([]);
-    }
-  }, [selectedServerId, servers]);
-
-  const loadSessions = async (serverId: string) => {
-    try {
-      setIsLoadingSessions(true);
-      const res = await monitoringService.getActiveInterfaces(serverId, routerName);
-      if (res.success && Array.isArray(res.data)) {
-        setActiveSessions(res.data);
-      }
-    } catch (err) {
-      console.warn('Could not load active sessions:', err);
-    } finally {
-      setIsLoadingSessions(false);
-    }
-  };
-
-  // 4. Live Polling Loop
-  useEffect(() => {
-    // Clear timer
     if (pollingTimerRef.current) {
       clearInterval(pollingTimerRef.current);
       pollingTimerRef.current = null;
     }
 
-    if (isPaused) {
-      setIsPolling(false);
-      return;
-    }
-
-    if (selectedUsername || selectedInterface || selectedServerId) {
-      // Execute immediate poll
+    if (username || selectedServerId) {
+      // Immediate initial fetch
       executePoll();
 
-      // Start recurring poll
+      // Poll every 2 seconds
       pollingTimerRef.current = setInterval(() => {
         executePoll();
-      }, pollIntervalMs);
+      }, 2000);
     }
 
     return () => {
@@ -219,11 +171,11 @@ export default function LiveTrafficPage() {
         pollingTimerRef.current = null;
       }
     };
-  }, [selectedServerId, selectedUsername, selectedInterface, isPaused, pollIntervalMs, routerName]);
+  }, [selectedServerId, username, routerName]);
 
   const executePoll = async () => {
     if (isFetchingRef.current) return;
-    if (!selectedUsername && !selectedInterface) return;
+    if (!username) return;
 
     try {
       isFetchingRef.current = true;
@@ -231,8 +183,8 @@ export default function LiveTrafficPage() {
 
       const res = await monitoringService.getLiveTraffic(
         selectedServerId || undefined,
-        selectedUsername || undefined,
-        selectedInterface || undefined,
+        username || undefined,
+        undefined,
         routerName || undefined,
       );
 
@@ -279,434 +231,361 @@ export default function LiveTrafficPage() {
       setSessionStatus('offline');
     } finally {
       isFetchingRef.current = false;
-      // Brief spinner reset animation
-      setTimeout(() => setIsPolling(false), 300);
+      setTimeout(() => setIsPolling(false), 250);
     }
   };
 
-  const handleClearHistory = () => {
-    setTrafficData([]);
-    setPeakTx(0);
-    setPeakRx(0);
-    setCurrentTx(0);
-    setCurrentRx(0);
-  };
-
-  // Filtered active sessions for quick picker
-  const filteredSessions = useMemo(() => {
-    if (!sessionSearch.trim()) return activeSessions.slice(0, 50);
-    const q = sessionSearch.toLowerCase();
-    return activeSessions.filter(
-      (s) => s.username?.toLowerCase().includes(q) || s.name?.toLowerCase().includes(q) || s.ip?.includes(q)
-    );
-  }, [activeSessions, sessionSearch]);
-
-  // Calculate highest scale for Y-axis to give proper headroom
+  // Y-axis maximum dynamic scale with 25% headroom
   const maxRecordedSpeed = useMemo(() => {
-    let max = Math.max(peakRx, peakTx, currentRx, currentTx, 500000);
-    // Headroom of 1.25x
+    const max = Math.max(peakRx, peakTx, currentRx, currentTx, 500000);
     return Math.ceil(max * 1.25);
   }, [peakRx, peakTx, currentRx, currentTx]);
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 p-3 sm:p-6 transition-colors">
-      <div className="max-w-6xl mx-auto space-y-4">
-        
-        {/* Top Navigation & Router Selection Bar */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => {
-                if (paramUserId) {
-                  navigate(`/dashboard/customers/${paramUserId}`);
-                } else {
-                  navigate('/dashboard/customers');
-                }
-              }}
-              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors shrink-0"
-              title="Go back"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <div>
-              <div className="flex items-center gap-2">
-                <Activity className="w-5 h-5 text-emerald-500" />
-                <h1 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100">
-                  Live Bandwidth Monitor
-                </h1>
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Single session real-time bandwidth meter on MikroTik
-              </p>
-            </div>
-          </div>
-
-          {/* Quick Selectors */}
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Router Selector */}
-            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
-              <Server className="w-4 h-4 text-slate-500 shrink-0" />
-              <select
-                value={selectedServerId}
-                onChange={(e) => {
-                  setSelectedServerId(e.target.value);
-                  const found = servers.find((s) => String(s.networkDeviceId) === e.target.value);
-                  if (found) setRouterName(found.deviceName || found.deviceCode);
-                }}
-                disabled={isLoadingServers}
-                className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer max-w-[140px] sm:max-w-[180px] truncate"
-              >
-                {servers.map((s) => (
-                  <option key={s.networkDeviceId} value={s.networkDeviceId} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
-                    {s.deviceName || s.deviceCode}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* PPPoE User Selector */}
-            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
-              <User className="w-4 h-4 text-slate-500 shrink-0" />
-              <input
-                type="text"
-                value={selectedUsername}
-                onChange={(e) => setSelectedUsername(e.target.value.trim())}
-                placeholder="PPPoE Username"
-                className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none w-28 sm:w-36"
-              />
-              {activeSessions.length > 0 && (
-                <select
-                  value=""
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      setSelectedUsername(e.target.value);
-                    }
-                  }}
-                  className="bg-transparent text-xs text-slate-400 outline-none cursor-pointer"
-                  title="Pick active session"
-                >
-                  <option value="">{activeSessions.length} active</option>
-                  {activeSessions.map((s, idx) => (
-                    <option key={idx} value={s.username || s.name} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
-                      {s.username || s.name} {s.ip ? `(${s.ip})` : ''}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-
-            {/* Pause / Resume Button */}
-            <button
-              onClick={() => setIsPaused(!isPaused)}
-              className={`p-2 rounded-xl border transition-all ${
-                isPaused
-                  ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600'
-                  : 'bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-600'
-              }`}
-              title={isPaused ? 'Resume monitoring' : 'Pause monitoring'}
-            >
-              {isPaused ? <Play className="w-4 h-4 fill-current" /> : <Pause className="w-4 h-4 fill-current" />}
-            </button>
-
-            {/* Clear History */}
-            <button
-              onClick={handleClearHistory}
-              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 transition-colors"
-              title="Clear graph history"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Live Session Status Pill Bar */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-3 shadow-xs flex items-center justify-between flex-wrap gap-2 text-xs">
-          <div className="flex items-center gap-3">
-            {/* Status indicator */}
-            <div className="flex items-center gap-1.5 font-semibold">
-              <span className={`w-2.5 h-2.5 rounded-full ${
-                sessionStatus === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
-              }`} />
-              <span className={sessionStatus === 'online' ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}>
-                {sessionStatus === 'online' ? 'Active Session' : 'Offline / Idle'}
-              </span>
-            </div>
-
+    <div className="w-full min-w-0 space-y-6 pb-12 relative">
+      
+      {/* Standard NetFix PageHeader matching all other pages */}
+      <PageHeader
+        backTo={paramUserId ? `/dashboard/customers/${paramUserId}` : '/dashboard/customers'}
+        icon={<Activity className="w-5 h-5 text-emerald-500" />}
+        title="Live Traffic Monitor"
+        subtitle={
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            <span>
+              Username: <strong className="font-mono text-slate-800 dark:text-slate-200">{username || '—'}</strong>
+            </span>
+            <span>•</span>
+            <span>
+              Router: <strong className="text-slate-800 dark:text-slate-200">{routerName || 'MikroTik Router'}</strong>
+            </span>
             {sessionIp && (
-              <span className="text-slate-500 dark:text-slate-400">
-                IP: <strong className="text-slate-700 dark:text-slate-200 font-mono">{sessionIp}</strong>
-              </span>
-            )}
-            {sessionMac && (
-              <span className="text-slate-500 dark:text-slate-400 hidden sm:inline">
-                MAC: <strong className="text-slate-700 dark:text-slate-200 font-mono">{sessionMac}</strong>
-              </span>
+              <>
+                <span>•</span>
+                <span>
+                  IP: <strong className="font-mono text-slate-800 dark:text-slate-200">{sessionIp}</strong>
+                </span>
+              </>
             )}
             {sessionUptime && (
-              <span className="text-slate-500 dark:text-slate-400 hidden md:inline">
-                Uptime: <strong className="text-slate-700 dark:text-slate-200">{sessionUptime}</strong>
-              </span>
+              <>
+                <span>•</span>
+                <span>
+                  Uptime: <strong className="text-slate-800 dark:text-slate-200">{sessionUptime}</strong>
+                </span>
+              </>
             )}
           </div>
+        }
+        badge={
+          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg border ${
+            sessionStatus === 'online'
+              ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60'
+              : 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${sessionStatus === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+            {sessionStatus === 'online' ? 'Active Session' : 'Offline / Idle'}
+          </span>
+        }
+      />
 
-          <div className="flex items-center gap-3 font-mono text-[11px]">
-            <span className="text-red-600 dark:text-red-400">
-              Peak Tx: <strong>{formatSpeed(peakTx)}</strong>
+      {/* Real-time Metric Cards Overview matching NetFix dashboard standard */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+        {/* Current Download (Rx) */}
+        <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-4 sm:p-5 shadow-sm">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
+            <span className="flex items-center gap-1.5">
+              <span className="p-1 rounded-md bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                <ArrowDownCircle className="w-4 h-4" />
+              </span>
+              Download (Rx)
             </span>
-            <span className="text-blue-600 dark:text-blue-400">
-              Peak Rx: <strong>{formatSpeed(peakRx)}</strong>
+          </div>
+          <div className="text-lg sm:text-2xl font-bold font-mono text-blue-600 dark:text-blue-400">
+            {formatSpeed(currentRx)}
+          </div>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Live incoming throughput</p>
+        </div>
+
+        {/* Current Upload (Tx) */}
+        <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-4 sm:p-5 shadow-sm">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
+            <span className="flex items-center gap-1.5">
+              <span className="p-1 rounded-md bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400">
+                <ArrowUpCircle className="w-4 h-4" />
+              </span>
+              Upload (Tx)
             </span>
-            {/* Polling speed selector */}
-            <div className="flex items-center gap-1 border-l border-slate-200 dark:border-slate-700 pl-2">
-              {[1000, 2000, 5000].map((int) => (
-                <button
-                  key={int}
-                  onClick={() => setPollIntervalMs(int)}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors ${
-                    pollIntervalMs === int
-                      ? 'bg-blue-600 text-white'
-                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-100'
-                  }`}
-                >
-                  {int / 1000}s
-                </button>
-              ))}
+          </div>
+          <div className="text-lg sm:text-2xl font-bold font-mono text-red-600 dark:text-red-400">
+            {formatSpeed(currentTx)}
+          </div>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Live outgoing throughput</p>
+        </div>
+
+        {/* Peak Download */}
+        <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-4 sm:p-5 shadow-sm">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
+            <span className="flex items-center gap-1.5">
+              <span className="p-1 rounded-md bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
+                <TrendingUp className="w-4 h-4" />
+              </span>
+              Peak Download
+            </span>
+          </div>
+          <div className="text-lg sm:text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
+            {formatSpeed(peakRx)}
+          </div>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Session maximum rate</p>
+        </div>
+
+        {/* Peak Upload */}
+        <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-4 sm:p-5 shadow-sm">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
+            <span className="flex items-center gap-1.5">
+              <span className="p-1 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
+                <Radio className="w-4 h-4" />
+              </span>
+              Peak Upload
+            </span>
+          </div>
+          <div className="text-lg sm:text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
+            {formatSpeed(peakTx)}
+          </div>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Session maximum rate</p>
+        </div>
+      </div>
+
+      {/* ============================================================== */}
+      {/* Main Chart Box - EXACT Match of User Demo Image (media_...)    */}
+      {/* ============================================================== */}
+      <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-5 sm:p-8 shadow-sm">
+        
+        {/* Centered Title Header matching demo graph */}
+        <div className="text-center mb-6">
+          <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 font-sans">
+            Real Time Download-Upload Graph
+          </h2>
+          <div className="mt-1.5 space-y-0.5 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+            <p>
+              Username:{' '}
+              <span className="font-semibold text-slate-900 dark:text-slate-100">
+                {username || '—'}
+              </span>
+            </p>
+            <p>
+              Router name:{' '}
+              <span className="font-semibold text-slate-900 dark:text-slate-100">
+                {routerName || 'MikroTik Router'}
+              </span>
+            </p>
+          </div>
+        </div>
+
+        {/* Graph Section */}
+        <div className="w-full h-[320px] sm:h-[400px] relative">
+          {trafficData.length === 0 ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
+              <RotateCw className="w-8 h-8 animate-spin text-blue-500 mb-2" />
+              <span className="text-xs font-medium">Connecting to MikroTik & waiting for traffic stream...</span>
+            </div>
+          ) : chartType === 'bar' ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={trafficData}
+                margin={{ top: 10, right: 20, left: 10, bottom: 20 }}
+                barCategoryGap="15%"
+                barGap={1}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={true} stroke="#e2e8f0" className="dark:stroke-slate-700/60" />
+                <XAxis
+                  dataKey="time"
+                  stroke="#94a3b8"
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  stroke="#94a3b8"
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  domain={[0, maxRecordedSpeed]}
+                  tickFormatter={formatSpeedY}
+                  label={{
+                    value: 'Speed',
+                    angle: -90,
+                    position: 'insideLeft',
+                    offset: 0,
+                    style: { fontSize: 12, fill: '#64748b', fontWeight: 600 },
+                  }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    borderRadius: '12px',
+                    border: '1px solid #334155',
+                    color: '#f8fafc',
+                    fontSize: '12px',
+                  }}
+                  formatter={(val: number, name: string) => [
+                    formatSpeed(val),
+                    name === 'rx' ? 'Rx (Download)' : 'Tx (Upload)',
+                  ]}
+                />
+                {/* Tx = Red bar */}
+                <Bar
+                  dataKey="tx"
+                  name="tx"
+                  fill="#ef4444"
+                  radius={[2, 2, 0, 0]}
+                  maxBarSize={8}
+                  isAnimationActive={false}
+                />
+                {/* Rx = Blue bar */}
+                <Bar
+                  dataKey="rx"
+                  name="rx"
+                  fill="#2563eb"
+                  radius={[2, 2, 0, 0]}
+                  maxBarSize={8}
+                  isAnimationActive={false}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart
+                data={trafficData}
+                margin={{ top: 10, right: 20, left: 10, bottom: 20 }}
+              >
+                <defs>
+                  <linearGradient id="colorRx" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.8} />
+                    <stop offset="95%" stopColor="#2563eb" stopOpacity={0.05} />
+                  </linearGradient>
+                  <linearGradient id="colorTx" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8} />
+                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={true} stroke="#e2e8f0" className="dark:stroke-slate-700/60" />
+                <XAxis
+                  dataKey="time"
+                  stroke="#94a3b8"
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  stroke="#94a3b8"
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  domain={[0, maxRecordedSpeed]}
+                  tickFormatter={formatSpeedY}
+                  label={{
+                    value: 'Speed',
+                    angle: -90,
+                    position: 'insideLeft',
+                    offset: 0,
+                    style: { fontSize: 12, fill: '#64748b', fontWeight: 600 },
+                  }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    borderRadius: '12px',
+                    border: '1px solid #334155',
+                    color: '#f8fafc',
+                    fontSize: '12px',
+                  }}
+                  formatter={(val: number, name: string) => [
+                    formatSpeed(val),
+                    name === 'rx' ? 'Rx (Download)' : 'Tx (Upload)',
+                  ]}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="rx"
+                  name="rx"
+                  stroke="#2563eb"
+                  strokeWidth={2}
+                  fill="url(#colorRx)"
+                  isAnimationActive={false}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="tx"
+                  name="tx"
+                  stroke="#ef4444"
+                  strokeWidth={2}
+                  fill="url(#colorTx)"
+                  isAnimationActive={false}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* Bottom Live Meter Indicator - EXACT Match of User Demo Image */}
+        <div className="mt-6 flex flex-col items-center justify-center space-y-2">
+          {/* Spinning refresh icon */}
+          <div className="flex items-center justify-center">
+            <RotateCw className={`w-5 h-5 text-slate-500 dark:text-slate-400 transition-all ${
+              isPolling ? 'animate-spin text-blue-500' : ''
+            }`} />
+          </div>
+
+          {/* Red Tx dot and Blue Rx dot with exact spacing & typography */}
+          <div className="flex flex-col items-center justify-center space-y-1 text-sm sm:text-base font-semibold">
+            {/* Tx (Upload) - Red dot */}
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-red-500 inline-block shrink-0 shadow-xs" />
+              <span className="text-slate-900 dark:text-slate-100 font-sans">
+                Tx: {formatSpeed(currentTx)}
+              </span>
+            </div>
+
+            {/* Rx (Download) - Blue dot */}
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-blue-600 inline-block shrink-0 shadow-xs" />
+              <span className="text-slate-900 dark:text-slate-100 font-sans">
+                Rx: {formatSpeed(currentRx)}
+              </span>
             </div>
           </div>
         </div>
 
-        {/* ============================================================== */}
-        {/* Main Chart Box - EXACT Match of User Demo Image (media_...)    */}
-        {/* ============================================================== */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-5 sm:p-8 shadow-xs">
-          
-          {/* Centered Title Header matching demo graph */}
-          <div className="text-center mb-6">
-            <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-800 dark:text-slate-100 font-sans">
-              Real Time Download-Upload Graph
-            </h2>
-            <div className="mt-1.5 space-y-0.5 text-xs sm:text-sm text-slate-600 dark:text-slate-400">
-              <p>
-                Username:{' '}
-                <span className="font-semibold text-slate-900 dark:text-slate-100">
-                  {selectedUsername || '—'}
-                </span>
-              </p>
-              <p>
-                Router name:{' '}
-                <span className="font-semibold text-slate-900 dark:text-slate-100">
-                  {routerName || 'MikroTik Router'}
-                </span>
-              </p>
-            </div>
+        {/* Bottom Chart View Toggle */}
+        <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+          <div className="flex items-center gap-2">
+            <span>View Style:</span>
+            <button
+              onClick={() => setChartType('bar')}
+              className={`px-2 py-1 rounded-md font-semibold transition-colors ${
+                chartType === 'bar'
+                  ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800'
+                  : 'hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              Bar Graph (Demo)
+            </button>
+            <button
+              onClick={() => setChartType('area')}
+              className={`px-2 py-1 rounded-md font-semibold transition-colors ${
+                chartType === 'area'
+                  ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800'
+                  : 'hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              Area Waves
+            </button>
           </div>
-
-          {/* Graph Section */}
-          <div className="w-full h-[320px] sm:h-[380px] relative">
-            {trafficData.length === 0 ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
-                <RotateCw className="w-8 h-8 animate-spin text-blue-500 mb-2" />
-                <span className="text-xs font-medium">Connecting to MikroTik & waiting for traffic stream...</span>
-              </div>
-            ) : chartType === 'bar' ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={trafficData}
-                  margin={{ top: 10, right: 20, left: 10, bottom: 20 }}
-                  barCategoryGap="15%"
-                  barGap={1}
-                >
-                  <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={true} stroke="#e2e8f0" className="dark:stroke-slate-800" />
-                  <XAxis
-                    dataKey="time"
-                    stroke="#94a3b8"
-                    tick={{ fontSize: 11 }}
-                    tickLine={false}
-                    interval="preserveStartEnd"
-                  />
-                  <YAxis
-                    stroke="#94a3b8"
-                    tick={{ fontSize: 11 }}
-                    tickLine={false}
-                    domain={[0, maxRecordedSpeed]}
-                    tickFormatter={formatSpeedY}
-                    label={{
-                      value: 'Speed',
-                      angle: -90,
-                      position: 'insideLeft',
-                      offset: 0,
-                      style: { fontSize: 12, fill: '#64748b', fontWeight: 600 },
-                    }}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                      borderRadius: '12px',
-                      border: '1px solid #334155',
-                      color: '#f8fafc',
-                      fontSize: '12px',
-                    }}
-                    formatter={(val: number, name: string) => [
-                      formatSpeed(val),
-                      name === 'rx' ? 'Rx (Download)' : 'Tx (Upload)',
-                    ]}
-                  />
-                  {/* Tx = Red bar */}
-                  <Bar
-                    dataKey="tx"
-                    name="tx"
-                    fill="#ef4444"
-                    radius={[2, 2, 0, 0]}
-                    maxBarSize={8}
-                    isAnimationActive={false}
-                  />
-                  {/* Rx = Blue bar */}
-                  <Bar
-                    dataKey="rx"
-                    name="rx"
-                    fill="#2563eb"
-                    radius={[2, 2, 0, 0]}
-                    maxBarSize={8}
-                    isAnimationActive={false}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart
-                  data={trafficData}
-                  margin={{ top: 10, right: 20, left: 10, bottom: 20 }}
-                >
-                  <defs>
-                    <linearGradient id="colorRx" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.8} />
-                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0.05} />
-                    </linearGradient>
-                    <linearGradient id="colorTx" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8} />
-                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={true} stroke="#e2e8f0" className="dark:stroke-slate-800" />
-                  <XAxis
-                    dataKey="time"
-                    stroke="#94a3b8"
-                    tick={{ fontSize: 11 }}
-                    tickLine={false}
-                    interval="preserveStartEnd"
-                  />
-                  <YAxis
-                    stroke="#94a3b8"
-                    tick={{ fontSize: 11 }}
-                    tickLine={false}
-                    domain={[0, maxRecordedSpeed]}
-                    tickFormatter={formatSpeedY}
-                    label={{
-                      value: 'Speed',
-                      angle: -90,
-                      position: 'insideLeft',
-                      offset: 0,
-                      style: { fontSize: 12, fill: '#64748b', fontWeight: 600 },
-                    }}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                      borderRadius: '12px',
-                      border: '1px solid #334155',
-                      color: '#f8fafc',
-                      fontSize: '12px',
-                    }}
-                    formatter={(val: number, name: string) => [
-                      formatSpeed(val),
-                      name === 'rx' ? 'Rx (Download)' : 'Tx (Upload)',
-                    ]}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="rx"
-                    name="rx"
-                    stroke="#2563eb"
-                    strokeWidth={2}
-                    fill="url(#colorRx)"
-                    isAnimationActive={false}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="tx"
-                    name="tx"
-                    stroke="#ef4444"
-                    strokeWidth={2}
-                    fill="url(#colorTx)"
-                    isAnimationActive={false}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
+          <div>
+            <span>Data Points: {trafficData.length} / {maxHistoryPoints}</span>
           </div>
-
-          {/* Bottom Live Meter Indicator - EXACT Match of User Demo Image */}
-          <div className="mt-6 flex flex-col items-center justify-center space-y-2">
-            {/* Spinning refresh icon */}
-            <div className="flex items-center justify-center">
-              <RotateCw className={`w-5 h-5 text-slate-600 dark:text-slate-400 transition-all ${
-                isPolling && !isPaused ? 'animate-spin text-blue-500' : ''
-              }`} />
-            </div>
-
-            {/* Red Tx dot and Blue Rx dot with exact spacing & typography */}
-            <div className="flex flex-col items-center justify-center space-y-1 text-sm sm:text-base font-semibold">
-              {/* Tx (Upload) - Red dot */}
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-red-500 inline-block shrink-0 shadow-xs" />
-                <span className="text-slate-900 dark:text-slate-100 font-sans">
-                  Tx: {formatSpeed(currentTx)}
-                </span>
-              </div>
-
-              {/* Rx (Download) - Blue dot */}
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-blue-600 inline-block shrink-0 shadow-xs" />
-                <span className="text-slate-900 dark:text-slate-100 font-sans">
-                  Rx: {formatSpeed(currentRx)}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Bottom Chart View Switcher */}
-          <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs text-slate-500">
-            <div className="flex items-center gap-2">
-              <span>View Mode:</span>
-              <button
-                onClick={() => setChartType('bar')}
-                className={`px-2 py-1 rounded-md font-semibold transition-colors ${
-                  chartType === 'bar'
-                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800'
-                    : 'hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
-              >
-                Bar Graph (Demo)
-              </button>
-              <button
-                onClick={() => setChartType('area')}
-                className={`px-2 py-1 rounded-md font-semibold transition-colors ${
-                  chartType === 'area'
-                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800'
-                    : 'hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
-              >
-                Area Waves
-              </button>
-            </div>
-            <div>
-              <span>Points: {trafficData.length} / {maxHistoryPoints}</span>
-            </div>
-          </div>
-
         </div>
 
       </div>
+
     </div>
   );
 }
