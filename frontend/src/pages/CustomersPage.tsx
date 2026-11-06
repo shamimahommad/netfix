@@ -19,6 +19,7 @@ import { openChangeExpiryDateModal } from '@/lib/changeExpiryDateModal';
 import { openLeftCustomerModal } from '@/lib/leftCustomerModal';
 import { openDeleteCustomerModal } from '@/lib/deleteCustomerModal';
 import { PageHeader } from '@/components/common';
+import { usePermissions } from '@/hooks/usePermissions';
 
 const CUSTOMER_TYPES: Record<string, { title: string; description: string; statusFilter?: string }> = {
   all: { title: 'All Customers', description: 'View all customers in your system.' },
@@ -368,6 +369,7 @@ export default function CustomersPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const toast = useToastContext();
+  const permissions = usePermissions();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -1301,15 +1303,17 @@ export default function CustomersPage() {
         subtitle={customerType.description}
         badge={`${total} ${type === 'online' ? (total === 1 ? 'Online' : 'Online') : type === 'offline' ? (total === 1 ? 'Offline' : 'Offline') : (total === 1 ? 'Customer' : 'Customers')}`}
         actions={
-          <button
-            onClick={() => navigate('/dashboard/customers/add')}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-lg transition-all shadow-sm active:scale-95"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Add Customer
-          </button>
+          permissions.canCreateCustomer ? (
+            <button
+              onClick={() => navigate('/dashboard/customers/add')}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-lg transition-all shadow-sm active:scale-95"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Add Customer
+            </button>
+          ) : undefined
         }
       />
 
@@ -2507,36 +2511,40 @@ export default function CustomersPage() {
                   </svg>
                   <span>View Details</span>
                 </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const button = actionButtonRefs.current.get(openActionMenu);
-                    if (button) {
-                      handleQuickRenew(openActionMenu, e as any);
-                    }
-                    setOpenActionMenu(null);
-                    setActionMenuPosition(null);
-                  }}
-                  className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-gradient-to-r hover:from-green-50 hover:to-emerald-50 dark:hover:from-green-900/20 dark:hover:to-emerald-900/20 transition-colors flex items-center gap-3 group"
-                >
-                  <RenewIcon className="w-4 h-4 text-green-500 group-hover:text-green-600" />
-                  <span>Renew</span>
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const customerId = openActionMenu;
-                    setOpenActionMenu(null);
-                    setActionMenuPosition(null);
-                    if (customerId) navigate(`/dashboard/customers/edit/${customerId}`);
-                  }}
-                  className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-gradient-to-r hover:from-purple-50 hover:to-pink-50 dark:hover:from-purple-900/20 dark:hover:to-pink-900/20 transition-colors flex items-center gap-3 group"
-                >
-                  <svg className="w-4 h-4 text-purple-500 group-hover:text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                  <span>Edit</span>
-                </button>
+                {permissions.canRecharge && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const button = actionButtonRefs.current.get(openActionMenu);
+                      if (button) {
+                        handleQuickRenew(openActionMenu, e as any);
+                      }
+                      setOpenActionMenu(null);
+                      setActionMenuPosition(null);
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-gradient-to-r hover:from-green-50 hover:to-emerald-50 dark:hover:from-green-900/20 dark:hover:to-emerald-900/20 transition-colors flex items-center gap-3 group"
+                  >
+                    <RenewIcon className="w-4 h-4 text-green-500 group-hover:text-green-600" />
+                    <span>Renew</span>
+                  </button>
+                )}
+                {permissions.canEditCustomer && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const customerId = openActionMenu;
+                      setOpenActionMenu(null);
+                      setActionMenuPosition(null);
+                      if (customerId) navigate(`/dashboard/customers/edit/${customerId}`);
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-gradient-to-r hover:from-purple-50 hover:to-pink-50 dark:hover:from-purple-900/20 dark:hover:to-pink-900/20 transition-colors flex items-center gap-3 group"
+                  >
+                    <svg className="w-4 h-4 text-purple-500 group-hover:text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    <span>Edit</span>
+                  </button>
+                )}
       </div>
             </div>,
             document.body

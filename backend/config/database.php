@@ -85,6 +85,18 @@ class Database {
             // Check if users table exists in the current database
             $stmt = $pdo->query("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'users' LIMIT 1");
             if ($stmt && $stmt->fetchColumn()) {
+                // Ensure multi-tier reseller tables exist if missing
+                try {
+                    $tierCheck = $pdo->query("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'tier_packages' LIMIT 1");
+                    if (!$tierCheck || !$tierCheck->fetchColumn()) {
+                        $migFile = __DIR__ . '/../database/run_multi_tier_migration.php';
+                        if (file_exists($migFile)) {
+                            require_once $migFile;
+                        }
+                    }
+                } catch (Throwable $t) {
+                    error_log('Multi-tier tables ensure notice: ' . $t->getMessage());
+                }
                 return; // Core tables already exist!
             }
 

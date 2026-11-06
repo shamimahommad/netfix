@@ -12,6 +12,8 @@ require_once __DIR__ . '/../lib/AuthMiddleware.php';
 require_once __DIR__ . '/../lib/Response.php';
 require_once __DIR__ . '/../lib/MikrotikService.php';
 require_once __DIR__ . '/../lib/TenantSequenceService.php';
+require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+require_once __DIR__ . '/../lib/WalletLedgerService.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -28,6 +30,20 @@ $customerId = $data['customer_id'] ?? null;
 if (!$customerId) {
     http_response_code(400);
     echo json_encode(['success' => false, 'message' => 'customer_id is required']);
+    exit;
+}
+
+// IDOR & Downward-Only Access Enforcement
+if (!HierarchySecurityService::canAccessCustomer((int)$user['user_id'], (int)$customerId, $tenantId ? (int)$tenantId : null)) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'message' => 'Access Denied: You do not have permission to recharge this customer.']);
+    exit;
+}
+
+// Granular Action Permission Check
+if (!HierarchySecurityService::hasPermission((int)$user['user_id'], 'can_recharge')) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'message' => 'Forbidden: Missing can_recharge permission.']);
     exit;
 }
 
@@ -114,6 +130,15 @@ try {
         'role' => $user['role'],
         'coll' => $user['user_id'],
     ]);
+
+    // 5. Atomic Wallet Deduction & Cascading Upstream Margin
+    $cascadeResult = WalletLedgerService::rechargeWithMarginCascade(
+        (int)$user['user_id'],
+        (int)$customerId,
+        (int)$package['access_profile_id'],
+        $invNumber,
+        $tenantId ? (int)$tenantId : null
+    );
 
     $db->commit();
 

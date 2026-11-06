@@ -7,6 +7,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
 require_once __DIR__ . '/../lib/AuthMiddleware.php';
 require_once __DIR__ . '/../lib/TenantSequenceService.php';
+require_once __DIR__ . '/../lib/HierarchySecurityService.php';
 
 class CustomersController {
     public static function index(): void {
@@ -49,11 +50,14 @@ class CustomersController {
             $params['ownerId'] = $_GET['ownerId'];
         }
 
-        // If user is Reseller/Agent, apply hierarchical isolation
-        if (!empty($user['role']) && in_array($user['role'], ['reseller', 'sub_reseller', 'agent'])) {
-            $where[] = "(c.owner_id = :user_owner_id OR c.owner_role_level <= :user_role_level)";
+        // Strict Downward-Only Access Control via Materialized Path
+        $callerRole = strtolower($user['role'] ?? '');
+        $isLevel0 = in_array($callerRole, ['admin', 'isp_admin', 'manager', 'tenant_admin', 'saas_admin', 'super_admin'], true);
+        if (!$isLevel0) {
+            $userPath = $user['hierarchy_path'] ?? "/{$user['user_id']}/";
+            $where[] = "(c.owner_id = :user_owner_id OR c.owner_path LIKE :user_path_like)";
             $params['user_owner_id'] = $user['user_id'];
-            $params['user_role_level'] = $user['role_level'] ?? 40;
+            $params['user_path_like'] = rtrim($userPath, '/') . '/%';
         }
 
         $whereSql = implode(' AND ', $where);
@@ -183,6 +187,12 @@ class CustomersController {
 
         if (!$customer) {
             Response::error('Customer not found', 404);
+        }
+
+        // IDOR Protection: Enforce Downward-Only Access
+        if (!HierarchySecurityService::canAccessCustomer((int)$user['user_id'], (int)$customer['customer_id'], (int)$customer['tenant_id'])) {
+            Response::error('Access denied: You do not have permission to view this customer record.', 403);
+            return;
         }
 
         $realCid = $customer['customer_id'];
@@ -438,6 +448,7 @@ class CustomersController {
         } catch (\Throwable $e) {
             error_log('reserveId fallback: ' . $e->getMessage());
             require_once __DIR__ . '/../lib/TenantSequenceService.php';
+require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             $fallbackCode = TenantSequenceService::peekNextCode($db, (string)$tenantId, 'customer', 6);
             Response::json([
                 'success' => true,
@@ -506,9 +517,13 @@ class CustomersController {
                 $customerCode = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'customer', 6);
             }
 
+            $ownerId = (int)($data['ownerId'] ?? $user['user_id']);
+            $ownerUser = HierarchySecurityService::getUser($ownerId);
+            $ownerPath = $ownerUser['hierarchy_path'] ?? "/{$ownerId}/";
+
             $stmt = $db->prepare("INSERT INTO customers 
-                (tenant_id, customer_code, customer_type, full_name, email, phone, installation_address, status, billing_status, connection_date, owner_id, owner_role, owner_role_level, created_by)
-                VALUES (:tid, :code, :type, :name, :email, :phone, :addr, 'active', 'Paid', CURDATE(), :oid, :orole, :olevel, :created_by)");
+                (tenant_id, customer_code, customer_type, full_name, email, phone, installation_address, status, billing_status, connection_date, owner_id, owner_role, owner_role_level, owner_path, created_by)
+                VALUES (:tid, :code, :type, :name, :email, :phone, :addr, 'active', 'Paid', CURDATE(), :oid, :orole, :olevel, :opath, :created_by)");
             $stmt->execute([
                 'tid' => $tenantId,
                 'code' => $customerCode,
@@ -517,9 +532,10 @@ class CustomersController {
                 'email' => $data['email'] ?? null,
                 'phone' => $phone,
                 'addr' => $address,
-                'oid' => $data['ownerId'] ?? $user['user_id'],
+                'oid' => $ownerId,
                 'orole' => $user['role'] ?? 'admin',
                 'olevel' => $user['role_level'] ?? 100,
+                'opath' => $ownerPath,
                 'created_by' => $user['user_id'],
             ]);
 
@@ -627,9 +643,13 @@ class CustomersController {
             }
 
             // 1. Insert Customer
+            $ownerId = (int)($data['ownerId'] ?? $user['user_id']);
+            $ownerUser = HierarchySecurityService::getUser($ownerId);
+            $ownerPath = $ownerUser['hierarchy_path'] ?? "/{$ownerId}/";
+
             $stmt = $db->prepare("INSERT INTO customers 
-                (tenant_id, customer_code, customer_type, full_name, email, phone, installation_address, status, billing_status, connection_date, owner_id, owner_role, owner_role_level, metadata, created_by)
-                VALUES (:tid, :code, :type, :name, :email, :phone, :addr, 'active', 'Paid', CURDATE(), :oid, :orole, :olevel, :meta, :created_by)");
+                (tenant_id, customer_code, customer_type, full_name, email, phone, installation_address, status, billing_status, connection_date, owner_id, owner_role, owner_role_level, owner_path, metadata, created_by)
+                VALUES (:tid, :code, :type, :name, :email, :phone, :addr, 'active', 'Paid', CURDATE(), :oid, :orole, :olevel, :opath, :meta, :created_by)");
             $stmt->execute([
                 'tid' => $tenantId,
                 'code' => $customerCode,
@@ -638,9 +658,10 @@ class CustomersController {
                 'email' => $data['email'] ?? null,
                 'phone' => $phone,
                 'addr' => $address,
-                'oid' => $data['ownerId'] ?? $user['user_id'],
+                'oid' => $ownerId,
                 'orole' => $user['role'] ?? 'admin',
                 'olevel' => $user['role_level'] ?? 100,
+                'opath' => $ownerPath,
                 'meta' => json_encode([
                     'service_area_id' => $data['areaId'] ?? null,
                     'sub_area_id' => $data['subAreaId'] ?? null,
@@ -734,6 +755,12 @@ class CustomersController {
         $customer = $stmtC->fetch();
         if (!$customer) {
             Response::error('Customer not found', 404);
+        }
+
+        // IDOR Protection: Enforce Downward-Only Access
+        if (!HierarchySecurityService::canAccessCustomer((int)$user['user_id'], (int)$customer['customer_id'], (int)$customer['tenant_id'])) {
+            Response::error('Access denied: You do not have permission to view this customer record.', 403);
+            return;
         }
         $realCid = (int)$customer['customer_id'];
         $customerTenantId = (int)$customer['tenant_id'];

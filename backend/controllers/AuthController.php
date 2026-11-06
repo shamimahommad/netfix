@@ -194,13 +194,23 @@ class AuthController {
         $user = AuthMiddleware::requireAuth();
         $db = Database::getConnection();
 
-        // Calculate balance if reseller
+        // Calculate balance from wallets table (primary) or reseller_ledger
         $balance = 0.00;
         if (!empty($user['user_id'])) {
-            $stmt = $db->prepare("SELECT COALESCE(SUM(credit - debit), 0) as balance FROM reseller_ledger WHERE user_id = :uid");
+            $stmt = $db->prepare("SELECT balance FROM wallets WHERE user_id = :uid LIMIT 1");
             $stmt->execute(['uid' => $user['user_id']]);
-            $row = $stmt->fetch();
-            $balance = (float)($row['balance'] ?? 0);
+            $wBal = $stmt->fetchColumn();
+            $stmt->closeCursor();
+
+            if ($wBal !== false) {
+                $balance = (float)$wBal;
+            } else {
+                $stmt = $db->prepare("SELECT COALESCE(SUM(credit - debit), 0) as balance FROM reseller_ledger WHERE user_id = :uid");
+                $stmt->execute(['uid' => $user['user_id']]);
+                $row = $stmt->fetch();
+                $stmt->closeCursor();
+                $balance = (float)($row['balance'] ?? 0);
+            }
         }
 
         $userType = 'isp';
@@ -210,16 +220,49 @@ class AuthController {
             $userType = 'customer';
         }
 
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        $uid = (int)$user['user_id'];
+        $role = $user['role'] ?? '';
+        $level = HierarchySecurityService::getHierarchyLevel($role);
+
+        // Fetch granular action permissions
+        $permCodes = [
+            'can_create_customer',
+            'can_edit_customer',
+            'can_delete_customer',
+            'can_view_invoice',
+            'can_recharge',
+            'can_manage_sub_tier',
+            'can_assign_package',
+            'can_transfer_balance'
+        ];
+        $permissions = [];
+        foreach ($permCodes as $pCode) {
+            $permissions[$pCode] = HierarchySecurityService::hasPermission($uid, $pCode);
+        }
+
+        // Fetch hierarchy_path and parent_id
+        $hStmt = $db->prepare("SELECT hierarchy_path, parent_id FROM users WHERE user_id = :uid LIMIT 1");
+        $hStmt->execute(['uid' => $uid]);
+        $hRow = $hStmt->fetch(PDO::FETCH_ASSOC);
+        $hStmt->closeCursor();
+
         Response::json([
             'user_id' => (string)$user['user_id'],
             'tenant_id' => $user['tenant_id'] ? (string)$user['tenant_id'] : null,
             'user_type' => $userType,
             'role_code' => $user['role'],
+            'role' => $user['role'],
+            'role_level' => (int)($user['role_level'] ?? 100),
+            'hierarchy_level' => $level,
+            'hierarchy_path' => $hRow['hierarchy_path'] ?? "/{$uid}/",
+            'parent_id' => $hRow['parent_id'] ?? null,
             'balance' => $balance,
             'first_name' => $user['first_name'],
             'last_name' => $user['last_name'],
             'email' => $user['email'],
             'username' => $user['username'] ?? '',
+            'permissions' => $permissions,
             'impersonated' => !empty($user['impersonated']),
             'impersonated_by' => $user['impersonated_by'] ?? null,
             'impersonated_by_role' => $user['impersonated_by_role'] ?? null,

@@ -280,6 +280,30 @@ if ($method === 'POST' && $uri === '/payments/simulator/confirm') {
 }
 
 // ---------------------------------------------------------------------
+// MULTI-TIER RESELLER HIERARCHY & CASCADING PRICE FLOOR APIS
+// ---------------------------------------------------------------------
+if ($method === 'POST' && ($uri === '/reseller/create_downline' || $uri === '/reseller/create-downline' || $uri === '/reseller/create_downline.php')) {
+    require __DIR__ . '/api/reseller/create_downline.php';
+    exit;
+}
+if ($method === 'POST' && ($uri === '/reseller/assign_package' || $uri === '/reseller/assign-package' || $uri === '/reseller/assign_package.php')) {
+    require __DIR__ . '/api/reseller/assign_package.php';
+    exit;
+}
+if ($method === 'GET' && ($uri === '/reseller/hierarchy' || $uri === '/resellers/hierarchy' || $uri === '/reseller/hierarchy.php')) {
+    require __DIR__ . '/api/reseller/hierarchy.php';
+    exit;
+}
+if ($method === 'GET' && ($uri === '/reseller/pricing_matrix' || $uri === '/resellers/pricing-matrix' || $uri === '/reseller/pricing_matrix.php')) {
+    require __DIR__ . '/api/reseller/pricing_matrix.php';
+    exit;
+}
+if ($method === 'GET' && ($uri === '/customers/list' || $uri === '/customers/list.php')) {
+    require __DIR__ . '/api/customers/list.php';
+    exit;
+}
+
+// ---------------------------------------------------------------------
 // RESELLERS & POP HIERARCHY
 // ---------------------------------------------------------------------
 if ($method === 'GET' && $uri === '/resellers') {

@@ -7,6 +7,9 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
 require_once __DIR__ . '/../lib/AuthMiddleware.php';
+require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+require_once __DIR__ . '/../lib/PackageAssignmentService.php';
+require_once __DIR__ . '/../lib/WalletLedgerService.php';
 
 class ResellersController {
     public static function index(): void {
@@ -14,7 +17,7 @@ class ResellersController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $where = ["u.role IN ('reseller', 'sub_reseller', 'agent')"];
+        $where = ["u.role IN ('reseller', 'sub_reseller', 'dealer', 'agent')"];
         $params = [];
 
         if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
@@ -36,9 +39,13 @@ class ResellersController {
             $params['status'] = $_GET['status'];
         }
 
-        // If caller is reseller, show only own downline
-        if (in_array($user['role'], ['reseller', 'sub_reseller'])) {
-            $where[] = "(u.parent_id = :caller_id OR u.created_by = :caller_id)";
+        // Downward-Only Access Control via Materialized Path
+        $callerRole = strtolower($user['role'] ?? '');
+        $isLevel0 = in_array($callerRole, ['admin', 'isp_admin', 'manager', 'tenant_admin', 'saas_admin', 'super_admin'], true);
+        if (!$isLevel0) {
+            $userPath = $user['hierarchy_path'] ?? "/{$user['user_id']}/";
+            $where[] = "(u.hierarchy_path LIKE :caller_path_like AND u.user_id != :caller_id)";
+            $params['caller_path_like'] = rtrim($userPath, '/') . '/%';
             $params['caller_id'] = $user['user_id'];
         }
 
@@ -154,7 +161,8 @@ class ResellersController {
 
         $roleLevel = 80;
         if ($role === 'sub_reseller') $roleLevel = 60;
-        if ($role === 'agent') $roleLevel = 40;
+        if ($role === 'dealer') $roleLevel = 40;
+        if ($role === 'agent') $roleLevel = 20;
 
         $db = Database::getConnection();
 
@@ -167,10 +175,13 @@ class ResellersController {
 
         $hash = password_hash($password, PASSWORD_BCRYPT);
         $email = $username . '@ispnetfix.local';
+        $parentId = (int)($data['parentId'] ?? $currentUser['user_id']);
+        $parentUser = HierarchySecurityService::getUser($parentId);
+        $parentPath = $parentUser['hierarchy_path'] ?? "/{$parentId}/";
 
         $stmt = $db->prepare("INSERT INTO users 
-            (tenant_id, email, username, password_hash, first_name, last_name, phone, role, role_level, parent_id, status, metadata, created_by)
-            VALUES (:tid, :email, :uname, :pwd, :fname, '', :phone, :role, :lvl, :pid, :status, :meta, :created_by)");
+            (tenant_id, email, username, password_hash, first_name, last_name, phone, role, role_level, parent_id, hierarchy_path, status, metadata, created_by)
+            VALUES (:tid, :email, :uname, :pwd, :fname, '', :phone, :role, :lvl, :pid, :path, :status, :meta, :created_by)");
         
         $stmt->execute([
             'tid' => $tenantId,
@@ -181,7 +192,8 @@ class ResellersController {
             'phone' => $data['phone'] ?? null,
             'role' => $role,
             'lvl' => $roleLevel,
-            'pid' => $data['parentId'] ?? $currentUser['user_id'],
+            'pid' => $parentId,
+            'path' => $parentPath,
             'status' => $data['status'] ?? 'active',
             'meta' => json_encode([
                 'credit_limit' => $data['credit_limit'] ?? 0,
@@ -190,14 +202,37 @@ class ResellersController {
             'created_by' => $currentUser['user_id'],
         ]);
 
-        $userId = $db->lastInsertId();
+        $userId = (int)$db->lastInsertId();
 
-        // If opening balance
-        if (!empty($data['opening_balance']) && (float)$data['opening_balance'] > 0) {
+        // Compute and set exact Materialized Path: /parent/.../userId/
+        $userPath = rtrim($parentPath, '/') . "/{$userId}/";
+        $db->prepare("UPDATE users SET hierarchy_path = :path WHERE user_id = :uid")
+            ->execute(['path' => $userPath, 'uid' => $userId]);
+
+        // Initialize Wallet
+        $openingBalance = !empty($data['opening_balance']) ? (float)$data['opening_balance'] : 0.00;
+        $db->prepare("INSERT INTO wallets (tenant_id, user_id, balance, currency, status) 
+            VALUES (:tid, :uid, :bal, 'BDT', 'active')
+            ON DUPLICATE KEY UPDATE updated_at = NOW()")
+            ->execute(['tid' => $tenantId ?: 1, 'uid' => $userId, 'bal' => $openingBalance]);
+
+        // If opening balance, record in ledger and transactions
+        if ($openingBalance > 0) {
             $stmtLedger = $db->prepare("INSERT INTO reseller_ledger (tenant_id, user_id, credit, reference_type, notes, created_by)
                 VALUES (:tid, :uid, :credit, 'OPENING_BALANCE', 'Opening wallet balance', :cb)");
             $stmtLedger->execute([
                 'tid' => $tenantId,
+                'uid' => $userId,
+                'credit' => $openingBalance,
+                'cb' => $currentUser['user_id'],
+            ]);
+
+            $db->prepare("INSERT INTO wallet_transactions 
+                (tenant_id, wallet_id, user_id, type, amount, balance_before, balance_after, reference_type, description, created_by)
+                SELECT tenant_id, wallet_id, user_id, 'credit', :amt, 0.00, :amt, 'OPENING_BALANCE', 'Opening wallet balance', :cb 
+                FROM wallets WHERE user_id = :uid LIMIT 1")
+                ->execute(['amt' => $openingBalance, 'cb' => $currentUser['user_id'], 'uid' => $userId]);
+        }
                 'uid' => $userId,
                 'credit' => (float)$data['opening_balance'],
                 'cb' => $currentUser['user_id'],
@@ -281,7 +316,7 @@ class ResellersController {
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
-        $userId = $data['userId'] ?? null;
+        $userId = (int)($data['userId'] ?? 0);
         $amount = (float)($data['amount'] ?? 0);
         $notes = $data['notes'] ?? 'Wallet Top-up';
 
@@ -289,24 +324,18 @@ class ResellersController {
             Response::error('User ID and positive amount are required', 400);
         }
 
-        $db = Database::getConnection();
-        $stmt = $db->prepare("INSERT INTO reseller_ledger 
-            (tenant_id, user_id, credit, reference_type, notes, created_by)
-            VALUES (:tid, :uid, :credit, 'ADMIN_TOPUP', :notes, :cb)");
-        $stmt->execute([
-            'tid' => $tenantId,
-            'uid' => $userId,
-            'credit' => $amount,
-            'notes' => $notes,
-            'cb' => $currentUser['user_id'],
-        ]);
-
-        // Get new balance
-        $stmtBal = $db->prepare("SELECT COALESCE(SUM(credit - debit), 0) as balance FROM reseller_ledger WHERE user_id = :uid");
-        $stmtBal->execute(['uid' => $userId]);
-        $newBalance = (float)$stmtBal->fetchColumn();
-
-        Response::json(['success' => true, 'balance' => $newBalance]);
+        try {
+            $result = WalletLedgerService::topup(
+                (int)$currentUser['user_id'],
+                $userId,
+                $amount,
+                $notes,
+                $tenantId ? (int)$tenantId : null
+            );
+            Response::json(['success' => true, 'balance' => $result['balance_after']]);
+        } catch (Throwable $e) {
+            Response::error($e->getMessage(), 400);
+        }
     }
 
     public static function transferBalance(): void {
@@ -314,50 +343,29 @@ class ResellersController {
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
-        $fromUserId = $data['fromUserId'] ?? null;
-        $toUserId = $data['toUserId'] ?? null;
+        $fromUserId = (int)($data['fromUserId'] ?? 0);
+        $toUserId = (int)($data['toUserId'] ?? 0);
         $amount = (float)($data['amount'] ?? 0);
+        $notes = $data['notes'] ?? 'Wallet Transfer';
 
         if (!$fromUserId || !$toUserId || $amount <= 0) {
             Response::error('From User, To User, and positive amount are required', 400);
         }
 
-        $db = Database::getConnection();
-        $db->beginTransaction();
-
         try {
-            // Check sender balance
-            $stmt = $db->prepare("SELECT COALESCE(SUM(credit - debit), 0) as balance FROM reseller_ledger WHERE user_id = :uid");
-            $stmt->execute(['uid' => $fromUserId]);
-            $senderBalance = (float)$stmt->fetchColumn();
-
-            if ($senderBalance < $amount && $currentUser['role'] !== 'saas_admin' && $currentUser['role'] !== 'admin') {
-                Response::error('Insufficient balance to transfer', 400);
-            }
-
-            // Debit sender
-            $stmt = $db->prepare("INSERT INTO reseller_ledger (tenant_id, user_id, debit, reference_type, notes, created_by)
-                VALUES (:tid, :uid, :amt, 'TRANSFER_OUT', 'Transferred to user ' :touid, :cb)");
-            $stmt->execute([
-                'tid' => $tenantId,
-                'uid' => $fromUserId,
-                'amt' => $amount,
-                'cb' => $currentUser['user_id'],
-            ]);
-
-            // Credit recipient
-            $stmt = $db->prepare("INSERT INTO reseller_ledger (tenant_id, user_id, credit, reference_type, notes, created_by)
-                VALUES (:tid, :uid, :amt, 'TRANSFER_IN', 'Received from user ' :fromuid, :cb)");
-            $stmt->execute([
-                'tid' => $tenantId,
-                'uid' => $toUserId,
-                'amt' => $amount,
-                'cb' => $currentUser['user_id'],
-            ]);
-
-            $db->commit();
-
-            Response::json([
+            $result = WalletLedgerService::transfer(
+                (int)$currentUser['user_id'],
+                $fromUserId,
+                $toUserId,
+                $amount,
+                $notes,
+                $tenantId ? (int)$tenantId : null
+            );
+            Response::json(['success' => true, 'data' => $result]);
+        } catch (Throwable $e) {
+            Response::error($e->getMessage(), 400);
+        }
+    }
                 'success' => true,
                 'fromBalance' => $senderBalance - $amount,
                 'toBalance' => 0,
@@ -409,77 +417,41 @@ class ResellersController {
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $items = $data['items'] ?? [];
+        $targetUserId = (int)$userId;
 
-        $db = Database::getConnection();
-
-        // 1. Fetch target user's parent
-        $stmt = $db->prepare("SELECT user_id, parent_id, role, role_level FROM users WHERE user_id = :uid LIMIT 1");
-        $stmt->execute(['uid' => $userId]);
-        $targetUser = $stmt->fetch();
-
-        if (!$targetUser) {
-            Response::error('Target user not found', 404);
+        // Verify downward access
+        if (!HierarchySecurityService::canAccessUser((int)$currentUser['user_id'], $targetUserId)) {
+            Response::error("Access denied: You do not have permission to configure permissions for user #{$targetUserId}", 403);
+            return;
         }
 
-        $parentId = $targetUser['parent_id'];
-        $parentPermMap = [];
-
-        // If parent exists and is not an Admin level (100+), verify parent's commission cap
-        if ($parentId) {
-            $stmtParent = $db->prepare("SELECT user_id, role, role_level FROM users WHERE user_id = :pid LIMIT 1");
-            $stmtParent->execute(['pid' => $parentId]);
-            $parentUser = $stmtParent->fetch();
-
-            if ($parentUser && (int)$parentUser['role_level'] < 100) {
-                // Fetch parent's plan permissions
-                $stmtPerms = $db->prepare("SELECT access_profile_id, pop_profit_percent FROM reseller_plan_permission WHERE user_id = :pid");
-                $stmtPerms->execute(['pid' => $parentId]);
-                while ($p = $stmtPerms->fetch()) {
-                    $parentPermMap[(string)$p['access_profile_id']] = (float)$p['pop_profit_percent'];
-                }
-            }
-        }
-
-        // 2. Validate Commission % Cap
-        foreach ($items as $item) {
-            $pkgId = (string)($item['packageId'] ?? '');
-            $childPercent = (float)($item['popProfitPercent'] ?? 0);
-
-            if (isset($parentPermMap[$pkgId])) {
-                $parentCap = $parentPermMap[$pkgId];
-                if ($childPercent > $parentCap) {
-                    Response::error("Commission % for package {$pkgId} ({$childPercent}%) cannot exceed parent's commission ({$parentCap}%). Lower role cannot exceed upper role commission.", 400);
-                }
-            }
-        }
-
-        // 3. Save or update permissions
-        $db->beginTransaction();
         try {
-            $stmtSave = $db->prepare("INSERT INTO reseller_plan_permission 
-                (tenant_id, user_id, access_profile_id, sell_price, pop_profit, pop_profit_percent, is_allowed)
-                VALUES (:tid, :uid, :pid, :price, :profit, :pct, :allowed)
-                ON DUPLICATE KEY UPDATE 
-                sell_price = VALUES(sell_price),
-                pop_profit = VALUES(pop_profit),
-                pop_profit_percent = VALUES(pop_profit_percent),
-                is_allowed = VALUES(is_allowed)");
-
             foreach ($items as $item) {
-                $stmtSave->execute([
-                    'tid' => $tenantId,
-                    'uid' => $userId,
-                    'pid' => $item['packageId'],
-                    'price' => (float)($item['sellPrice'] ?? 0),
-                    'profit' => (float)($item['popProfit'] ?? 0),
-                    'pct' => (float)($item['popProfitPercent'] ?? 0),
-                    'allowed' => !empty($item['allowed']) ? 1 : 0,
-                ]);
+                $pkgId = (int)($item['packageId'] ?? 0);
+                if (!$pkgId) continue;
+
+                $commissionRate = (float)($item['popProfitPercent'] ?? 0);
+                $sellPrice = isset($item['sellPrice']) ? (float)$item['sellPrice'] : null;
+                $isAllowed = !empty($item['allowed']);
+
+                PackageAssignmentService::assignPackageToChild(
+                    (int)$currentUser['user_id'],
+                    $targetUserId,
+                    $pkgId,
+                    $commissionRate,
+                    $sellPrice,
+                    $isAllowed,
+                    $tenantId ? (int)$tenantId : null
+                );
             }
 
-            $db->commit();
-            Response::json(['success' => true]);
+            Response::json(['success' => true, 'message' => 'Package permissions and price floors updated successfully']);
+        } catch (DomainException $de) {
+            Response::error($de->getMessage(), 400);
         } catch (Throwable $e) {
+            Response::error("Failed to update permissions: " . $e->getMessage(), 500);
+        }
+    }
             $db->rollBack();
             Response::error('Failed to update plan permissions: ' . $e->getMessage(), 500);
         }

@@ -2,10 +2,75 @@ import api from '@/lib/api';
 
 export type ResellerRole =
   | 'admin'
+  | 'isp_admin'
   | 'manager'
   | 'reseller'
   | 'sub_reseller'
+  | 'dealer'
   | 'agent';
+
+export interface HierarchyTreeNode {
+  user_id: string | number;
+  username: string;
+  first_name: string;
+  last_name: string;
+  phone: string | null;
+  role: string;
+  role_level: number;
+  hierarchy_path: string;
+  wallet_balance: number;
+  parent_id: string | number | null;
+  status: string;
+  children?: HierarchyTreeNode[];
+}
+
+export interface HierarchyUserNode {
+  user_id: string | number;
+  username: string;
+  first_name: string;
+  last_name: string;
+  phone: string | null;
+  role: string;
+  role_level: number;
+  parent_id: string | number | null;
+  hierarchy_path: string;
+  status: string;
+  wallet_balance: number;
+  direct_customers_count: number;
+  direct_downlines_count: number;
+}
+
+export interface PricingMatrixPackage {
+  package_id: number;
+  package_name: string;
+  retail_price: number;
+  download_speed_kbps: number;
+  upload_speed_kbps: number;
+  parent_cost_floor: number;
+  max_allowed_commission: number;
+  child_cost_price: number;
+  commission_rate: number;
+  is_allowed: boolean;
+}
+
+export interface CreateDownlinePayload {
+  username: string;
+  password: string;
+  first_name: string;
+  last_name?: string;
+  email?: string;
+  phone?: string;
+  role?: string;
+  notes?: string;
+}
+
+export interface AssignPackagePayload {
+  child_user_id: string | number;
+  package_id: string | number;
+  commission_rate?: number;
+  cost_price?: number;
+  is_allowed?: boolean;
+}
 
 export interface Reseller {
   userId: string;
@@ -309,5 +374,35 @@ export const resellerService = {
         description: r.description,
       })),
     };
+  },
+
+  async getHierarchy(): Promise<{
+    tree: HierarchyTreeNode;
+    downlines: HierarchyUserNode[];
+    current_user: any;
+    total_downlines: number;
+  }> {
+    const res = await api.get('/reseller/hierarchy');
+    return res.data;
+  },
+
+  async createDownline(payload: CreateDownlinePayload): Promise<any> {
+    const res = await api.post('/reseller/create_downline', payload);
+    return res.data;
+  },
+
+  async getPricingMatrix(childUserId: string | number): Promise<{
+    child_user: any;
+    packages: PricingMatrixPackage[];
+  }> {
+    const res = await api.get('/reseller/pricing_matrix', {
+      params: { child_user_id: childUserId },
+    });
+    return res.data;
+  },
+
+  async assignPackage(payload: AssignPackagePayload): Promise<any> {
+    const res = await api.post('/reseller/assign_package', payload);
+    return res.data;
   },
 };

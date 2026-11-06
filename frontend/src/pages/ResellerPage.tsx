@@ -35,21 +35,27 @@ import { authService } from '@/services/auth.service';
 import { networkService } from '@/services/network.service';
 import { useToastContext } from '@/contexts/ToastContext';
 import { useAuthStore } from '@/stores/authStore';
+import { usePermissions } from '@/hooks/usePermissions';
+import { ResellerHierarchyTree } from '@/components/reseller/ResellerHierarchyTree';
 import api from '@/lib/api';
 
 const RESELLER_ROLE_LABELS: Record<string, string> = {
-  admin: 'Admin',
+  admin: 'ISP Admin',
+  isp_admin: 'ISP Admin',
   manager: 'Manager',
   reseller: 'Reseller',
   sub_reseller: 'Sub Reseller',
+  dealer: 'Dealer',
   agent: 'Agent',
 };
 
 const ROLE_BADGE_CLASS: Record<string, string> = {
   admin: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300',
+  isp_admin: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300',
   manager: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
   reseller: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300',
   sub_reseller: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+  dealer: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300',
   agent: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
 };
 
@@ -275,13 +281,14 @@ function AvatarInitials({ name }: { name: string }) {
   );
 }
 
-/** Agent cannot add users. Sub Reseller can add only Agent. Reseller can add Sub Reseller + Agent. Admin/Manager can add all. */
+/** Strict Tier Chain: Agent cannot add. Dealer adds Agent. Sub Reseller adds Dealer. Reseller adds Sub Reseller. Admin adds Reseller. */
 function getAllowedAddRoles(roleCode: string | undefined): ResellerRole[] {
   const r = (roleCode ?? '').toLowerCase();
   if (r === 'agent') return [];
-  if (r === 'sub_reseller') return ['agent'];
-  if (r === 'reseller') return ['sub_reseller', 'agent'];
-  return ['admin', 'manager', 'reseller', 'sub_reseller', 'agent'];
+  if (r === 'dealer') return ['agent'];
+  if (r === 'sub_reseller') return ['dealer'];
+  if (r === 'reseller') return ['sub_reseller'];
+  return ['reseller', 'sub_reseller', 'dealer', 'agent'];
 }
 
 export default function ResellerPage() {
@@ -289,10 +296,12 @@ export default function ResellerPage() {
   const navigate = useNavigate();
   const toast = useToastContext();
   const { user, refreshMe } = useAuthStore();
+  const permissions = usePermissions();
   const isAdmin = user?.role_code === 'admin' || user?.role_code === 'isp_admin';
   const allowedAddRoles = getAllowedAddRoles(user?.role_code);
-  const canShowAddUser = allowedAddRoles.length > 0;
+  const canShowAddUser = permissions.canManageSubTier && allowedAddRoles.length > 0;
 
+  const [viewMode, setViewMode] = useState<'table' | 'tree'>('table');
   const [list, setList] = useState<Reseller[]>([]);
   const [loading, setLoading] = useState(true);
   const [servers, setServers] = useState<Array<{ id: string; name: string }>>([]);
@@ -612,17 +621,46 @@ export default function ResellerPage() {
         badge={`${list.length} Users`}
         actions={
           <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => setFilterPanelOpen((o) => !o)}
-              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border text-sm font-medium transition-colors shadow-sm ${
-                filterPanelOpen
-                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60'
-              }`}
-            >
-              <FilterIcon /> Filters
-            </button>
+            {/* View Mode Toggle */}
+            <div className="flex items-center rounded-xl p-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setViewMode('table')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  viewMode === 'table'
+                    ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                Table View
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('tree')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  viewMode === 'tree'
+                    ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" /> Hierarchy Tree
+              </button>
+            </div>
+
+            {viewMode === 'table' && (
+              <button
+                type="button"
+                onClick={() => setFilterPanelOpen((o) => !o)}
+                className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border text-sm font-medium transition-colors shadow-sm ${
+                  filterPanelOpen
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60'
+                }`}
+              >
+                <FilterIcon /> Filters
+              </button>
+            )}
+
             {canShowAddUser && (
               <button
                 type="button"
@@ -636,7 +674,11 @@ export default function ResellerPage() {
         }
       />
 
-      {/* Collapsible filter panel */}
+      {viewMode === 'tree' ? (
+        <ResellerHierarchyTree />
+      ) : (
+        <>
+          {/* Collapsible filter panel */}
       {filterPanelOpen && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm">
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -1210,6 +1252,8 @@ export default function ResellerPage() {
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
 
       {/* Redesigned Add Reseller / User Modal */}
