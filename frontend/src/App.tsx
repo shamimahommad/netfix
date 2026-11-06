@@ -236,7 +236,7 @@ function AppContent() {
               <Route path="report" element={<Navigate to="/dashboard/report/reseller-wise-customers" replace />} />
               <Route path="report/reseller-wise-customers" element={<ResellerWiseCustomersPage />} />
               <Route path="report/area-wise-customers" element={<AreaWiseCustomersPage />} />
-              <Route path="report/server-wise-customers" element={<ServerWiseCustomersPage />} />
+              <Route path="report/server-wise-customers" element={<AdminOnlyGuard><ServerWiseCustomersPage /></AdminOnlyGuard>} />
               <Route path="report/online-transactions" element={<OnlineTransactionsPage />} />
               <Route path="report/merchant-payments" element={<MerchantPaymentsPage />} />
               <Route path="report/customer-payments" element={<CustomerPaymentsPage />} />

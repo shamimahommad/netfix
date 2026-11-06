@@ -1028,6 +1028,15 @@ class CustomersController {
     public static function reportsServerWise(): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
+
+        // Server-wise customers report is restricted to ISP Admin / Company roles only
+        $role = strtolower($user['role'] ?? $user['role_code'] ?? '');
+        $allowedRoles = ['admin', 'manager', 'isp_admin', 'tenant_admin', 'saas_admin', 'super_admin'];
+        if (!in_array($role, $allowedRoles, true)) {
+            Response::error('Access denied. Server-wise customer reports are restricted to ISP Admin/Company only.', 403);
+            return;
+        }
+
         $db = Database::getConnection();
 
         $stmt = $db->prepare("SELECT 

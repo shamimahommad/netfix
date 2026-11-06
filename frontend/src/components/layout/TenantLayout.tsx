@@ -38,11 +38,18 @@ function getResellerWiseReportLabel(roleCode: string | undefined): string {
   return 'Reseller Wise Customers'; // admin, manager, tenant_admin, isp_admin
 }
 
-/** Network menu is only for admin-level roles or SaaS admin inspecting tenant. */
+/** Network menu and Server-wise report are only for admin-level roles or SaaS admin inspecting tenant. */
 function canSeeNetwork(roleCode: string | undefined, userType?: string): boolean {
   if (userType === 'saas') return true;
   const r = (roleCode ?? '').toLowerCase();
   return r === 'admin' || r === 'manager' || r === 'isp_admin' || r === 'tenant_admin' || r === 'saas_admin';
+}
+
+/** Server Wise Customers report is restricted to ISP admin / company roles only */
+function canSeeServerWiseReport(roleCode: string | undefined, userType?: string): boolean {
+  if (userType === 'saas') return true;
+  const r = (roleCode ?? '').toLowerCase();
+  return r === 'admin' || r === 'manager' || r === 'isp_admin' || r === 'tenant_admin' || r === 'saas_admin' || r === 'super_admin';
 }
 
 export default function TenantLayout() {
@@ -160,7 +167,9 @@ export default function TenantLayout() {
         submenu: [
           { label: getResellerWiseReportLabel(user?.role_code), path: '/dashboard/report/reseller-wise-customers' },
           { label: 'Area Wise Customers', path: '/dashboard/report/area-wise-customers' },
-          { label: 'Server Wise Customers', path: '/dashboard/report/server-wise-customers' },
+          ...(canSeeServerWiseReport(user?.role_code, user?.user_type)
+            ? [{ label: 'Server Wise Customers', path: '/dashboard/report/server-wise-customers' }]
+            : []),
           { label: 'Online Transactions', path: '/dashboard/report/online-transactions' },
           { label: 'Merchant Payments', path: '/dashboard/report/merchant-payments' },
           { label: 'Customer Payments', path: '/dashboard/report/customer-payments' },
