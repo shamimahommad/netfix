@@ -231,6 +231,7 @@ function AppContent() {
               <Route path="reseller" element={<AgentRestrictedGuard><ResellerPage /></AgentRestrictedGuard>} />
               <Route path="topup-balance" element={<TopupBalancePage />} />
               <Route path="reseller/plan-permission/:userId" element={<AgentRestrictedGuard><PlanPermissionPage /></AgentRestrictedGuard>} />
+              <Route path="reseller/login-log" element={<AgentRestrictedGuard><LoginLogPage /></AgentRestrictedGuard>} />
               <Route path="reseller/login-log/:userId" element={<AgentRestrictedGuard><LoginLogPage /></AgentRestrictedGuard>} />
               <Route path="report" element={<Navigate to="/dashboard/report/reseller-wise-customers" replace />} />
               <Route path="report/reseller-wise-customers" element={<ResellerWiseCustomersPage />} />

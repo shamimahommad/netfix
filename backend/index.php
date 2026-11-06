@@ -309,6 +309,9 @@ if ($method === 'PUT' && preg_match('#^/resellers/([^/]+)/plan-permissions$#', $
 if ($method === 'GET' && preg_match('#^/resellers/([^/]+)/ledger$#', $uri, $m)) {
     ResellersController::ledger($m[1]);
 }
+if ($method === 'GET' && ($uri === '/resellers/login-log' || $uri === '/reseller/login-log')) {
+    ResellersController::loginLog(null);
+}
 if ($method === 'GET' && preg_match('#^/resellers/([^/]+)/login-log$#', $uri, $m)) {
     ResellersController::loginLog($m[1]);
 }

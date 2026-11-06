@@ -74,10 +74,33 @@ class AuthController {
 
         // Update last login
         try {
+            $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
             $update = $db->prepare("UPDATE users SET last_login_at = NOW(), last_login_ip = :ip WHERE user_id = :id");
             $update->execute([
-                'ip' => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                'ip' => $ip,
                 'id' => $user['user_id'],
+            ]);
+
+            // Record in login_logs
+            $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
+            $browser = 'Chrome';
+            if (str_contains($ua, 'Edg')) $browser = 'Edge';
+            elseif (str_contains($ua, 'Firefox')) $browser = 'Firefox';
+            elseif (str_contains($ua, 'Safari') && !str_contains($ua, 'Chrome')) $browser = 'Safari';
+            elseif (str_contains($ua, 'Opera') || str_contains($ua, 'OPR')) $browser = 'Opera';
+
+            $os = 'Windows';
+            if (str_contains($ua, 'Macintosh') || str_contains($ua, 'Mac OS')) $os = 'macOS';
+            elseif (str_contains($ua, 'Android')) $os = 'Android';
+            elseif (str_contains($ua, 'iPhone') || str_contains($ua, 'iPad')) $os = 'iOS';
+            elseif (str_contains($ua, 'Linux')) $os = 'Linux';
+
+            $stmtLog = $db->prepare("INSERT INTO login_logs (user_id, ip, browser, os, method, created_at) VALUES (:uid, :ip, :browser, :os, 'web', NOW())");
+            $stmtLog->execute([
+                'uid' => $user['user_id'],
+                'ip' => $ip,
+                'browser' => $browser,
+                'os' => $os,
             ]);
         } catch (Throwable $e) {}
 

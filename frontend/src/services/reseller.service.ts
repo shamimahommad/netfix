@@ -212,12 +212,35 @@ export const resellerService = {
     return res.data;
   },
 
-  async getLoginLog(userId: string): Promise<{
-    items: Array<{ logTime: string; ip: string; browser: string; os: string; method: string }>;
+  async getLoginLog(userId?: string): Promise<{
+    items: Array<{
+      id?: string | number;
+      logTime: string;
+      ip: string;
+      browser: string;
+      os: string;
+      method: string;
+      user_id?: string;
+      userName?: string;
+      username?: string;
+      role?: string;
+    }>;
   }> {
-    const res = await api.get<{ items: Array<{ logTime: string; ip: string; browser: string; os: string; method: string }> }>(
-      `/resellers/${userId}/login-log`,
-    );
+    const url = userId && userId !== 'all' ? `/resellers/${userId}/login-log` : `/resellers/login-log`;
+    const res = await api.get<{
+      items: Array<{
+        id?: string | number;
+        logTime: string;
+        ip: string;
+        browser: string;
+        os: string;
+        method: string;
+        user_id?: string;
+        userName?: string;
+        username?: string;
+        role?: string;
+      }>;
+    }>(url);
     return res.data;
   },
 
