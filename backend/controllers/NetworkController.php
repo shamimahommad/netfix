@@ -638,20 +638,207 @@ class NetworkController {
     public static function liveTraffic(): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
 
-        // Realistic live bandwidth throughput telemetry
-        $rxRate = rand(150, 480); // Mbps
-        $txRate = rand(30, 95);   // Mbps
+        $serverId = $_GET['serverId'] ?? $_GET['router_id'] ?? null;
+        $serverName = trim($_GET['serverName'] ?? '');
+        $username = trim($_GET['username'] ?? '');
+        $interfaceName = trim($_GET['interfaceName'] ?? '');
+
+        // 1. Resolve Router device
+        $router = null;
+        if (!empty($serverId)) {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) LIMIT 1");
+            $stmt->execute(['id' => $serverId, 'code' => $serverId]);
+            $router = $stmt->fetch();
+        }
+
+        if (!$router && !empty($serverName)) {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE device_name = :name LIMIT 1");
+            $stmt->execute(['name' => $serverName]);
+            $router = $stmt->fetch();
+        }
+
+        if (!$router && !empty($username)) {
+            $stmt = $db->prepare("SELECT na.network_device_id FROM customer_network_accounts na WHERE na.username = :user LIMIT 1");
+            $stmt->execute(['user' => $username]);
+            $devId = $stmt->fetchColumn();
+            if ($devId) {
+                $stmtDev = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id LIMIT 1");
+                $stmtDev->execute(['id' => $devId]);
+                $router = $stmtDev->fetch();
+            }
+        }
+
+        // Fallback to first available MikroTik router
+        if (!$router) {
+            $stmt = $db->query("SELECT * FROM network_devices WHERE vendor = 'mikrotik' AND status = 'active' LIMIT 1");
+            $router = $stmt->fetch();
+        }
+
+        if (!$router) {
+            Response::error('MikroTik router not found or not configured', 404);
+            return;
+        }
+
+        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+        $api = MikrotikSyncService::connect($router, 3);
+        if (!$api) {
+            Response::error("Could not connect to MikroTik router {$router['device_name']} at {$router['management_ip']}:{$router['management_port']}", 503);
+            return;
+        }
+
+        // 2. Resolve interface name and active session
+        $targetIface = $interfaceName;
+        $sessionInfo = null;
+
+        if (!empty($username)) {
+            $actList = $api->comm('/ppp/active/print', ['?name' => $username]);
+            if (!empty($actList[0])) {
+                $sessionInfo = $actList[0];
+            }
+
+            if (empty($targetIface)) {
+                $targetIface = "<pppoe-{$username}>";
+            }
+        }
+
+        // 3. Monitor traffic on target interface
+        $mon = [];
+        if (!empty($targetIface)) {
+            $mon = $api->comm('/interface/monitor-traffic', [
+                'interface' => $targetIface,
+                'once' => '',
+            ]);
+
+            // If empty, try without angle brackets
+            if (empty($mon) && str_starts_with($targetIface, '<') && str_ends_with($targetIface, '>')) {
+                $trimmed = substr($targetIface, 1, -1);
+                $mon = $api->comm('/interface/monitor-traffic', [
+                    'interface' => $trimmed,
+                    'once' => '',
+                ]);
+                if (!empty($mon)) {
+                    $targetIface = $trimmed;
+                }
+            }
+        }
+
+        // If interface not found or currently offline
+        if (empty($mon) || empty($mon[0])) {
+            Response::json([
+                'success' => true,
+                'data' => [
+                    'timestamp' => date('c'),
+                    'download_bps' => 0,
+                    'upload_bps' => 0,
+                    'rx_bps' => 0,
+                    'tx_bps' => 0,
+                    'rx_mbps' => 0,
+                    'tx_mbps' => 0,
+                    'router_name' => $router['device_name'],
+                    'router_id' => $router['network_device_id'],
+                    'username' => $username,
+                    'interface' => $targetIface,
+                    'status' => 'offline',
+                    'session' => $sessionInfo,
+                ],
+            ]);
+            return;
+        }
+
+        $row = $mon[0];
+        // In RouterOS:
+        // tx-bits-per-second = Router transmits to client = Client Download
+        // rx-bits-per-second = Router receives from client = Client Upload
+        $clientDownloadBps = (int)($row['tx-bits-per-second'] ?? 0);
+        $clientUploadBps = (int)($row['rx-bits-per-second'] ?? 0);
 
         Response::json([
             'success' => true,
             'data' => [
-                'rx_mbps' => $rxRate,
-                'tx_mbps' => $txRate,
-                'rx_bytes' => $rxRate * 1024 * 1024,
-                'tx_bytes' => $txRate * 1024 * 1024,
-                'timestamp' => time(),
+                'timestamp' => date('c'),
+                'download_bps' => $clientDownloadBps,
+                'upload_bps' => $clientUploadBps,
+                // Match client UI & user's demo graph:
+                // Red dot = Tx = Upload
+                // Blue dot = Rx = Download
+                'tx_bps' => $clientUploadBps,
+                'rx_bps' => $clientDownloadBps,
+                'tx_mbps' => round($clientUploadBps / 1000000, 2),
+                'rx_mbps' => round($clientDownloadBps / 1000000, 2),
+                'tx_packets' => (int)($row['rx-packets-per-second'] ?? 0),
+                'rx_packets' => (int)($row['tx-packets-per-second'] ?? 0),
+                'router_name' => $router['device_name'],
+                'router_id' => $router['network_device_id'],
+                'username' => $username,
+                'interface' => $targetIface,
+                'status' => 'online',
+                'ip' => $sessionInfo['address'] ?? null,
+                'mac' => $sessionInfo['caller-id'] ?? null,
+                'uptime' => $sessionInfo['uptime'] ?? null,
+                'session' => $sessionInfo,
             ],
+        ]);
+    }
+
+    public static function activeSessions(?string $serverIdParam = null): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $serverId = $serverIdParam ?? $_GET['serverId'] ?? $_GET['router_id'] ?? null;
+        $router = null;
+
+        if (!empty($serverId)) {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) LIMIT 1");
+            $stmt->execute(['id' => $serverId, 'code' => $serverId]);
+            $router = $stmt->fetch();
+        }
+
+        if (!$router && !empty($_GET['serverName'])) {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE device_name = :name LIMIT 1");
+            $stmt->execute(['name' => $_GET['serverName']]);
+            $router = $stmt->fetch();
+        }
+
+        if (!$router) {
+            $stmt = $db->query("SELECT * FROM network_devices WHERE vendor = 'mikrotik' AND status = 'active' LIMIT 1");
+            $router = $stmt->fetch();
+        }
+
+        if (!$router) {
+            Response::json(['success' => true, 'data' => []]);
+            return;
+        }
+
+        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+        $api = MikrotikSyncService::connect($router, 3);
+        if (!$api) {
+            Response::json(['success' => true, 'data' => []]);
+            return;
+        }
+
+        $active = $api->comm('/ppp/active/print');
+        $sessions = [];
+        if (is_array($active)) {
+            foreach ($active as $act) {
+                $u = $act['name'] ?? '';
+                if (empty($u)) continue;
+                $sessions[] = [
+                    'name' => "<pppoe-{$u}>",
+                    'type' => 'pppoe',
+                    'username' => $u,
+                    'ip' => $act['address'] ?? '',
+                    'callerId' => $act['caller-id'] ?? '',
+                    'uptime' => $act['uptime'] ?? '',
+                ];
+            }
+        }
+
+        Response::json([
+            'success' => true,
+            'data' => $sessions,
         ]);
     }
 

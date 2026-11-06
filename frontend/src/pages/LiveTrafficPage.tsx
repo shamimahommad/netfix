@@ -1,461 +1,711 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  LineChart,
-  Line,
+  ResponsiveContainer,
+  BarChart,
+  Bar,
   AreaChart,
   Area,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
-  ResponsiveContainer,
 } from 'recharts';
-import { monitoringService, LiveTrafficData, ActiveInterface } from '@/services/monitoring.service';
+import {
+  ArrowLeft,
+  RotateCw,
+  Play,
+  Pause,
+  Trash2,
+  BarChart2,
+  Activity,
+  Server,
+  User,
+  Wifi,
+  ShieldCheck,
+  Search,
+} from 'lucide-react';
+import { monitoringService, ActiveInterface } from '@/services/monitoring.service';
 import { networkService } from '@/services/network.service';
 import { useToastContext } from '@/contexts/ToastContext';
-import { useTenantStore } from '@/stores/tenantStore';
 
 interface NetworkDevice {
   networkDeviceId: string;
   deviceName: string;
   deviceCode: string;
+  managementIp?: string;
 }
 
 interface TrafficDataPoint {
   time: string;
-  download: number;
-  upload: number;
-  downloadFormatted: string;
-  uploadFormatted: string;
+  timestamp: number;
+  tx: number; // bps (Upload - Red)
+  rx: number; // bps (Download - Blue)
+  txFormatted: string;
+  rxFormatted: string;
 }
 
 export default function LiveTrafficPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const toast = useToastContext();
-  const { selectedTenant } = useTenantStore();
+
+  // Query params
+  const paramServerId = searchParams.get('serverId') || searchParams.get('router_id');
+  const paramServerName = searchParams.get('serverName');
+  const paramUsername = searchParams.get('username');
+  const paramUserId = searchParams.get('user_id');
 
   // State
   const [servers, setServers] = useState<NetworkDevice[]>([]);
   const [selectedServerId, setSelectedServerId] = useState<string>('');
-  const [interfaces, setInterfaces] = useState<ActiveInterface[]>([]);
-  const [selectedInterface, setSelectedInterface] = useState<string>('');
-  const [selectedUsername, setSelectedUsername] = useState<string>('');
-  const [trafficData, setTrafficData] = useState<TrafficDataPoint[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isLoadingInterfaces, setIsLoadingInterfaces] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [currentDownload, setCurrentDownload] = useState<number>(0);
-  const [currentUpload, setCurrentUpload] = useState<number>(0);
   const [routerName, setRouterName] = useState<string>('');
+  const [activeSessions, setActiveSessions] = useState<ActiveInterface[]>([]);
+  const [selectedUsername, setSelectedUsername] = useState<string>('');
+  const [selectedInterface, setSelectedInterface] = useState<string>('');
+  const [trafficData, setTrafficData] = useState<TrafficDataPoint[]>([]);
+  
+  // Real-time rates
+  const [currentTx, setCurrentTx] = useState<number>(0); // Upload bps
+  const [currentRx, setCurrentRx] = useState<number>(0); // Download bps
+  const [peakTx, setPeakTx] = useState<number>(0);
+  const [peakRx, setPeakRx] = useState<number>(0);
 
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const maxDataPoints = 60; // 60 seconds of data (2s interval = 30 points, but we'll keep 60 for smoother chart)
+  // Status & Telemetry
+  const [sessionStatus, setSessionStatus] = useState<'online' | 'offline' | 'checking'>('checking');
+  const [sessionIp, setSessionIp] = useState<string>('');
+  const [sessionMac, setSessionMac] = useState<string>('');
+  const [sessionUptime, setSessionUptime] = useState<string>('');
 
-  // Load servers on mount
-  useEffect(() => {
-    loadServers();
-  }, []);
+  // UI Settings
+  const [chartType, setChartType] = useState<'bar' | 'area'>('bar');
+  const [pollIntervalMs, setPollIntervalMs] = useState<number>(2000); // 2s default
+  const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [isPolling, setIsPolling] = useState<boolean>(false);
+  const [isLoadingServers, setIsLoadingServers] = useState<boolean>(true);
+  const [isLoadingSessions, setIsLoadingSessions] = useState<boolean>(false);
+  const [sessionSearch, setSessionSearch] = useState<string>('');
 
-  // Handle URL parameters for auto-selection (from customer profile)
-  useEffect(() => {
-    const serverId = searchParams.get('serverId') || searchParams.get('router_id');
-    const serverName = searchParams.get('serverName');
-    const username = searchParams.get('username');
-    const interfaceName = searchParams.get('interfaceName');
-    const userId = searchParams.get('user_id');
+  const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isFetchingRef = useRef<boolean>(false);
+  const maxHistoryPoints = 40; // Number of bars/points to show on X axis
 
-    // If serverName is provided, find matching server by name
-    if (serverName && servers.length > 0 && !serverId) {
-      const matchingServer = servers.find(
-        (s) => s.deviceName?.toLowerCase() === serverName.toLowerCase() || 
-               s.deviceCode?.toLowerCase() === serverName.toLowerCase()
-      );
-      if (matchingServer) {
-        setSelectedServerId(matchingServer.networkDeviceId);
-      }
-    } else if (serverId && servers.length > 0) {
-      setSelectedServerId(serverId);
+  // Format speed (bps -> kbps / mbps / gbps) matching the user's demo graph
+  const formatSpeed = (bps: number): string => {
+    if (bps == null || isNaN(bps) || bps <= 0) return '0.00 kbps';
+    if (bps >= 1000000000) {
+      return `${(bps / 1000000000).toFixed(2)} gbps`;
     }
-
-    // Set username if provided
-    if (username) {
-      setSelectedUsername(username);
-    }
-
-    // Set interface if provided
-    if (interfaceName) {
-      setSelectedInterface(interfaceName);
-    }
-  }, [searchParams, servers]);
-
-  // Load interfaces when server is selected
-  useEffect(() => {
-    if (selectedServerId) {
-      loadInterfaces(selectedServerId);
-      const server = servers.find((s) => s.networkDeviceId === selectedServerId);
-      if (server) {
-        setRouterName(server.deviceName || server.deviceCode);
-      }
-    } else {
-      setInterfaces([]);
-      setSelectedInterface('');
-      setSelectedUsername('');
-    }
-  }, [selectedServerId, servers]);
-
-  // Start/stop polling when selection changes
-  useEffect(() => {
-    // Clear existing polling
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
-    }
-
-    // Reset data when selection changes
-    setTrafficData([]);
-    setCurrentDownload(0);
-    setCurrentUpload(0);
-    setError(null);
-
-    // Start polling if we have a valid selection
-    if (selectedServerId && (selectedInterface || selectedUsername)) {
-      startPolling();
-    }
-
-    // Cleanup on unmount or selection change
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
-      }
-    };
-  }, [selectedServerId, selectedInterface, selectedUsername]);
-
-  const loadServers = async () => {
-    try {
-      setIsLoading(true);
-      const response = await networkService.getNetworkDevices('mikrotik');
-      if (response.success && response.data) {
-        setServers(response.data);
-      }
-    } catch (err: any) {
-      console.error('Failed to load servers:', err);
-      toast.error('Failed to load servers');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const loadInterfaces = async (serverId: string) => {
-    try {
-      setIsLoadingInterfaces(true);
-      const response = await monitoringService.getActiveInterfaces(serverId);
-      if (response.success && response.data) {
-        setInterfaces(response.data);
-      }
-    } catch (err: any) {
-      console.error('Failed to load interfaces:', err);
-      toast.error('Failed to load active interfaces');
-      setInterfaces([]);
-    } finally {
-      setIsLoadingInterfaces(false);
-    }
-  };
-
-  const fetchTrafficData = async () => {
-    if (!selectedServerId || (!selectedInterface && !selectedUsername)) {
-      return;
-    }
-
-    try {
-      const response = await monitoringService.getLiveTraffic(
-        selectedServerId,
-        selectedUsername || undefined,
-        selectedInterface || undefined,
-      );
-
-      if (response.success && response.data) {
-        const data = response.data;
-        // FRONTEND - Fix swapped display
-        // Backend sends: download_bps (from tx-byte), upload_bps (from rx-byte)
-        // But cards are showing swapped, so we need to swap them here
-        // TEMP DEBUG LOG (remove after confirmation)
-        console.log('[TRAFFIC MAP] Frontend received:', {
-          download_bps: data.download_bps,
-          upload_bps: data.upload_bps,
-          download_bytes: data.download_bytes,
-          upload_bytes: data.upload_bytes,
-        });
-        // FIX: Swap to match card labels
-        // Current Download card should show upload_bps (rx-byte)
-        // Current Upload card should show download_bps (tx-byte)
-        setCurrentDownload(data.upload_bps); // Download card shows upload_bps
-        setCurrentUpload(data.download_bps); // Upload card shows download_bps
-        setError(null);
-
-        // Add new data point
-        // FIX: Swap for chart to match card labels
-        const newPoint: TrafficDataPoint = {
-          time: new Date(data.timestamp).toLocaleTimeString(),
-          download: data.upload_bps, // Download line shows upload_bps (rx-byte)
-          upload: data.download_bps, // Upload line shows download_bps (tx-byte)
-          downloadFormatted: formatBandwidth(data.upload_bps),
-          uploadFormatted: formatBandwidth(data.download_bps),
-        };
-
-        setTrafficData((prev) => {
-          const updated = [...prev, newPoint];
-          // Keep only last maxDataPoints
-          return updated.slice(-maxDataPoints);
-        });
-      }
-    } catch (err: any) {
-      const errorMessage = err?.response?.data?.error || err?.message || 'Failed to fetch traffic data';
-      if (errorMessage.includes('offline') || errorMessage.includes('not found')) {
-        setError('User offline / No active session');
-      } else {
-        setError(errorMessage);
-      }
-      // Stop polling on error
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
-      }
-    }
-  };
-
-  const startPolling = () => {
-    // Fetch immediately
-    fetchTrafficData();
-
-    // Then poll every 5 seconds (default interval)
-    pollingIntervalRef.current = setInterval(() => {
-      fetchTrafficData();
-    }, 5000);
-  };
-
-  const formatBandwidth = (bps: number): string => {
     if (bps >= 1000000) {
-      return `${(bps / 1000000).toFixed(2)} Mbps`;
-    } else if (bps >= 1000) {
-      return `${(bps / 1000).toFixed(2)} Kbps`;
+      return `${(bps / 1000000).toFixed(2)} mbps`;
+    }
+    if (bps >= 1000) {
+      return `${(bps / 1000).toFixed(2)} kbps`;
     }
     return `${bps.toFixed(0)} bps`;
   };
 
-  const handleInterfaceChange = (value: string) => {
-    setSelectedInterface(value);
-    setSelectedUsername('');
-    
-    // Extract username if it's a PPPoE interface
-    const iface = interfaces.find((i) => i.name === value);
-    if (iface && iface.type === 'pppoe' && iface.username) {
-      setSelectedUsername(iface.username);
+  // Y-axis tick formatter matching demo graph: 0, 2.5M, 5M, 7.5M, 10M, 12.5M, 15M
+  const formatSpeedY = (val: number): string => {
+    if (val >= 1000000000) return `${(val / 1000000000).toFixed(1)}G`;
+    if (val >= 1000000) {
+      const num = val / 1000000;
+      return `${Number.isInteger(num) ? num : num.toFixed(1)}M`;
+    }
+    if (val >= 1000) return `${(val / 1000).toFixed(0)}k`;
+    return String(val);
+  };
+
+  // 1. Initial Load: Fetch MikroTik routers
+  useEffect(() => {
+    loadRouters();
+  }, []);
+
+  const loadRouters = async () => {
+    try {
+      setIsLoadingServers(true);
+      const res = await networkService.getNetworkDevices('mikrotik');
+      if (res.success && res.data) {
+        setServers(res.data);
+
+        // Auto-select router from URL param if available
+        let targetRouter: NetworkDevice | undefined;
+        if (paramServerId) {
+          targetRouter = res.data.find(
+            (d) => String(d.networkDeviceId) === String(paramServerId) || d.deviceCode === paramServerId
+          );
+        }
+        if (!targetRouter && paramServerName) {
+          targetRouter = res.data.find(
+            (d) => d.deviceName?.toLowerCase() === paramServerName.toLowerCase() ||
+                   d.deviceCode?.toLowerCase() === paramServerName.toLowerCase()
+          );
+        }
+
+        if (targetRouter) {
+          setSelectedServerId(String(targetRouter.networkDeviceId));
+          setRouterName(targetRouter.deviceName || targetRouter.deviceCode);
+        } else if (res.data.length > 0) {
+          setSelectedServerId(String(res.data[0].networkDeviceId));
+          setRouterName(res.data[0].deviceName || res.data[0].deviceCode);
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to load routers:', err);
+      toast.error('Failed to load MikroTik routers');
+    } finally {
+      setIsLoadingServers(false);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 p-6">
-      <div className="max-w-[1920px] mx-auto space-y-6">
-        {/* Header */}
-        <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-lg rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-xl p-6">
-          <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">
-            Live Traffic Monitor
-          </h1>
-          <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
-            Real-time bandwidth monitoring for MikroTik interfaces and users
-          </p>
-        </div>
+  // 2. Set username from URL param
+  useEffect(() => {
+    if (paramUsername) {
+      setSelectedUsername(paramUsername);
+    }
+  }, [paramUsername]);
 
-        {/* Controls */}
-        <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-lg rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-xl p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Server Selection */}
+  // 3. Load active PPPoE sessions whenever selected server changes
+  useEffect(() => {
+    if (selectedServerId) {
+      loadSessions(selectedServerId);
+      const r = servers.find((s) => String(s.networkDeviceId) === String(selectedServerId));
+      if (r) setRouterName(r.deviceName || r.deviceCode);
+    } else {
+      setActiveSessions([]);
+    }
+  }, [selectedServerId, servers]);
+
+  const loadSessions = async (serverId: string) => {
+    try {
+      setIsLoadingSessions(true);
+      const res = await monitoringService.getActiveInterfaces(serverId, routerName);
+      if (res.success && Array.isArray(res.data)) {
+        setActiveSessions(res.data);
+      }
+    } catch (err) {
+      console.warn('Could not load active sessions:', err);
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  };
+
+  // 4. Live Polling Loop
+  useEffect(() => {
+    // Clear timer
+    if (pollingTimerRef.current) {
+      clearInterval(pollingTimerRef.current);
+      pollingTimerRef.current = null;
+    }
+
+    if (isPaused) {
+      setIsPolling(false);
+      return;
+    }
+
+    if (selectedUsername || selectedInterface || selectedServerId) {
+      // Execute immediate poll
+      executePoll();
+
+      // Start recurring poll
+      pollingTimerRef.current = setInterval(() => {
+        executePoll();
+      }, pollIntervalMs);
+    }
+
+    return () => {
+      if (pollingTimerRef.current) {
+        clearInterval(pollingTimerRef.current);
+        pollingTimerRef.current = null;
+      }
+    };
+  }, [selectedServerId, selectedUsername, selectedInterface, isPaused, pollIntervalMs, routerName]);
+
+  const executePoll = async () => {
+    if (isFetchingRef.current) return;
+    if (!selectedUsername && !selectedInterface) return;
+
+    try {
+      isFetchingRef.current = true;
+      setIsPolling(true);
+
+      const res = await monitoringService.getLiveTraffic(
+        selectedServerId || undefined,
+        selectedUsername || undefined,
+        selectedInterface || undefined,
+        routerName || undefined,
+      );
+
+      if (res.success && res.data) {
+        const d = res.data;
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString([], { hour12: false });
+
+        // Tx = Upload (Router Rx), Rx = Download (Router Tx)
+        const txBps = d.tx_bps ?? d.upload_bps ?? 0;
+        const rxBps = d.rx_bps ?? d.download_bps ?? 0;
+
+        setCurrentTx(txBps);
+        setCurrentRx(rxBps);
+
+        setPeakTx((prev) => Math.max(prev, txBps));
+        setPeakRx((prev) => Math.max(prev, rxBps));
+
+        if (d.router_name) {
+          setRouterName(d.router_name);
+        }
+
+        setSessionStatus(d.status === 'online' ? 'online' : 'offline');
+        if (d.ip) setSessionIp(d.ip);
+        if (d.mac) setSessionMac(d.mac);
+        if (d.uptime) setSessionUptime(d.uptime);
+
+        const newPoint: TrafficDataPoint = {
+          time: timeStr,
+          timestamp: now.getTime(),
+          tx: txBps,
+          rx: rxBps,
+          txFormatted: formatSpeed(txBps),
+          rxFormatted: formatSpeed(rxBps),
+        };
+
+        setTrafficData((prev) => {
+          const updated = [...prev, newPoint];
+          return updated.slice(-maxHistoryPoints);
+        });
+      }
+    } catch (err: any) {
+      console.warn('Traffic polling error:', err);
+      setSessionStatus('offline');
+    } finally {
+      isFetchingRef.current = false;
+      // Brief spinner reset animation
+      setTimeout(() => setIsPolling(false), 300);
+    }
+  };
+
+  const handleClearHistory = () => {
+    setTrafficData([]);
+    setPeakTx(0);
+    setPeakRx(0);
+    setCurrentTx(0);
+    setCurrentRx(0);
+  };
+
+  // Filtered active sessions for quick picker
+  const filteredSessions = useMemo(() => {
+    if (!sessionSearch.trim()) return activeSessions.slice(0, 50);
+    const q = sessionSearch.toLowerCase();
+    return activeSessions.filter(
+      (s) => s.username?.toLowerCase().includes(q) || s.name?.toLowerCase().includes(q) || s.ip?.includes(q)
+    );
+  }, [activeSessions, sessionSearch]);
+
+  // Calculate highest scale for Y-axis to give proper headroom
+  const maxRecordedSpeed = useMemo(() => {
+    let max = Math.max(peakRx, peakTx, currentRx, currentTx, 500000);
+    // Headroom of 1.25x
+    return Math.ceil(max * 1.25);
+  }, [peakRx, peakTx, currentRx, currentTx]);
+
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 p-3 sm:p-6 transition-colors">
+      <div className="max-w-6xl mx-auto space-y-4">
+        
+        {/* Top Navigation & Router Selection Bar */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                if (paramUserId) {
+                  navigate(`/dashboard/customers/${paramUserId}`);
+                } else {
+                  navigate('/dashboard/customers');
+                }
+              }}
+              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors shrink-0"
+              title="Go back"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
             <div>
-              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                Select Server
-              </label>
+              <div className="flex items-center gap-2">
+                <Activity className="w-5 h-5 text-emerald-500" />
+                <h1 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100">
+                  Live Bandwidth Monitor
+                </h1>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Single session real-time bandwidth meter on MikroTik
+              </p>
+            </div>
+          </div>
+
+          {/* Quick Selectors */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Router Selector */}
+            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
+              <Server className="w-4 h-4 text-slate-500 shrink-0" />
               <select
                 value={selectedServerId}
                 onChange={(e) => {
                   setSelectedServerId(e.target.value);
-                  setSelectedInterface('');
-                  setSelectedUsername('');
+                  const found = servers.find((s) => String(s.networkDeviceId) === e.target.value);
+                  if (found) setRouterName(found.deviceName || found.deviceCode);
                 }}
-                className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-sm text-slate-900 dark:text-slate-100 transition-all"
-                disabled={isLoading}
+                disabled={isLoadingServers}
+                className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none cursor-pointer max-w-[140px] sm:max-w-[180px] truncate"
               >
-                <option value="">-- Select Server --</option>
-                {servers.map((server) => (
-                  <option key={server.networkDeviceId} value={server.networkDeviceId}>
-                    {server.deviceName || server.deviceCode}
+                {servers.map((s) => (
+                  <option key={s.networkDeviceId} value={s.networkDeviceId} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
+                    {s.deviceName || s.deviceCode}
                   </option>
                 ))}
               </select>
             </div>
 
-            {/* Interface/User Selection */}
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                Select Interface / User
-              </label>
-              <select
-                value={selectedInterface}
-                onChange={(e) => handleInterfaceChange(e.target.value)}
-                className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-sm text-slate-900 dark:text-slate-100 transition-all"
-                disabled={!selectedServerId || isLoadingInterfaces}
-              >
-                <option value="">-- Select Interface / User --</option>
-                {isLoadingInterfaces ? (
-                  <option disabled>Loading interfaces...</option>
-                ) : (
-                  interfaces.map((iface) => (
-                    <option key={iface.name} value={iface.name}>
-                      {iface.type === 'pppoe' && iface.username
-                        ? `${iface.username} (PPPoE)`
-                        : `${iface.name} (${iface.type})`}
+            {/* PPPoE User Selector */}
+            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
+              <User className="w-4 h-4 text-slate-500 shrink-0" />
+              <input
+                type="text"
+                value={selectedUsername}
+                onChange={(e) => setSelectedUsername(e.target.value.trim())}
+                placeholder="PPPoE Username"
+                className="bg-transparent text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none w-28 sm:w-36"
+              />
+              {activeSessions.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      setSelectedUsername(e.target.value);
+                    }
+                  }}
+                  className="bg-transparent text-xs text-slate-400 outline-none cursor-pointer"
+                  title="Pick active session"
+                >
+                  <option value="">{activeSessions.length} active</option>
+                  {activeSessions.map((s, idx) => (
+                    <option key={idx} value={s.username || s.name} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
+                      {s.username || s.name} {s.ip ? `(${s.ip})` : ''}
                     </option>
-                  ))
-                )}
-              </select>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* Pause / Resume Button */}
+            <button
+              onClick={() => setIsPaused(!isPaused)}
+              className={`p-2 rounded-xl border transition-all ${
+                isPaused
+                  ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600'
+                  : 'bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-600'
+              }`}
+              title={isPaused ? 'Resume monitoring' : 'Pause monitoring'}
+            >
+              {isPaused ? <Play className="w-4 h-4 fill-current" /> : <Pause className="w-4 h-4 fill-current" />}
+            </button>
+
+            {/* Clear History */}
+            <button
+              onClick={handleClearHistory}
+              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 transition-colors"
+              title="Clear graph history"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Live Session Status Pill Bar */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-3 shadow-xs flex items-center justify-between flex-wrap gap-2 text-xs">
+          <div className="flex items-center gap-3">
+            {/* Status indicator */}
+            <div className="flex items-center gap-1.5 font-semibold">
+              <span className={`w-2.5 h-2.5 rounded-full ${
+                sessionStatus === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
+              }`} />
+              <span className={sessionStatus === 'online' ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}>
+                {sessionStatus === 'online' ? 'Active Session' : 'Offline / Idle'}
+              </span>
+            </div>
+
+            {sessionIp && (
+              <span className="text-slate-500 dark:text-slate-400">
+                IP: <strong className="text-slate-700 dark:text-slate-200 font-mono">{sessionIp}</strong>
+              </span>
+            )}
+            {sessionMac && (
+              <span className="text-slate-500 dark:text-slate-400 hidden sm:inline">
+                MAC: <strong className="text-slate-700 dark:text-slate-200 font-mono">{sessionMac}</strong>
+              </span>
+            )}
+            {sessionUptime && (
+              <span className="text-slate-500 dark:text-slate-400 hidden md:inline">
+                Uptime: <strong className="text-slate-700 dark:text-slate-200">{sessionUptime}</strong>
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3 font-mono text-[11px]">
+            <span className="text-red-600 dark:text-red-400">
+              Peak Tx: <strong>{formatSpeed(peakTx)}</strong>
+            </span>
+            <span className="text-blue-600 dark:text-blue-400">
+              Peak Rx: <strong>{formatSpeed(peakRx)}</strong>
+            </span>
+            {/* Polling speed selector */}
+            <div className="flex items-center gap-1 border-l border-slate-200 dark:border-slate-700 pl-2">
+              {[1000, 2000, 5000].map((int) => (
+                <button
+                  key={int}
+                  onClick={() => setPollIntervalMs(int)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors ${
+                    pollIntervalMs === int
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-100'
+                  }`}
+                >
+                  {int / 1000}s
+                </button>
+              ))}
             </div>
           </div>
         </div>
 
-        {/* Current Stats */}
-        {(selectedInterface || selectedUsername) && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-200 dark:border-blue-800 p-4">
-              <div className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide mb-1">
-                Current Download
-              </div>
-              <div className="text-2xl font-bold text-blue-900 dark:text-blue-100">
-                {formatBandwidth(currentDownload)}
-              </div>
-            </div>
-            <div className="bg-gradient-to-br from-red-50 to-rose-50 dark:from-red-900/20 dark:to-rose-900/20 rounded-xl border border-red-200 dark:border-red-800 p-4">
-              <div className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide mb-1">
-                Current Upload
-              </div>
-              <div className="text-2xl font-bold text-red-900 dark:text-red-100">
-                {formatBandwidth(currentUpload)}
-              </div>
-            </div>
-            <div className="bg-gradient-to-br from-slate-50 to-gray-50 dark:from-slate-800/50 dark:to-gray-900/50 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
-              <div className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wide mb-1">
-                Router
-              </div>
-              <div className="text-lg font-semibold text-slate-900 dark:text-slate-100 truncate">
-                {routerName || '—'}
-              </div>
-              {selectedUsername && (
-                <div className="text-xs text-slate-500 dark:text-slate-500 mt-1">
-                  User: {selectedUsername}
-                </div>
-              )}
+        {/* ============================================================== */}
+        {/* Main Chart Box - EXACT Match of User Demo Image (media_...)    */}
+        {/* ============================================================== */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-5 sm:p-8 shadow-xs">
+          
+          {/* Centered Title Header matching demo graph */}
+          <div className="text-center mb-6">
+            <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-800 dark:text-slate-100 font-sans">
+              Real Time Download-Upload Graph
+            </h2>
+            <div className="mt-1.5 space-y-0.5 text-xs sm:text-sm text-slate-600 dark:text-slate-400">
+              <p>
+                Username:{' '}
+                <span className="font-semibold text-slate-900 dark:text-slate-100">
+                  {selectedUsername || '—'}
+                </span>
+              </p>
+              <p>
+                Router name:{' '}
+                <span className="font-semibold text-slate-900 dark:text-slate-100">
+                  {routerName || 'MikroTik Router'}
+                </span>
+              </p>
             </div>
           </div>
-        )}
 
-        {/* Error State */}
-        {error && (
-          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-6 text-center">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/30 mb-4">
-              <svg className="w-8 h-8 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <p className="text-lg font-semibold text-red-800 dark:text-red-300">{error}</p>
-          </div>
-        )}
-
-        {/* Chart */}
-        {!error && (selectedInterface || selectedUsername) && (
-          <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-lg rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-xl p-6">
+          {/* Graph Section */}
+          <div className="w-full h-[320px] sm:h-[380px] relative">
             {trafficData.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12">
-                <div className="relative mb-4">
-                  <div className="w-16 h-16 border-4 border-blue-200 dark:border-blue-800 border-t-blue-600 dark:border-t-blue-400 rounded-full animate-spin"></div>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-8 h-8 border-4 border-transparent border-t-indigo-600 dark:border-t-indigo-400 rounded-full animate-spin" style={{ animationDirection: 'reverse', animationDuration: '0.8s' }}></div>
-                  </div>
-                </div>
-                <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Loading traffic data...</p>
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
+                <RotateCw className="w-8 h-8 animate-spin text-blue-500 mb-2" />
+                <span className="text-xs font-medium">Connecting to MikroTik & waiting for traffic stream...</span>
               </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={400}>
-                <AreaChart data={trafficData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorDownload" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8} />
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.1} />
-                    </linearGradient>
-                    <linearGradient id="colorUpload" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8} />
-                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0.1} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:stroke-slate-700" />
+            ) : chartType === 'bar' ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={trafficData}
+                  margin={{ top: 10, right: 20, left: 10, bottom: 20 }}
+                  barCategoryGap="15%"
+                  barGap={1}
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={true} stroke="#e2e8f0" className="dark:stroke-slate-800" />
                   <XAxis
                     dataKey="time"
-                    stroke="#64748b"
-                    className="dark:stroke-slate-400"
-                    style={{ fontSize: '12px' }}
+                    stroke="#94a3b8"
+                    tick={{ fontSize: 11 }}
+                    tickLine={false}
+                    interval="preserveStartEnd"
                   />
                   <YAxis
-                    stroke="#64748b"
-                    className="dark:stroke-slate-400"
-                    style={{ fontSize: '12px' }}
-                    tickFormatter={(value) => formatBandwidth(value)}
+                    stroke="#94a3b8"
+                    tick={{ fontSize: 11 }}
+                    tickLine={false}
+                    domain={[0, maxRecordedSpeed]}
+                    tickFormatter={formatSpeedY}
+                    label={{
+                      value: 'Speed',
+                      angle: -90,
+                      position: 'insideLeft',
+                      offset: 0,
+                      style: { fontSize: 12, fill: '#64748b', fontWeight: 600 },
+                    }}
                   />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: '8px',
+                      backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                      borderRadius: '12px',
+                      border: '1px solid #334155',
+                      color: '#f8fafc',
+                      fontSize: '12px',
                     }}
-                    formatter={(value: number) => formatBandwidth(value)}
+                    formatter={(val: number, name: string) => [
+                      formatSpeed(val),
+                      name === 'rx' ? 'Rx (Download)' : 'Tx (Upload)',
+                    ]}
                   />
-                  <Legend />
+                  {/* Tx = Red bar */}
+                  <Bar
+                    dataKey="tx"
+                    name="tx"
+                    fill="#ef4444"
+                    radius={[2, 2, 0, 0]}
+                    maxBarSize={8}
+                    isAnimationActive={false}
+                  />
+                  {/* Rx = Blue bar */}
+                  <Bar
+                    dataKey="rx"
+                    name="rx"
+                    fill="#2563eb"
+                    radius={[2, 2, 0, 0]}
+                    maxBarSize={8}
+                    isAnimationActive={false}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart
+                  data={trafficData}
+                  margin={{ top: 10, right: 20, left: 10, bottom: 20 }}
+                >
+                  <defs>
+                    <linearGradient id="colorRx" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.8} />
+                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0.05} />
+                    </linearGradient>
+                    <linearGradient id="colorTx" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8} />
+                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={true} stroke="#e2e8f0" className="dark:stroke-slate-800" />
+                  <XAxis
+                    dataKey="time"
+                    stroke="#94a3b8"
+                    tick={{ fontSize: 11 }}
+                    tickLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    stroke="#94a3b8"
+                    tick={{ fontSize: 11 }}
+                    tickLine={false}
+                    domain={[0, maxRecordedSpeed]}
+                    tickFormatter={formatSpeedY}
+                    label={{
+                      value: 'Speed',
+                      angle: -90,
+                      position: 'insideLeft',
+                      offset: 0,
+                      style: { fontSize: 12, fill: '#64748b', fontWeight: 600 },
+                    }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                      borderRadius: '12px',
+                      border: '1px solid #334155',
+                      color: '#f8fafc',
+                      fontSize: '12px',
+                    }}
+                    formatter={(val: number, name: string) => [
+                      formatSpeed(val),
+                      name === 'rx' ? 'Rx (Download)' : 'Tx (Upload)',
+                    ]}
+                  />
                   <Area
                     type="monotone"
-                    dataKey="download"
-                    stroke="#3b82f6"
+                    dataKey="rx"
+                    name="rx"
+                    stroke="#2563eb"
                     strokeWidth={2}
-                    fill="url(#colorDownload)"
-                    name="Download"
+                    fill="url(#colorRx)"
+                    isAnimationActive={false}
                   />
                   <Area
                     type="monotone"
-                    dataKey="upload"
+                    dataKey="tx"
+                    name="tx"
                     stroke="#ef4444"
                     strokeWidth={2}
-                    fill="url(#colorUpload)"
-                    name="Upload"
+                    fill="url(#colorTx)"
+                    isAnimationActive={false}
                   />
                 </AreaChart>
               </ResponsiveContainer>
             )}
           </div>
-        )}
 
-        {/* Empty State */}
-        {!selectedServerId && !isLoading && (
-          <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-lg rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-xl p-12 text-center">
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-gradient-to-br from-blue-100 to-indigo-100 dark:from-blue-900/30 dark:to-indigo-900/30 mb-6">
-              <svg className="w-10 h-10 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
+          {/* Bottom Live Meter Indicator - EXACT Match of User Demo Image */}
+          <div className="mt-6 flex flex-col items-center justify-center space-y-2">
+            {/* Spinning refresh icon */}
+            <div className="flex items-center justify-center">
+              <RotateCw className={`w-5 h-5 text-slate-600 dark:text-slate-400 transition-all ${
+                isPolling && !isPaused ? 'animate-spin text-blue-500' : ''
+              }`} />
             </div>
-            <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-2">No Selection</h3>
-            <p className="text-sm text-slate-600 dark:text-slate-400">
-              Please select a server and interface/user to start monitoring
-            </p>
+
+            {/* Red Tx dot and Blue Rx dot with exact spacing & typography */}
+            <div className="flex flex-col items-center justify-center space-y-1 text-sm sm:text-base font-semibold">
+              {/* Tx (Upload) - Red dot */}
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-red-500 inline-block shrink-0 shadow-xs" />
+                <span className="text-slate-900 dark:text-slate-100 font-sans">
+                  Tx: {formatSpeed(currentTx)}
+                </span>
+              </div>
+
+              {/* Rx (Download) - Blue dot */}
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-blue-600 inline-block shrink-0 shadow-xs" />
+                <span className="text-slate-900 dark:text-slate-100 font-sans">
+                  Rx: {formatSpeed(currentRx)}
+                </span>
+              </div>
+            </div>
           </div>
-        )}
+
+          {/* Bottom Chart View Switcher */}
+          <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs text-slate-500">
+            <div className="flex items-center gap-2">
+              <span>View Mode:</span>
+              <button
+                onClick={() => setChartType('bar')}
+                className={`px-2 py-1 rounded-md font-semibold transition-colors ${
+                  chartType === 'bar'
+                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800'
+                    : 'hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                Bar Graph (Demo)
+              </button>
+              <button
+                onClick={() => setChartType('area')}
+                className={`px-2 py-1 rounded-md font-semibold transition-colors ${
+                  chartType === 'area'
+                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800'
+                    : 'hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                Area Waves
+              </button>
+            </div>
+            <div>
+              <span>Points: {trafficData.length} / {maxHistoryPoints}</span>
+            </div>
+          </div>
+
+        </div>
+
       </div>
     </div>
   );

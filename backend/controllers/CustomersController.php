@@ -369,6 +369,8 @@ class CustomersController {
                 ],
                 'network' => [
                     'protocolType' => $net['protocol'] ?? 'pppoe',
+                    'serverId' => $net['network_device_id'] ?? null,
+                    'networkDeviceId' => $net['network_device_id'] ?? null,
                     'serverName' => $net['device_name'] ?? 'Core Router',
                     'username' => $net['username'] ?? '',
                     'password' => $net['password'] ?? '',

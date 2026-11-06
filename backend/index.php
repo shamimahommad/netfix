@@ -404,8 +404,14 @@ if ($method === 'PUT' && preg_match('#^/network/devices/([^/]+)$#', $uri, $m)) {
 if ($method === 'DELETE' && preg_match('#^/network/devices/([^/]+)$#', $uri, $m)) {
     NetworkController::delete($m[1]);
 }
-if ($method === 'GET' && $uri === '/network/mikrotik/live-traffic') {
+if ($method === 'GET' && ($uri === '/network/mikrotik/live-traffic' || $uri === '/monitoring/live-traffic')) {
     NetworkController::liveTraffic();
+}
+if ($method === 'GET' && ($uri === '/network/mikrotik/sessions' || $uri === '/monitoring/interfaces')) {
+    NetworkController::activeSessions();
+}
+if ($method === 'GET' && preg_match('#^/monitoring/servers/([^/]+)/interfaces$#', $uri, $m)) {
+    NetworkController::activeSessions($m[1]);
 }
 if ($method === 'GET' && ($uri === '/network/mikrotik/pppoe-logs' || $uri === '/network/pppoe-logs')) {
     NetworkController::pppoeLogs();

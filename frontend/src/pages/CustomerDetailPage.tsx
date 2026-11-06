@@ -1676,14 +1676,15 @@ export default function CustomerDetailPage() {
                 <button
                   onClick={() => {
                     if (customerData && customerData.network.username && customerData.network.serverName) {
-                      navigate(`/dashboard/network/monitoring/live-traffic?username=${encodeURIComponent(customerData.network.username)}&serverName=${encodeURIComponent(customerData.network.serverName)}&user_id=${id}`);
+                      const sId = (customerData.network as any).serverId || (customerData.network as any).networkDeviceId || '';
+                      navigate(`/dashboard/network/monitoring/live-traffic?username=${encodeURIComponent(customerData.network.username)}&serverName=${encodeURIComponent(customerData.network.serverName)}&serverId=${encodeURIComponent(sId)}&user_id=${id}`);
                     } else {
                       toast.error('User traffic monitoring requires username and server information');
                     }
                   }}
                   disabled={!customerData || !customerData.network.username || !customerData.network.serverName || !network.onlineStatus}
-                  title={!network.onlineStatus ? 'Available when customer is online' : undefined}
-                  className="flex items-center justify-center gap-1 sm:gap-2 px-1.5 py-1.5 sm:px-3 sm:py-2.5 bg-sky-500 hover:bg-sky-600 dark:bg-teal-600 dark:hover:bg-teal-500 text-white rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 min-w-0"
+                  title={!network.onlineStatus ? 'Available when customer is online' : 'Monitor live bandwidth'}
+                  className="flex items-center justify-center gap-1 sm:gap-2 px-1.5 py-1.5 sm:px-3 sm:py-2.5 bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 min-w-0"
                 >
                   <ChartBarIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                   <span className="truncate">Traffic</span>
