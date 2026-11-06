@@ -142,7 +142,7 @@ class PublicTopupController {
                 'type' => 'reseller',
                 'tenant_id' => $tid,
                 'user_id' => (string)$uid,
-                'name' => $reseller['full_name'],
+                'name' => trim(($reseller['first_name'] ?? '') . ' ' . ($reseller['last_name'] ?? '')) ?: ($reseller['username'] ?? 'Reseller'),
                 'previous_balance' => $curBal,
             ]);
             return;

@@ -104,7 +104,9 @@ try {
     $downlineSql = "SELECT 
         u.user_id,
         u.username,
-        u.full_name,
+        u.first_name,
+        u.last_name,
+        TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) AS full_name,
         u.role,
         COUNT(DISTINCT wl.txn_group_id) AS txn_count,
         COALESCE(SUM(CASE WHEN wl.purpose = 'commission_margin' THEN wl.amount ELSE 0 END), 0) AS commission_earned,
@@ -117,7 +119,7 @@ try {
              AND wl.created_at >= ? AND wl.created_at <= ?
         LEFT JOIN wallets w ON w.user_id = u.user_id
         WHERE u.user_id IN ({$userPlaceholders})
-        GROUP BY u.user_id, u.username, u.full_name, u.role
+        GROUP BY u.user_id, u.username, u.first_name, u.last_name, u.role
         ORDER BY total_credited DESC";
 
     $downlineParams = array_merge([$tenantId, $startDate . ' 00:00:00', $endDate . ' 23:59:59'], $targetUserIds);

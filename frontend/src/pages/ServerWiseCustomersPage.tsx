@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Server, Search, ChevronLeft, ChevronRight, ChevronsUpDown, RefreshCw } from 'lucide-react';
+import { Server, Search, ChevronLeft, ChevronRight, ChevronsUpDown, RefreshCw, ShieldAlert } from 'lucide-react';
 import { customersService, ServerWiseReportRow } from '@/services/customers.service';
 import { useToastContext } from '@/contexts/ToastContext';
+import { useAuthStore } from '@/stores/authStore';
 import { PageHeader, MetricCard } from '@/components/common';
 
 const ROW_OPTIONS = [10, 25, 50] as const;
@@ -37,6 +38,10 @@ function getCustomerListUrl(serverId: string | null, columnKey: SortKey): string
 export default function ServerWiseCustomersPage() {
   const navigate = useNavigate();
   const toast = useToastContext();
+  const { user } = useAuthStore();
+  const role = (user?.role_code ?? '').toLowerCase();
+  const isAllowed = user?.user_type === 'saas' || ['admin', 'manager', 'isp_admin', 'tenant_admin', 'saas_admin', 'super_admin'].includes(role);
+
   const [rows, setRows] = useState<ServerWiseReportRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +52,10 @@ export default function ServerWiseCustomersPage() {
   const [sortAsc, setSortAsc] = useState(false);
 
   useEffect(() => {
+    if (!isAllowed) {
+      setIsLoading(false);
+      return;
+    }
     let cancelled = false;
     setError(null);
     setRows([]);
@@ -108,6 +117,28 @@ export default function ServerWiseCustomersPage() {
     }
     setPage(1);
   };
+
+  if (!isAllowed) {
+    return (
+      <div className="w-full min-w-0 space-y-6">
+        <PageHeader
+          icon={<Server className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
+          title="Server Wise Customers"
+          subtitle="Customer distribution and live subscriber metrics per MikroTik router / NAS"
+          onBack={() => navigate('/dashboard/report')}
+        />
+        <div className="p-12 rounded-2xl bg-card border border-border flex flex-col items-center justify-center text-center">
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-4 text-amber-500">
+            <ShieldAlert className="w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">Access Restricted</h2>
+          <p className="text-slate-500 dark:text-slate-400 max-w-md text-sm">
+            Server Wise Customers report is only accessible by ISP Admin / Company Management. Resellers and downlines are strictly isolated from server/router-level aggregates.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full min-w-0 space-y-6">

@@ -42,7 +42,10 @@ try {
     }
 
     // Target user info
-    $stmtTarget = $db->prepare("SELECT user_id, username, full_name, role, hierarchy_path FROM users WHERE user_id = :uid LIMIT 1");
+    $stmtTarget = $db->prepare("SELECT user_id, username, first_name, last_name, 
+        TRIM(CONCAT(COALESCE(first_name, ''), ' ', COALESCE(last_name, ''))) AS full_name, 
+        role, hierarchy_path 
+        FROM users WHERE user_id = :uid LIMIT 1");
     $stmtTarget->execute(['uid' => $requestedUserId]);
     $targetUser = $stmtTarget->fetch(PDO::FETCH_ASSOC);
     $stmtTarget->closeCursor();
@@ -118,7 +121,7 @@ try {
         wl.invoice_id,
         inv.invoice_number,
         wl.source_customer_id,
-        c.username AS customer_username,
+        c.customer_code AS customer_username,
         c.full_name AS customer_full_name,
         u.username AS account_username,
         u.role AS account_role
