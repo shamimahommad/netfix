@@ -233,11 +233,6 @@ class ResellersController {
                 FROM wallets WHERE user_id = :uid LIMIT 1")
                 ->execute(['amt' => $openingBalance, 'cb' => $currentUser['user_id'], 'uid' => $userId]);
         }
-                'uid' => $userId,
-                'credit' => (float)$data['opening_balance'],
-                'cb' => $currentUser['user_id'],
-            ]);
-        }
 
         Response::json([
             'success' => true,
@@ -366,15 +361,6 @@ class ResellersController {
             Response::error($e->getMessage(), 400);
         }
     }
-                'success' => true,
-                'fromBalance' => $senderBalance - $amount,
-                'toBalance' => 0,
-            ]);
-        } catch (Throwable $e) {
-            $db->rollBack();
-            Response::error('Balance transfer failed: ' . $e->getMessage(), 500);
-        }
-    }
 
     /**
      * CRITICAL HIERARCHY RULE:
@@ -450,10 +436,6 @@ class ResellersController {
             Response::error($de->getMessage(), 400);
         } catch (Throwable $e) {
             Response::error("Failed to update permissions: " . $e->getMessage(), 500);
-        }
-    }
-            $db->rollBack();
-            Response::error('Failed to update plan permissions: ' . $e->getMessage(), 500);
         }
     }
 
