@@ -545,12 +545,27 @@ export default function OltDetailPage() {
           }
 
           const portTemp = portInfo?.temperature ?? portInfo?.temperatureC;
+          const portVendor = portInfo?.sfpVendor || portInfo?.name;
+          const portVoltage = portInfo?.voltage ?? portInfo?.supVol;
+          const portBias = portInfo?.biasCurrent ?? portInfo?.txBiasCur;
+          const portSerial = portInfo?.sfpSerial ?? portInfo?.serial;
 
           return (
             <button
               key={ponNum}
               onClick={() => setSelectedPon(isSelected ? 'all' : ponNum)}
-              title={isOnline ? `PON ${ponNum} Laser Tx: ${txPower}${portTemp ? ` | Temp: ${portTemp}°C` : ''}${portInfo?.sfpVendor ? ` | SFP: ${portInfo.sfpVendor}` : ''}` : `PON ${ponNum} Offline`}
+              title={
+                isOnline 
+                  ? [
+                      `PON ${ponNum} Laser Tx: ${txPower}`,
+                      portTemp ? `Temp: ${portTemp}°C` : null,
+                      portVoltage ? `Voltage: ${portVoltage}V` : null,
+                      portBias ? `Bias Current: ${portBias}mA` : null,
+                      portVendor ? `SFP: ${portVendor}` : null,
+                      portSerial ? `S/N: ${portSerial}` : null,
+                    ].filter(Boolean).join(' • ')
+                  : `PON ${ponNum} Offline`
+              }
               className={`p-3.5 rounded-2xl border text-left transition-all ${
                 isSelected
                   ? 'bg-blue-50/80 dark:bg-blue-950/50 border-blue-500 dark:border-blue-500 shadow-sm ring-1 ring-blue-500'
@@ -581,7 +596,9 @@ export default function OltDetailPage() {
                 {isSelected 
                   ? '✓ Filter active' 
                   : (isOnline 
-                      ? (portTemp ? `${portTemp}°C • Click to filter` : 'Click to filter') 
+                      ? (portTemp 
+                          ? `${portTemp}°C${portVendor ? ` • ${portVendor}` : ''}` 
+                          : (portVendor ? `${portVendor} • Active` : 'Click to filter')) 
                       : 'No optical link')}
               </p>
             </button>
@@ -691,6 +708,83 @@ export default function OltDetailPage() {
             </div>
           </div>
         </div>
+
+        {/* Selected PON Optical Telemetry Banner */}
+        {selectedPon !== 'all' && (() => {
+          const selectedPortInfo = (telemetry?.ponPorts || []).find((p: any) => 
+            p.portNum === selectedPon || 
+            p.port === `PON${selectedPon}` || 
+            p.portName === `${ponPrefix}${selectedPon}` || 
+            p.portName === `EPON 0/${selectedPon}` ||
+            p.portName === `GPON 0/${selectedPon}` ||
+            p.portName?.toLowerCase() === `pon${selectedPon}` ||
+            p.portName === `EPON ${selectedPon}` ||
+            p.portName === `GPON ${selectedPon}`
+          ) || ((device as any)?.telemetry?.ponPorts || []).find((p: any) => 
+            p.portNum === selectedPon || 
+            p.port === `PON${selectedPon}` || 
+            p.portName === `${ponPrefix}${selectedPon}` || 
+            p.portName === `EPON 0/${selectedPon}` ||
+            p.portName === `GPON 0/${selectedPon}` ||
+            p.portName?.toLowerCase() === `pon${selectedPon}` ||
+            p.portName === `EPON ${selectedPon}` ||
+            p.portName === `GPON ${selectedPon}`
+          );
+          if (!selectedPortInfo) return null;
+          const rawTx = selectedPortInfo.txPowerDbm ?? selectedPortInfo.txPower;
+          const txStr = (rawTx !== null && rawTx !== undefined && rawTx !== '' && rawTx !== 'N/A') 
+            ? `${Number(rawTx) >= 0 ? '+' : ''}${Number(rawTx).toFixed(2)} dBm` 
+            : null;
+          const temp = selectedPortInfo.temperature ?? selectedPortInfo.temperatureC;
+          const volt = selectedPortInfo.voltage ?? selectedPortInfo.supVol;
+          const bias = selectedPortInfo.biasCurrent ?? selectedPortInfo.txBiasCur;
+          const vendor = selectedPortInfo.sfpVendor || selectedPortInfo.name;
+          const serial = selectedPortInfo.sfpSerial || selectedPortInfo.serial;
+
+          if (!txStr && !temp && !vendor) return null;
+
+          return (
+            <div className="px-4 py-2.5 bg-blue-50/70 dark:bg-blue-950/40 border-b border-blue-100 dark:border-blue-900/50 flex items-center justify-between flex-wrap gap-2 text-xs">
+              <div className="flex items-center gap-2 text-blue-900 dark:text-blue-200 font-medium">
+                <span className="font-bold bg-blue-600 text-white px-2 py-0.5 rounded text-[11px]">
+                  PON {selectedPon} SFP Transceiver
+                </span>
+                {vendor && (
+                  <span className="text-slate-600 dark:text-slate-300">
+                    Vendor: <strong className="text-slate-800 dark:text-slate-100">{vendor}</strong>
+                  </span>
+                )}
+                {serial && (
+                  <span className="text-slate-500 dark:text-slate-400 text-[11px] font-mono">
+                    S/N: {serial}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 sm:gap-3 text-[11px] font-mono flex-wrap">
+                {txStr && (
+                  <span className="bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-emerald-600 dark:text-emerald-400 font-semibold shadow-2xs">
+                    Laser Tx: {txStr}
+                  </span>
+                )}
+                {temp !== null && temp !== undefined && (
+                  <span className="bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 shadow-2xs">
+                    Temp: {temp}°C
+                  </span>
+                )}
+                {volt !== null && volt !== undefined && (
+                  <span className="bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 shadow-2xs">
+                    Supply: {volt}V
+                  </span>
+                )}
+                {bias !== null && bias !== undefined && (
+                  <span className="bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 shadow-2xs">
+                    Bias: {bias}mA
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Table */}
         <div className="overflow-x-auto">

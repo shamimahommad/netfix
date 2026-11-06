@@ -164,64 +164,101 @@ class VsolOltClient {
     }
 
     /**
-     * Retrieve PON port statistics and optical transceiver data
+     * Retrieve PON port statistics and optical transceiver data (laser output power, temperature, voltage, bias current, SFP vendor)
      */
     public function getPonPorts(int $totalConfiguredPorts = 8, string $ponType = 'epon'): array {
         $html = $this->request('poninfo.html');
         if (!$html) return [];
 
-        $txPowers = [];
-        $temperatures = [];
-        $linkStatuses = [];
+        $opticalData = [];
+        $trafficData = [];
         $detectedMaxPort = 0;
 
-        // 1. Primary robust row-by-row cell extractor (immune to inner tags, fonts, whitespace, + signs)
-        if (preg_match_all('/<tr[^>]*>(.*?)<\/tr>/is', $html, $rowMatches)) {
-            foreach ($rowMatches[1] as $rowHtml) {
-                if (preg_match_all('/<td[^>]*>(.*?)<\/td>/is', $rowHtml, $cellMatches)) {
-                    $cells = array_map(function($c) {
-                        return trim(strip_tags($c));
-                    }, $cellMatches[1]);
+        // 1. Primary robust parser by table context:
+        // Table 1: Optical Transceiver (Temperature, Voltage, Bias Current, Transmit Power, Vendor Name, S/N)
+        // Table 2: Traffic Statistics (Link Status, Rx Bytes, Tx Bytes)
+        if (preg_match_all('/<table[^>]*>(.*?)<\/table>/is', $html, $tableMatches)) {
+            foreach ($tableMatches[1] as $tableHtml) {
+                $isOpticalTable = (stripos($tableHtml, 'Temperature') !== false || stripos($tableHtml, 'Transmit Power') !== false || stripos($tableHtml, 'Vendor Name') !== false);
+                $isTrafficTable = (stripos($tableHtml, 'Link Status') !== false || stripos($tableHtml, 'Rx Bytes') !== false);
 
-                    if (empty($cells[0])) continue;
+                if (preg_match_all('/<tr[^>]*>(.*?)<\/tr>/is', $tableHtml, $rowMatches)) {
+                    foreach ($rowMatches[1] as $rHtml) {
+                        if (preg_match_all('/<(?:td|th)[^>]*>(.*?)<\/(?:td|th)>/is', $rHtml, $cellMatches)) {
+                            $cells = array_map(function($c) {
+                                return trim(strip_tags($c));
+                            }, $cellMatches[1]);
 
-                    // Match PON identifier in first cell: "PON1", "PON 1", "EPON0/1", "EPON 0/1", etc.
-                    if (preg_match('/^(?:E?PON|GPON)?\s*0?\/?:?\s*(\d+)$/i', $cells[0], $pm)) {
-                        $pNum = (int)$pm[1];
-                        if ($pNum > $detectedMaxPort) {
-                            $detectedMaxPort = $pNum;
-                        }
-                        $pKey = 'PON' . $pNum;
+                            if (empty($cells[0])) continue;
 
-                        // Optical Transceiver Table:
-                        // [0] Port ID (PON1)
-                        // [1] Temperature (32.92)
-                        // [2] Voltage (3.27)
-                        // [3] Bias Current (8.48)
-                        // [4] Transmit Power (8.03 or +8.03 or N/A)
-                        if (isset($cells[4]) && !isset($txPowers[$pKey])) {
-                            $rawTx = trim($cells[4]);
-                            if (preg_match('/([+-]?\d+(?:\.\d+)?)/', $rawTx, $txMatch)) {
-                                $txPowers[$pKey] = (float)$txMatch[1];
-                            } elseif (strtoupper($rawTx) === 'N/A') {
-                                $txPowers[$pKey] = null;
-                            }
-                        }
+                            // Match PON identifier in first cell: "PON1", "PON 1", "EPON0/1", "EPON 0/1", etc.
+                            if (preg_match('/^(?:E?PON|GPON)?\s*0?\/?:?\s*(\d+)$/i', $cells[0], $pm)) {
+                                $pNum = (int)$pm[1];
+                                if ($pNum > $detectedMaxPort) {
+                                    $detectedMaxPort = $pNum;
+                                }
+                                $pKey = "PON{$pNum}";
 
-                        if (isset($cells[1]) && !isset($temperatures[$pKey])) {
-                            $rawTemp = trim($cells[1]);
-                            if (preg_match('/([+-]?\d+(?:\.\d+)?)/', $rawTemp, $tempMatch)) {
-                                $temperatures[$pKey] = (float)$tempMatch[1];
-                            }
-                        }
+                                if ($isOpticalTable && count($cells) >= 5) {
+                                    // Optical Transceiver Table:
+                                    // [0] Port ID (PON1)
+                                    // [1] Temperature (32.92)
+                                    // [2] Voltage (3.27)
+                                    // [3] Bias Current (8.48)
+                                    // [4] Transmit Power (8.03 or +8.03 or N/A)
+                                    // [5] Vendor Name (ZIBBIX)
+                                    // [6] Vendor Revision
+                                    // [7] Vendor Serial Number
+                                    $opt = [
+                                        'temperature' => null,
+                                        'voltage' => null,
+                                        'biasCurrent' => null,
+                                        'txPower' => null,
+                                        'sfpVendor' => null,
+                                        'sfpRevision' => null,
+                                        'sfpSerial' => null,
+                                    ];
 
-                        // Traffic / Link Status Table:
-                        // [0] Port ID (PON1)
-                        // [1] Link Status (Up / Down)
-                        if (isset($cells[1])) {
-                            $rawStatus = strtolower(trim($cells[1]));
-                            if ($rawStatus === 'up' || $rawStatus === 'down') {
-                                $linkStatuses[$pKey] = $rawStatus;
+                                    if (isset($cells[1]) && $cells[1] !== 'N/A' && $cells[1] !== '--' && is_numeric($cells[1])) {
+                                        $opt['temperature'] = (float)$cells[1];
+                                    }
+                                    if (isset($cells[2]) && $cells[2] !== 'N/A' && $cells[2] !== '--' && is_numeric($cells[2])) {
+                                        $opt['voltage'] = (float)$cells[2];
+                                    }
+                                    if (isset($cells[3]) && $cells[3] !== 'N/A' && $cells[3] !== '--' && is_numeric($cells[3])) {
+                                        $opt['biasCurrent'] = (float)$cells[3];
+                                    }
+                                    if (isset($cells[4]) && $cells[4] !== 'N/A' && $cells[4] !== '--' && preg_match('/([+-]?\d+(?:\.\d+)?)/', $cells[4], $txM)) {
+                                        $opt['txPower'] = (float)$txM[1];
+                                    }
+                                    if (isset($cells[5])) {
+                                        $v = trim($cells[5]);
+                                        if ($v !== '' && $v !== 'N/A' && $v !== '--') {
+                                            $opt['sfpVendor'] = $v;
+                                        }
+                                    }
+                                    if (isset($cells[6])) {
+                                        $rev = trim($cells[6]);
+                                        if ($rev !== '' && $rev !== 'N/A' && $rev !== '--') {
+                                            $opt['sfpRevision'] = $rev;
+                                        }
+                                    }
+                                    if (isset($cells[7])) {
+                                        $sn = trim($cells[7]);
+                                        if ($sn !== '' && $sn !== 'N/A' && $sn !== '--') {
+                                            $opt['sfpSerial'] = $sn;
+                                        }
+                                    }
+
+                                    $opticalData[$pKey] = $opt;
+                                } elseif ($isTrafficTable && count($cells) >= 2) {
+                                    $status = strtolower(trim($cells[1]));
+                                    if ($status === 'up' || $status === 'down') {
+                                        $trafficData[$pKey] = [
+                                            'status' => $status,
+                                        ];
+                                    }
+                                }
                             }
                         }
                     }
@@ -229,27 +266,22 @@ class VsolOltClient {
             }
         }
 
-        // 2. Secondary fallback regex
-        if (empty($txPowers)) {
-            if (preg_match_all('/<tr>\s*<td[^>]*>\s*(PON\d+)\s*<\/td>\s*<td[^>]*>\s*([0-9\.]+|N\/A)\s*<\/td>\s*<td[^>]*>\s*([0-9\.]+|N\/A)\s*<\/td>\s*<td[^>]*>\s*([0-9\.]+|N\/A)\s*<\/td>\s*<td[^>]*>\s*([0-9\.\-+]+|N\/A)\s*<\/td>/i', $html, $matches, PREG_SET_ORDER)) {
+        // 2. Secondary fallback regex if table splitting missed
+        if (empty($opticalData)) {
+            if (preg_match_all('/<tr[^>]*>\s*<td[^>]*>\s*(?:E?PON|GPON)?\s*0?\/?:?\s*(\d+)\s*<\/td>\s*<td[^>]*>\s*([0-9\.\-+]+|N\/A)\s*<\/td>\s*<td[^>]*>\s*([0-9\.\-+]+|N\/A)\s*<\/td>\s*<td[^>]*>\s*([0-9\.\-+]+|N\/A)\s*<\/td>\s*<td[^>]*>\s*([0-9\.\-+]+|N\/A)\s*<\/td>(?:\s*<td[^>]*>\s*([^<]*)\s*<\/td>)?/i', $html, $matches, PREG_SET_ORDER)) {
                 foreach ($matches as $m) {
-                    $pName = strtoupper(trim($m[1]));
-                    $num = (int)str_replace('PON', '', $pName);
-                    if ($num > $detectedMaxPort) $detectedMaxPort = $num;
-                    $txPowers[$pName] = ($m[5] !== 'N/A') ? (float)$m[5] : null;
-                    $temperatures[$pName] = ($m[2] !== 'N/A') ? (float)$m[2] : null;
-                }
-            }
-        }
-
-        // 3. Link status secondary fallback regex
-        if (empty($linkStatuses)) {
-            if (preg_match_all('/<tr>\s*<td[^>]*>\s*(PON\d+)\s*<\/td>\s*<td[^>]*>\s*(?:<font[^>]*>)?\s*(Up|Down)\s*(?:<\/font>)?\s*<\/td>/i', $html, $matches, PREG_SET_ORDER)) {
-                foreach ($matches as $m) {
-                    $pName = strtoupper(trim($m[1]));
-                    $num = (int)str_replace('PON', '', $pName);
-                    if ($num > $detectedMaxPort) $detectedMaxPort = $num;
-                    $linkStatuses[$pName] = strtolower($m[2]);
+                    $pNum = (int)$m[1];
+                    if ($pNum > $detectedMaxPort) $detectedMaxPort = $pNum;
+                    $pKey = "PON{$pNum}";
+                    $opticalData[$pKey] = [
+                        'temperature' => ($m[2] !== 'N/A' && is_numeric($m[2])) ? (float)$m[2] : null,
+                        'voltage' => ($m[3] !== 'N/A' && is_numeric($m[3])) ? (float)$m[3] : null,
+                        'biasCurrent' => ($m[4] !== 'N/A' && is_numeric($m[4])) ? (float)$m[4] : null,
+                        'txPower' => ($m[5] !== 'N/A' && is_numeric($m[5])) ? (float)$m[5] : null,
+                        'sfpVendor' => !empty($m[6]) && trim($m[6]) !== 'N/A' ? trim($m[6]) : null,
+                        'sfpRevision' => null,
+                        'sfpSerial' => null,
+                    ];
                 }
             }
         }
@@ -260,19 +292,35 @@ class VsolOltClient {
         $ports = [];
         for ($p = 1; $p <= $totalPorts; $p++) {
             $key = "PON$p";
-            $status = $linkStatuses[$key] ?? 'down';
-            $tx = $txPowers[$key] ?? null;
-            $temp = $temperatures[$key] ?? null;
+            $opt = $opticalData[$key] ?? [];
+            $traf = $trafficData[$key] ?? [];
+
+            $tx = $opt['txPower'] ?? null;
+            $temp = $opt['temperature'] ?? null;
+            $voltage = $opt['voltage'] ?? null;
+            $biasCurrent = $opt['biasCurrent'] ?? null;
+            $sfpVendor = $opt['sfpVendor'] ?? null;
+            $sfpRevision = $opt['sfpRevision'] ?? null;
+            $sfpSerial = $opt['sfpSerial'] ?? null;
+
+            $status = $traf['status'] ?? (($tx !== null && $tx > 0) ? 'up' : 'down');
+            $isOnline = ($status === 'up' || ($tx !== null && $tx > 0));
 
             $ports[] = [
                 'portNum' => $p,
                 'port' => $key,
                 'portName' => "{$prefix}{$p}",
-                'status' => $status === 'up' ? 'online' : 'offline',
-                'operStatus' => $status,
+                'status' => $isOnline ? 'online' : 'offline',
+                'operStatus' => $isOnline ? 'up' : 'down',
                 'txPowerDbm' => $tx,
                 'txPower' => $tx,
                 'temperature' => $temp,
+                'temperatureC' => $temp,
+                'voltage' => $voltage,
+                'biasCurrent' => $biasCurrent,
+                'sfpVendor' => $sfpVendor,
+                'sfpRevision' => $sfpRevision,
+                'sfpSerial' => $sfpSerial,
             ];
         }
 
