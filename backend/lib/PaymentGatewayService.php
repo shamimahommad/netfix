@@ -731,7 +731,6 @@ class PaymentGatewayService {
                 'mikrotik' => $mikrotikResult,
                 'payment_split' => $splitResult,
             ];
-            ];
         } catch (\Throwable $e) {
             $db->rollBack();
             return [

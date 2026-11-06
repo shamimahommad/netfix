@@ -68,3 +68,4 @@ DEALLOCATE PREPARE stmt;
 -- Backfill invoice_no and creator_id from existing columns if empty
 UPDATE `invoices` SET `invoice_no` = `invoice_number` WHERE `invoice_no` IS NULL AND `invoice_number` IS NOT NULL;
 UPDATE `invoices` SET `creator_id` = `created_by` WHERE `creator_id` IS NULL AND `created_by` IS NOT NULL;
+
