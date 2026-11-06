@@ -175,14 +175,25 @@ export default function PlanPermissionPage() {
       });
 
       await resellerService.putPlanPermissions(userId, items);
+      
+      const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
       await Swal.fire({
         icon: 'success',
         title: 'Permissions Saved',
         text: 'Package permissions and wholesale prices updated successfully.',
-        timer: 1500,
+        timer: 1600,
         timerProgressBar: true,
         showConfirmButton: false,
+        background: isDark ? '#1e293b' : '#ffffff',
+        color: isDark ? '#f8fafc' : '#0f172a',
+        customClass: {
+          popup: 'rounded-3xl border border-slate-200 dark:border-slate-700/80 shadow-2xl p-6',
+          title: 'text-xl font-bold text-slate-900 dark:text-white pt-2',
+          htmlContainer: 'text-sm text-slate-600 dark:text-slate-300 mt-1',
+          timerProgressBar: 'bg-gradient-to-r from-blue-500 to-emerald-500',
+        },
       });
+      toast.success('Package permissions saved successfully');
     } catch (e: any) {
       const msg = e?.response?.data?.message ?? e?.message ?? 'Save failed';
       toast.error(typeof msg === 'string' ? msg : 'Save failed');

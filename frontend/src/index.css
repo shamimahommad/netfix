@@ -435,6 +435,44 @@
   background: #334155 !important;
 }
 
+/* Universal NetFix SweetAlert2 Theming (Dark & Light Mode) */
+.swal2-popup {
+  border-radius: 1.5rem !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
+  border: 1px solid #e2e8f0;
+}
+.swal2-timer-progress-bar {
+  background: linear-gradient(to right, #2563eb, #10b981) !important;
+  height: 4px !important;
+}
+
+.dark .swal2-popup {
+  background: #1e293b !important;
+  color: #f8fafc !important;
+  border: 1px solid #334155 !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7) !important;
+}
+.dark .swal2-title {
+  color: #f8fafc !important;
+  font-weight: 700 !important;
+}
+.dark .swal2-html-container {
+  color: #94a3b8 !important;
+}
+.dark .swal2-icon.swal2-success {
+  border-color: #10b981 !important;
+  color: #10b981 !important;
+}
+.dark .swal2-icon.swal2-success .swal2-success-ring {
+  border-color: rgba(16, 185, 129, 0.3) !important;
+}
+.dark .swal2-icon.swal2-success [class^='swal2-success-line'] {
+  background-color: #10b981 !important;
+}
+.dark .swal2-timer-progress-bar {
+  background: linear-gradient(to right, #3b82f6, #10b981) !important;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
