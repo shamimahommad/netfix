@@ -514,13 +514,19 @@ export default function OltDetailPage() {
             p.port === `PON${ponNum}` || 
             p.portName === `${ponPrefix}${ponNum}` || 
             p.portName === `EPON 0/${ponNum}` ||
-            p.portName === `GPON 0/${ponNum}`
+            p.portName === `GPON 0/${ponNum}` ||
+            p.portName?.toLowerCase() === `pon${ponNum}` ||
+            p.portName === `EPON ${ponNum}` ||
+            p.portName === `GPON ${ponNum}`
           ) || ((device as any)?.telemetry?.ponPorts || []).find((p: any) => 
             p.portNum === ponNum || 
             p.port === `PON${ponNum}` || 
             p.portName === `${ponPrefix}${ponNum}` || 
             p.portName === `EPON 0/${ponNum}` ||
-            p.portName === `GPON 0/${ponNum}`
+            p.portName === `GPON 0/${ponNum}` ||
+            p.portName?.toLowerCase() === `pon${ponNum}` ||
+            p.portName === `EPON ${ponNum}` ||
+            p.portName === `GPON ${ponNum}`
           );
 
           const isOnline = portInfo ? portInfo.status === 'online' : (count > 0);
@@ -538,10 +544,13 @@ export default function OltDetailPage() {
             txPower = 'Active';
           }
 
+          const portTemp = portInfo?.temperature ?? portInfo?.temperatureC;
+
           return (
             <button
               key={ponNum}
               onClick={() => setSelectedPon(isSelected ? 'all' : ponNum)}
+              title={isOnline ? `PON ${ponNum} Laser Tx: ${txPower}${portTemp ? ` | Temp: ${portTemp}°C` : ''}${portInfo?.sfpVendor ? ` | SFP: ${portInfo.sfpVendor}` : ''}` : `PON ${ponNum} Offline`}
               className={`p-3.5 rounded-2xl border text-left transition-all ${
                 isSelected
                   ? 'bg-blue-50/80 dark:bg-blue-950/50 border-blue-500 dark:border-blue-500 shadow-sm ring-1 ring-blue-500'
@@ -569,7 +578,11 @@ export default function OltDetailPage() {
                 </span>
               </div>
               <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 truncate">
-                {isSelected ? '✓ Filter active' : (isOnline ? 'Click to filter' : 'No optical link')}
+                {isSelected 
+                  ? '✓ Filter active' 
+                  : (isOnline 
+                      ? (portTemp ? `${portTemp}°C • Click to filter` : 'Click to filter') 
+                      : 'No optical link')}
               </p>
             </button>
           );

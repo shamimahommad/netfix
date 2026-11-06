@@ -231,26 +231,93 @@ class BtponOltClient {
     }
 
     /**
-     * Retrieve PON port status and telemetry
+     * Retrieve PON port status and optical telemetry (laser output power, temperature, SFP vendor)
      */
     public function getPonPorts(int $totalConfiguredPorts = 8, string $ponType = 'epon'): array {
         $sysInfo = $this->getSystemInfo($totalConfiguredPorts);
         $portData = $sysInfo['ports'] ?? [];
         $total = max(count($portData), $totalConfiguredPorts);
 
+        // Fetch Optical Telemetry for PON ports from goform/getPonPortOptical or goform/getPortOptical
+        $opticalData = $this->request('goform/getPonPortOptical');
+        if (empty($opticalData['list'])) {
+            $opticalData = $this->request('goform/getPortOptical');
+        }
+
+        $opticalMap = [];
+        if (!empty($opticalData['list']) && is_array($opticalData['list'])) {
+            foreach ($opticalData['list'] as $opt) {
+                $name = strtolower(trim($opt['portName'] ?? ''));
+                $pNum = (int)($opt['portNum'] ?? 0);
+                if (!empty($name)) {
+                    $opticalMap[$name] = $opt;
+                }
+                if ($pNum > 0) {
+                    $opticalMap["p_{$pNum}"] = $opt;
+                }
+            }
+        }
+
         $ports = [];
         for ($i = 1; $i <= $total; $i++) {
             $p = $portData[$i - 1] ?? null;
             $isOnline = $p ? ($p['status'] === 'online') : false;
 
+            // Match optical telemetry by name ('pon1') or port number ('p_1')
+            $opt = $opticalMap["pon{$i}"] ?? $opticalMap["p_{$i}"] ?? null;
+
+            $txPower = null;
+            $temperature = null;
+            $voltage = null;
+            $biasCurrent = null;
+            $sfpVendor = null;
+
+            if ($opt) {
+                $rawTx = trim($opt['txPower'] ?? '');
+                if ($rawTx !== '' && $rawTx !== '--' && is_numeric($rawTx)) {
+                    $txPower = (float)$rawTx;
+                }
+
+                $rawTemp = trim($opt['temperature'] ?? '');
+                if ($rawTemp !== '' && $rawTemp !== '--' && is_numeric($rawTemp)) {
+                    $temperature = (float)$rawTemp;
+                }
+
+                $rawVol = trim($opt['supVol'] ?? '');
+                if ($rawVol !== '' && $rawVol !== '--' && is_numeric($rawVol)) {
+                    $voltage = (float)$rawVol;
+                }
+
+                $rawBias = trim($opt['txBiasCur'] ?? '');
+                if ($rawBias !== '' && $rawBias !== '--' && is_numeric($rawBias)) {
+                    $biasCurrent = (float)$rawBias;
+                }
+
+                $rawName = trim($opt['name'] ?? '');
+                if ($rawName !== '' && $rawName !== '--') {
+                    $sfpVendor = $rawName;
+                }
+            }
+
+            // If optical TX power is active (> 0), confirm the port is online
+            if ($txPower !== null && $txPower > 0) {
+                $isOnline = true;
+            }
+
+            $prefix = strtoupper($ponType) . ' ';
             $ports[] = [
                 'portNum' => $i,
                 'port' => "PON{$i}",
-                'portName' => "EPON {$i}",
+                'portName' => "{$prefix}{$i}",
                 'status' => $isOnline ? 'online' : 'offline',
                 'operStatus' => $isOnline ? 'up' : 'down',
-                'txPowerDbm' => $isOnline ? 2.5 : null,
-                'txPower' => $isOnline ? 2.5 : null,
+                'txPowerDbm' => $txPower,
+                'txPower' => $txPower,
+                'temperature' => $temperature,
+                'temperatureC' => $temperature,
+                'voltage' => $voltage,
+                'biasCurrent' => $biasCurrent,
+                'sfpVendor' => $sfpVendor,
                 'onlineCount' => $p['online'] ?? 0,
                 'offlineCount' => $p['offline'] ?? 0,
             ];
