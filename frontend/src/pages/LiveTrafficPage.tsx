@@ -14,10 +14,6 @@ import {
 import {
   Activity,
   RotateCw,
-  ArrowDownCircle,
-  ArrowUpCircle,
-  TrendingUp,
-  Radio,
 } from 'lucide-react';
 import PageHeader from '@/components/common/PageHeader';
 import { monitoringService } from '@/services/monitoring.service';
@@ -242,9 +238,9 @@ export default function LiveTrafficPage() {
   }, [peakRx, peakTx, currentRx, currentTx]);
 
   return (
-    <div className="w-full min-w-0 space-y-6 pb-12 relative">
+    <div className="w-full min-w-0 overflow-x-hidden space-y-3 sm:space-y-4 pb-2 sm:pb-4 relative">
       
-      {/* Standard NetFix PageHeader matching all other pages */}
+      {/* Standard NetFix PageHeader */}
       <PageHeader
         backTo={paramUserId ? `/dashboard/customers/${paramUserId}` : '/dashboard/customers'}
         icon={<Activity className="w-5 h-5 text-emerald-500" />}
@@ -252,28 +248,12 @@ export default function LiveTrafficPage() {
         subtitle={
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             <span>
-              Username: <strong className="font-mono text-slate-800 dark:text-slate-200">{username || '—'}</strong>
+              Customer: <strong className="font-mono text-slate-800 dark:text-slate-200">{username || '—'}</strong>
             </span>
             <span>•</span>
             <span>
               Router: <strong className="text-slate-800 dark:text-slate-200">{routerName || 'MikroTik Router'}</strong>
             </span>
-            {sessionIp && (
-              <>
-                <span>•</span>
-                <span>
-                  IP: <strong className="font-mono text-slate-800 dark:text-slate-200">{sessionIp}</strong>
-                </span>
-              </>
-            )}
-            {sessionUptime && (
-              <>
-                <span>•</span>
-                <span>
-                  Uptime: <strong className="text-slate-800 dark:text-slate-200">{sessionUptime}</strong>
-                </span>
-              </>
-            )}
           </div>
         }
         badge={
@@ -288,84 +268,47 @@ export default function LiveTrafficPage() {
         }
       />
 
-      {/* Real-time Metric Cards Overview matching NetFix dashboard standard */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-        {/* Current Download (Rx) */}
-        <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-4 sm:p-5 shadow-sm">
-          <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
-            <span className="flex items-center gap-1.5">
-              <span className="p-1 rounded-md bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-                <ArrowDownCircle className="w-4 h-4" />
-              </span>
-              Download (Rx)
+      {/* Compact Session Telemetry & Peak Throughput Strip */}
+      <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-xl px-4 py-2.5 shadow-2xs flex flex-wrap items-center justify-between gap-2.5 text-xs">
+        <div className="flex flex-wrap items-center gap-3 text-slate-600 dark:text-slate-300">
+          {sessionIp && (
+            <span>
+              IP: <strong className="font-mono text-slate-900 dark:text-slate-100">{sessionIp}</strong>
             </span>
-          </div>
-          <div className="text-lg sm:text-2xl font-bold font-mono text-blue-600 dark:text-blue-400">
-            {formatSpeed(currentRx)}
-          </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Live incoming throughput</p>
+          )}
+          {sessionMac && (
+            <span className="hidden sm:inline">
+              MAC: <strong className="font-mono text-slate-900 dark:text-slate-100">{sessionMac}</strong>
+            </span>
+          )}
+          {sessionUptime && (
+            <span className="hidden md:inline">
+              Uptime: <strong className="text-slate-900 dark:text-slate-100">{sessionUptime}</strong>
+            </span>
+          )}
         </div>
-
-        {/* Current Upload (Tx) */}
-        <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-4 sm:p-5 shadow-sm">
-          <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
-            <span className="flex items-center gap-1.5">
-              <span className="p-1 rounded-md bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400">
-                <ArrowUpCircle className="w-4 h-4" />
-              </span>
-              Upload (Tx)
-            </span>
-          </div>
-          <div className="text-lg sm:text-2xl font-bold font-mono text-red-600 dark:text-red-400">
-            {formatSpeed(currentTx)}
-          </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Live outgoing throughput</p>
-        </div>
-
-        {/* Peak Download */}
-        <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-4 sm:p-5 shadow-sm">
-          <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
-            <span className="flex items-center gap-1.5">
-              <span className="p-1 rounded-md bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
-                <TrendingUp className="w-4 h-4" />
-              </span>
-              Peak Download
-            </span>
-          </div>
-          <div className="text-lg sm:text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
-            {formatSpeed(peakRx)}
-          </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Session maximum rate</p>
-        </div>
-
-        {/* Peak Upload */}
-        <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-4 sm:p-5 shadow-sm">
-          <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
-            <span className="flex items-center gap-1.5">
-              <span className="p-1 rounded-md bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
-                <Radio className="w-4 h-4" />
-              </span>
-              Peak Upload
-            </span>
-          </div>
-          <div className="text-lg sm:text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
-            {formatSpeed(peakTx)}
-          </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Session maximum rate</p>
+        <div className="flex items-center gap-3 font-mono text-xs">
+          <span className="text-red-600 dark:text-red-400 font-semibold">
+            Peak Tx: {formatSpeed(peakTx)}
+          </span>
+          <span className="text-slate-300 dark:text-slate-600">•</span>
+          <span className="text-blue-600 dark:text-blue-400 font-semibold">
+            Peak Rx: {formatSpeed(peakRx)}
+          </span>
         </div>
       </div>
 
       {/* ============================================================== */}
       {/* Main Chart Box - EXACT Match of User Demo Image (media_...)    */}
       {/* ============================================================== */}
-      <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-5 sm:p-8 shadow-sm">
+      <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-4 sm:p-5 shadow-xs min-w-0 overflow-hidden">
         
         {/* Centered Title Header matching demo graph */}
-        <div className="text-center mb-6">
-          <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 font-sans">
+        <div className="text-center mb-3 sm:mb-4">
+          <h2 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100 font-sans">
             Real Time Download-Upload Graph
           </h2>
-          <div className="mt-1.5 space-y-0.5 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+          <div className="mt-1 space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
             <p>
               Username:{' '}
               <span className="font-semibold text-slate-900 dark:text-slate-100">
@@ -382,17 +325,17 @@ export default function LiveTrafficPage() {
         </div>
 
         {/* Graph Section */}
-        <div className="w-full h-[320px] sm:h-[400px] relative">
+        <div className="w-full h-[260px] sm:h-[280px] lg:h-[300px] relative min-w-0 overflow-hidden">
           {trafficData.length === 0 ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
-              <RotateCw className="w-8 h-8 animate-spin text-blue-500 mb-2" />
+              <RotateCw className="w-7 h-7 animate-spin text-blue-500 mb-2" />
               <span className="text-xs font-medium">Connecting to MikroTik & waiting for traffic stream...</span>
             </div>
           ) : chartType === 'bar' ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={trafficData}
-                margin={{ top: 10, right: 20, left: 10, bottom: 20 }}
+                margin={{ top: 10, right: 15, left: 5, bottom: 10 }}
                 barCategoryGap="15%"
                 barGap={1}
               >
@@ -400,13 +343,13 @@ export default function LiveTrafficPage() {
                 <XAxis
                   dataKey="time"
                   stroke="#94a3b8"
-                  tick={{ fontSize: 11 }}
+                  tick={{ fontSize: 10 }}
                   tickLine={false}
                   interval="preserveStartEnd"
                 />
                 <YAxis
                   stroke="#94a3b8"
-                  tick={{ fontSize: 11 }}
+                  tick={{ fontSize: 10 }}
                   tickLine={false}
                   domain={[0, maxRecordedSpeed]}
                   tickFormatter={formatSpeedY}
@@ -414,17 +357,17 @@ export default function LiveTrafficPage() {
                     value: 'Speed',
                     angle: -90,
                     position: 'insideLeft',
-                    offset: 0,
-                    style: { fontSize: 12, fill: '#64748b', fontWeight: 600 },
+                    offset: 5,
+                    style: { fontSize: 11, fill: '#64748b', fontWeight: 600 },
                   }}
                 />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                    borderRadius: '12px',
+                    borderRadius: '10px',
                     border: '1px solid #334155',
                     color: '#f8fafc',
-                    fontSize: '12px',
+                    fontSize: '11px',
                   }}
                   formatter={(val: number, name: string) => [
                     formatSpeed(val),
@@ -455,7 +398,7 @@ export default function LiveTrafficPage() {
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
                 data={trafficData}
-                margin={{ top: 10, right: 20, left: 10, bottom: 20 }}
+                margin={{ top: 10, right: 15, left: 5, bottom: 10 }}
               >
                 <defs>
                   <linearGradient id="colorRx" x1="0" y1="0" x2="0" y2="1">
@@ -471,13 +414,13 @@ export default function LiveTrafficPage() {
                 <XAxis
                   dataKey="time"
                   stroke="#94a3b8"
-                  tick={{ fontSize: 11 }}
+                  tick={{ fontSize: 10 }}
                   tickLine={false}
                   interval="preserveStartEnd"
                 />
                 <YAxis
                   stroke="#94a3b8"
-                  tick={{ fontSize: 11 }}
+                  tick={{ fontSize: 10 }}
                   tickLine={false}
                   domain={[0, maxRecordedSpeed]}
                   tickFormatter={formatSpeedY}
@@ -485,17 +428,17 @@ export default function LiveTrafficPage() {
                     value: 'Speed',
                     angle: -90,
                     position: 'insideLeft',
-                    offset: 0,
-                    style: { fontSize: 12, fill: '#64748b', fontWeight: 600 },
+                    offset: 5,
+                    style: { fontSize: 11, fill: '#64748b', fontWeight: 600 },
                   }}
                 />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                    borderRadius: '12px',
+                    borderRadius: '10px',
                     border: '1px solid #334155',
                     color: '#f8fafc',
-                    fontSize: '12px',
+                    fontSize: '11px',
                   }}
                   formatter={(val: number, name: string) => [
                     formatSpeed(val),
@@ -526,19 +469,19 @@ export default function LiveTrafficPage() {
         </div>
 
         {/* Bottom Live Meter Indicator - EXACT Match of User Demo Image */}
-        <div className="mt-6 flex flex-col items-center justify-center space-y-2">
+        <div className="mt-3 sm:mt-4 flex flex-col items-center justify-center space-y-1.5">
           {/* Spinning refresh icon */}
           <div className="flex items-center justify-center">
-            <RotateCw className={`w-5 h-5 text-slate-500 dark:text-slate-400 transition-all ${
+            <RotateCw className={`w-4 h-4 text-slate-500 dark:text-slate-400 transition-all ${
               isPolling ? 'animate-spin text-blue-500' : ''
             }`} />
           </div>
 
           {/* Red Tx dot and Blue Rx dot with exact spacing & typography */}
-          <div className="flex flex-col items-center justify-center space-y-1 text-sm sm:text-base font-semibold">
+          <div className="flex flex-col items-center justify-center space-y-1 text-xs sm:text-sm font-semibold">
             {/* Tx (Upload) - Red dot */}
             <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-red-500 inline-block shrink-0 shadow-xs" />
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block shrink-0 shadow-xs" />
               <span className="text-slate-900 dark:text-slate-100 font-sans">
                 Tx: {formatSpeed(currentTx)}
               </span>
@@ -546,7 +489,7 @@ export default function LiveTrafficPage() {
 
             {/* Rx (Download) - Blue dot */}
             <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-blue-600 inline-block shrink-0 shadow-xs" />
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block shrink-0 shadow-xs" />
               <span className="text-slate-900 dark:text-slate-100 font-sans">
                 Rx: {formatSpeed(currentRx)}
               </span>
@@ -555,12 +498,12 @@ export default function LiveTrafficPage() {
         </div>
 
         {/* Bottom Chart View Toggle */}
-        <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+        <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
           <div className="flex items-center gap-2">
             <span>View Style:</span>
             <button
               onClick={() => setChartType('bar')}
-              className={`px-2 py-1 rounded-md font-semibold transition-colors ${
+              className={`px-2 py-0.5 rounded-md font-semibold transition-colors ${
                 chartType === 'bar'
                   ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800'
                   : 'hover:text-slate-800 dark:hover:text-slate-200'
@@ -570,7 +513,7 @@ export default function LiveTrafficPage() {
             </button>
             <button
               onClick={() => setChartType('area')}
-              className={`px-2 py-1 rounded-md font-semibold transition-colors ${
+              className={`px-2 py-0.5 rounded-md font-semibold transition-colors ${
                 chartType === 'area'
                   ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800'
                   : 'hover:text-slate-800 dark:hover:text-slate-200'
