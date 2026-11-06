@@ -74,11 +74,24 @@ const PingStatusIndicator = memo(({ deviceId }: { deviceId: string }) => {
 });
 PingStatusIndicator.displayName = 'PingStatusIndicator';
 
+const getCachedOltDevices = (): NetworkDevice[] => {
+  try {
+    const raw = localStorage.getItem('netfix_olt_devices_cache');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return [];
+};
+
 export default function OltPage() {
   const navigate = useNavigate();
   const toast = useToastContext();
-  const [devices, setDevices] = useState<NetworkDevice[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const initialCached = getCachedOltDevices();
+  const [devices, setDevices] = useState<NetworkDevice[]>(initialCached);
+  const [isLoading, setIsLoading] = useState(initialCached.length === 0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -123,17 +136,26 @@ export default function OltPage() {
   usePingStatus(deviceIds, devices.length > 0);
 
   const loadDevices = async () => {
-    setIsLoading(true);
+    if (devices.length === 0) {
+      setIsLoading(true);
+    } else {
+      setIsRefreshing(true);
+    }
     setError(null);
     try {
       const response = await networkService.getNetworkDevices('olt');
-      setDevices(response.data || []);
+      const list = response.data || [];
+      setDevices(list);
+      try {
+        localStorage.setItem('netfix_olt_devices_cache', JSON.stringify(list));
+      } catch {}
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to load OLT devices';
       setError(errorMessage);
       if (devices.length === 0) toast.error(errorMessage);
     } finally {
       setIsLoading(false);
+      setIsRefreshing(false);
     }
   };
 
@@ -404,7 +426,16 @@ export default function OltPage() {
         }
         title="OLT Devices"
         subtitle="Manage Optical Line Terminals, PON ports, and optical network health"
-        badge={`${devices.length} Devices`}
+        badge={
+          <span className="inline-flex items-center gap-1.5">
+            <span>{devices.length} Devices</span>
+            {isRefreshing && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-normal text-blue-500 animate-pulse">
+                • Syncing...
+              </span>
+            )}
+          </span>
+        }
         actions={
           <button
             onClick={() => {
@@ -474,6 +505,8 @@ export default function OltPage() {
                       onChange={(e) => setFormData((p) => ({ ...p, vendor: e.target.value }))}
                       className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 font-medium"
                     >
+                      <option value="btpon">TBS / BTPON (PTF-EP4X / PTF-EP8X Series)</option>
+                      <option value="focuscom">Focuscom (EP5800 / EPON Series)</option>
                       <option value="vsol">VSOL (V1600 Series EPON/GPON)</option>
                       <option value="bdcom">BDCOM (P3310, GP3600 Series)</option>
                       <option value="huawei">Huawei (SmartAX MA5608T / MA5800)</option>
@@ -523,7 +556,7 @@ export default function OltPage() {
                       className={inputClass('webPort')}
                       placeholder="80 or 1010"
                     />
-                    <p className="mt-1 text-xs text-slate-500">Default: 80 (or 1010 for VSOL). Used internally by NetFix to sync ONUs & telemetry.</p>
+                    <p className="mt-1 text-xs text-slate-500">Default: 80 (or 1010 for VSOL, 2322 for Focuscom, 16148 for BTPON). Used internally by NetFix to sync ONUs & telemetry.</p>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Telnet / SSH CLI Port</label>
@@ -613,6 +646,8 @@ export default function OltPage() {
                       onChange={(e) => setFormData((p) => ({ ...p, vendor: e.target.value }))}
                       className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 font-medium"
                     >
+                      <option value="btpon">TBS / BTPON (PTF-EP4X / PTF-EP8X Series)</option>
+                      <option value="focuscom">Focuscom (EP5800 / EPON Series)</option>
                       <option value="vsol">VSOL (V1600 Series EPON/GPON)</option>
                       <option value="bdcom">BDCOM (P3310, GP3600 Series)</option>
                       <option value="huawei">Huawei (SmartAX MA5608T / MA5800)</option>
@@ -662,7 +697,7 @@ export default function OltPage() {
                       className={inputClass('webPort')}
                       placeholder="80 or 1010"
                     />
-                    <p className="mt-1 text-xs text-slate-500">Default: 80 (or 1010 for VSOL). Used internally by NetFix to sync ONUs & telemetry.</p>
+                    <p className="mt-1 text-xs text-slate-500">Default: 80 (or 1010 for VSOL, 2322 for Focuscom, 16148 for BTPON). Used internally by NetFix to sync ONUs & telemetry.</p>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Telnet / SSH CLI Port</label>
@@ -758,7 +793,9 @@ export default function OltPage() {
 
                     return (
                       <tr key={device.networkDeviceId} className="hover:bg-gradient-to-r hover:from-teal-50/50 hover:to-cyan-50/50 dark:hover:from-teal-900/10 dark:hover:to-cyan-900/10 transition-all duration-200">
-                        <td className="px-3 py-4 text-sm font-semibold text-slate-900 dark:text-slate-100 font-mono">{device.deviceCode}</td>
+                        <td className="px-3 py-4 text-sm font-semibold text-slate-900 dark:text-slate-100 font-mono">
+                          {device.deviceCode || `#${device.networkDeviceId}`}
+                        </td>
                         <td className="px-3 py-4 text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
                           <button
                             onClick={() => navigate(`/dashboard/network/olt/${device.networkDeviceId}`)}

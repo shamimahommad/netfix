@@ -766,10 +766,15 @@ export default function CustomersPage() {
 
   // Format traffic: MB or GB. Use "—" for missing; never show 0 as fake value.
   const formatTraffic = (bytes: number | null | undefined): string => {
-    if (bytes == null || bytes === 0) return '—';
-    const mb = bytes / (1024 * 1024);
-    if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
-    return `${mb.toFixed(2)} MB`;
+    if (bytes == null) return '—';
+    const num = Number(bytes);
+    if (isNaN(num) || num <= 0) return '0 GB';
+    const gb = num / (1024 * 1024 * 1024);
+    if (gb >= 1) return `${gb.toFixed(2)} GB`;
+    const mb = num / (1024 * 1024);
+    if (mb >= 1) return `${gb.toFixed(2)} GB (${mb.toFixed(0)} MB)`;
+    const kb = num / 1024;
+    return `${(num / (1024 * 1024 * 1024)).toFixed(3)} GB (${kb.toFixed(0)} KB)`;
   };
 
   // Calculate remaining days from expiry date (Lifetime = null)
@@ -1718,12 +1723,12 @@ export default function CustomersPage() {
                               {customer.mac_address || '—'}
                             </td>
                             <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                              {/* FIX: Swap to match correct mapping - Up (Traffic) = Download = tx-byte = download_bytes */}
-                              {formatTraffic(customer.download_bytes)}
+                              {/* Up (Traffic) = Upload = rx-byte = upload_bytes */}
+                              {formatTraffic(customer.upload_bytes)}
                             </td>
                             <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                              {/* FIX: Swap to match correct mapping - Down (Traffic) = Upload = rx-byte = upload_bytes */}
-                              {formatTraffic(customer.upload_bytes)}
+                              {/* Down (Traffic) = Download = tx-byte = download_bytes */}
+                              {formatTraffic(customer.download_bytes)}
                             </td>
                             <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
                               <div className="flex items-center gap-1.5">
@@ -2185,12 +2190,12 @@ export default function CustomersPage() {
                                   {customer.mac_address || '—'}
                                 </td>
                                 <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                  {/* FIX: Swap to match correct mapping - Up (Traffic) = Download = tx-byte = download_bytes */}
-                                  {formatTraffic(customer.download_bytes)}
+                                  {/* Up (Traffic) = Upload = rx-byte = upload_bytes */}
+                                  {formatTraffic(customer.upload_bytes)}
                                 </td>
                                 <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                  {/* FIX: Swap to match correct mapping - Down (Traffic) = Upload = rx-byte = upload_bytes */}
-                                  {formatTraffic(customer.upload_bytes)}
+                                  {/* Down (Traffic) = Download = tx-byte = download_bytes */}
+                                  {formatTraffic(customer.download_bytes)}
                                 </td>
                                 <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
                                   <div className="flex items-center gap-1.5">

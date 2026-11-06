@@ -104,11 +104,11 @@ export default function CustomerPaymentsPage() {
       }));
 
       setData(rows);
-      setTotal(res.meta?.total ?? rows.length);
+      setTotal(res.meta?.total ?? res.total ?? rows.length);
     } catch (err: any) {
       const msg = err?.response?.data?.message || err?.message || 'Failed to load customer payments';
       setError(msg);
-      toast.showToast(msg, 'error');
+      toast.error(msg);
       setData([]);
       setTotal(0);
     } finally {

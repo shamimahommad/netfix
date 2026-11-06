@@ -110,6 +110,30 @@ class MikrotikSyncService {
     }
 
     /**
+     * Parse RouterOS date string (e.g. 'nov/06/2026 18:38:50') to MySQL DATETIME ('YYYY-MM-DD HH:MM:SS')
+     */
+    public static function parseRouterDate(?string $raw): ?string {
+        if (empty($raw)) return null;
+        $raw = trim($raw);
+        if (str_starts_with($raw, '1970') || str_starts_with($raw, 'jan/01/1970') || str_starts_with($raw, '0000') || strtolower($raw) === 'never' || str_contains(strtolower($raw), 'never')) {
+            return null;
+        }
+        if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $raw)) {
+            return $raw;
+        }
+        $dt = DateTime::createFromFormat('M/d/Y H:i:s', ucfirst($raw));
+        if ($dt) {
+            return $dt->format('Y-m-d H:i:s');
+        }
+        $clean = str_replace('/', ' ', $raw);
+        $ts = strtotime($clean);
+        if ($ts && $ts > 86400) {
+            return date('Y-m-d H:i:s', $ts);
+        }
+        return null;
+    }
+
+    /**
      * Quick check customer live status from MikroTik (fast timeout for page view)
      */
     public static function checkCustomerLiveStatus(PDO $db, $customerId, array &$net): void {
@@ -132,14 +156,51 @@ class MikrotikSyncService {
                 $net['mac_address'] = $act['caller-id'] ?? $net['mac_address'];
                 $net['uptime_seconds'] = self::parseUptime($act['uptime'] ?? '');
 
+                // Query live interface traffic counters
+                $iface = $api->comm('/interface/print', ['?name' => '<pppoe-' . $username . '>']);
+                if (empty($iface)) {
+                    $iface = $api->comm('/interface/print', ['?name' => 'pppoe-' . $username]);
+                }
+                if (!empty($iface[0])) {
+                    // MikroTik dynamic PPPoE interface:
+                    // tx-byte = router transmits out to client = client download
+                    // rx-byte = router receives from client = client upload
+                    $net['download_bytes'] = (float)($iface[0]['tx-byte'] ?? 0);
+                    $net['upload_bytes'] = (float)($iface[0]['rx-byte'] ?? 0);
+                }
+
+                // Query secret to get last logout time and disconnect reason even while currently online
+                $secList = $api->comm('/ppp/secret/print', ['?name' => $username]);
+                if (!empty($secList[0])) {
+                    $sec = $secList[0];
+                    if (!empty($sec['last-logged-out'])) {
+                        $parsedOff = self::parseRouterDate($sec['last-logged-out']);
+                        if ($parsedOff) {
+                            $net['last_offline_at'] = $parsedOff;
+                        }
+                    }
+                    if (!empty($sec['last-disconnect-reason'])) {
+                        $net['last_disconnect_reason'] = $sec['last-disconnect-reason'];
+                    }
+                }
+
                 // Keep local DB updated
                 $upStmt = $db->prepare("UPDATE customer_network_accounts 
-                    SET is_online = 1, current_ip = :ip, mac_address = :mac, uptime_seconds = :uptime, last_online_at = NOW() 
+                    SET is_online = 1, current_ip = :ip, mac_address = :mac, uptime_seconds = :uptime, 
+                        upload_bytes = COALESCE(:up, upload_bytes),
+                        download_bytes = COALESCE(:down, download_bytes),
+                        last_offline_at = COALESCE(:off, last_offline_at),
+                        last_disconnect_reason = COALESCE(:reason, last_disconnect_reason),
+                        last_online_at = NOW() 
                     WHERE customer_id = :cid");
                 $upStmt->execute([
                     'ip' => $net['current_ip'],
                     'mac' => $net['mac_address'],
                     'uptime' => $net['uptime_seconds'],
+                    'up' => $net['upload_bytes'] ?? null,
+                    'down' => $net['download_bytes'] ?? null,
+                    'off' => $net['last_offline_at'] ?? null,
+                    'reason' => $net['last_disconnect_reason'] ?? null,
                     'cid' => $customerId,
                 ]);
             } else {
@@ -151,7 +212,10 @@ class MikrotikSyncService {
                 if (!empty($secList[0])) {
                     $sec = $secList[0];
                     if (!empty($sec['last-logged-out'])) {
-                        $net['last_offline_at'] = $sec['last-logged-out'];
+                        $parsedOff = self::parseRouterDate($sec['last-logged-out']);
+                        if ($parsedOff) {
+                            $net['last_offline_at'] = $parsedOff;
+                        }
                     }
                     if (!empty($sec['last-disconnect-reason'])) {
                         $net['last_disconnect_reason'] = $sec['last-disconnect-reason'];
@@ -178,12 +242,15 @@ class MikrotikSyncService {
                    ]);
             }
 
-            // If last_offline_at is still empty, populate from secret
-            if (empty($net['last_offline_at'])) {
+            // If last_offline_at is still empty or invalid, populate from secret
+            if (empty($net['last_offline_at']) || str_starts_with($net['last_offline_at'], '1970') || str_starts_with($net['last_offline_at'], '0000')) {
                 $secList = $api->comm('/ppp/secret/print', ['?name' => $username]);
                 if (!empty($secList[0])) {
                     if (!empty($secList[0]['last-logged-out'])) {
-                        $net['last_offline_at'] = $secList[0]['last-logged-out'];
+                        $parsedOff = self::parseRouterDate($secList[0]['last-logged-out']);
+                        if ($parsedOff) {
+                            $net['last_offline_at'] = $parsedOff;
+                        }
                     }
                     if (!empty($secList[0]['last-disconnect-reason'])) {
                         $net['last_disconnect_reason'] = $secList[0]['last-disconnect-reason'];
@@ -326,12 +393,30 @@ class MikrotikSyncService {
                 $lines[] = "Notice: User '{$username}' does not exist in router's PPPoE secrets.";
             }
 
+            $txBytes = null;
+            $rxBytes = null;
+            if ($isOnline) {
+                $iface = $api->comm('/interface/print', ['?name' => '<pppoe-' . $username . '>']);
+                if (empty($iface)) {
+                    $iface = $api->comm('/interface/print', ['?name' => 'pppoe-' . $username]);
+                }
+                if (!empty($iface[0])) {
+                    $txBytes = (float)($iface[0]['tx-byte'] ?? 0);
+                    $rxBytes = (float)($iface[0]['rx-byte'] ?? 0);
+                    $lines[] = "Traffic Download (Tx): " . self::formatBytes($txBytes);
+                    $lines[] = "Traffic Upload (Rx): " . self::formatBytes($rxBytes);
+                }
+            }
+
             // Update database with latest live values
+            $parsedLogout = self::parseRouterDate($lastLoggedOut);
             $upStmt = $db->prepare("UPDATE customer_network_accounts SET 
                 is_online = :online,
                 current_ip = :ip,
                 mac_address = COALESCE(:mac, mac_address),
                 uptime_seconds = :uptime,
+                upload_bytes = COALESCE(:up, upload_bytes),
+                download_bytes = COALESCE(:down, download_bytes),
                 last_offline_at = COALESCE(:off, last_offline_at),
                 last_disconnect_reason = COALESCE(:reason, last_disconnect_reason),
                 last_online_at = CASE WHEN :online1 = 1 THEN NOW() ELSE last_online_at END
@@ -341,7 +426,9 @@ class MikrotikSyncService {
                 'ip' => $currentIp,
                 'mac' => $callerId,
                 'uptime' => $isOnline ? self::parseUptime($uptime) : 0,
-                'off' => $lastLoggedOut,
+                'up' => $rxBytes,
+                'down' => $txBytes,
+                'off' => $parsedLogout,
                 'reason' => $disconnectReason,
                 'online1' => $isOnline ? 1 : 0,
                 'cid' => $customerId,
@@ -424,6 +511,23 @@ class MikrotikSyncService {
         try {
             $activeList = $api->comm('/ppp/active/print', ['?name' => $username]);
             if (!empty($activeList)) {
+                // Capture final session traffic before terminating session
+                $iface = $api->comm('/interface/print', ['?name' => '<pppoe-' . $username . '>']);
+                if (empty($iface)) {
+                    $iface = $api->comm('/interface/print', ['?name' => 'pppoe-' . $username]);
+                }
+                $lastDown = !empty($iface[0]['tx-byte']) ? (float)$iface[0]['tx-byte'] : null;
+                $lastUp = !empty($iface[0]['rx-byte']) ? (float)$iface[0]['rx-byte'] : null;
+                if ($lastDown !== null || $lastUp !== null) {
+                    try {
+                        $db->prepare("UPDATE customer_network_accounts SET 
+                            upload_bytes = COALESCE(:up, upload_bytes),
+                            download_bytes = COALESCE(:down, download_bytes)
+                            WHERE customer_id = :cid")
+                           ->execute(['up' => $lastUp, 'down' => $lastDown, 'cid' => $customerId]);
+                    } catch (\Throwable $e) {}
+                }
+
                 foreach ($activeList as $session) {
                     if (isset($session['.id'])) {
                         $api->comm('/ppp/active/remove', ['=.id=' . $session['.id']]);

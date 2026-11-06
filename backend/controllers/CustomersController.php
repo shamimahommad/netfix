@@ -381,9 +381,9 @@ class CustomersController {
                     'onlineStatus' => (bool)($net['is_online'] ?? false),
                     'lastLogoutTime' => $net['last_offline_at'] ?? null,
                     'lastDisconnectReason' => $net['last_disconnect_reason'] ?? null,
-                    'uploadBytes' => 0,
-                    'downloadBytes' => 0,
-                    'totalDataUsed' => 0,
+                    'uploadBytes' => (float)($net['upload_bytes'] ?? 0),
+                    'downloadBytes' => (float)($net['download_bytes'] ?? 0),
+                    'totalDataUsed' => (float)(($net['upload_bytes'] ?? 0) + ($net['download_bytes'] ?? 0)),
                     'isSuspended' => ($customer['status'] === 'suspended'),
                 ],
                 'billing' => [
@@ -411,6 +411,57 @@ class CustomersController {
         $code = TenantSequenceService::peekNextCode($db, (string)$tenantId, 'customer', 6);
 
         Response::json(['customerCode' => $code]);
+    }
+
+    public static function reserveId(): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId() ?: 0;
+        $db = Database::getConnection();
+
+        $raw = file_get_contents('php://input');
+        $data = json_decode($raw, true) ?: [];
+        $sessionToken = trim($data['session_token'] ?? $data['lease_token'] ?? '');
+
+        require_once __DIR__ . '/../lib/CustomerIdReservationService.php';
+
+        try {
+            $result = CustomerIdReservationService::reserve(
+                $db,
+                (int)$tenantId,
+                (int)($user['user_id'] ?? 0),
+                !empty($sessionToken) ? $sessionToken : null
+            );
+
+            Response::json($result);
+        } catch (\Throwable $e) {
+            Response::error($e->getMessage(), 500);
+        }
+    }
+
+    public static function releaseId(): void {
+        $raw = file_get_contents('php://input');
+        $data = json_decode($raw, true);
+        if (!$data && !empty($_POST)) {
+            $data = $_POST;
+        }
+
+        $code = trim($data['customer_code'] ?? $data['customerCode'] ?? $_GET['customer_code'] ?? '');
+        $token = trim($data['lease_token'] ?? $data['session_token'] ?? $data['token'] ?? $_GET['lease_token'] ?? '');
+
+        if (empty($code) || empty($token)) {
+            Response::error('customer_code and lease_token are required to release reservation', 400);
+            return;
+        }
+
+        require_once __DIR__ . '/../lib/CustomerIdReservationService.php';
+        $db = Database::getConnection();
+
+        $released = CustomerIdReservationService::release($db, $code, $token);
+
+        Response::json([
+            'success' => true,
+            'message' => $released ? 'Reservation released successfully' : 'No active reservation found or already released',
+        ]);
     }
 
     public static function create(): void {
@@ -463,6 +514,14 @@ class CustomersController {
 
             $customerId = $db->lastInsertId();
             $db->commit();
+
+            require_once __DIR__ . '/../lib/CustomerIdReservationService.php';
+            $leaseToken = trim($data['leaseToken'] ?? $data['lease_token'] ?? $data['session_token'] ?? '');
+            CustomerIdReservationService::markUsed($db, $customerCode, $leaseToken ?: null);
+
+            require_once __DIR__ . '/../lib/CustomerIdReservationService.php';
+            $leaseToken = trim($data['leaseToken'] ?? $data['lease_token'] ?? $data['session_token'] ?? '');
+            CustomerIdReservationService::markUsed($db, $customerCode, $leaseToken ?: null);
 
             Response::json([
                 'success' => true,
@@ -627,6 +686,10 @@ class CustomersController {
             ]);
 
             $db->commit();
+
+            require_once __DIR__ . '/../lib/CustomerIdReservationService.php';
+            $leaseToken = trim($data['leaseToken'] ?? $data['lease_token'] ?? $data['session_token'] ?? '');
+            CustomerIdReservationService::markUsed($db, $customerCode, $leaseToken ?: null);
 
             Response::json([
                 'success' => true,

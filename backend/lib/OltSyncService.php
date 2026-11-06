@@ -5,6 +5,8 @@
  */
 
 require_once __DIR__ . '/VsolOltClient.php';
+require_once __DIR__ . '/FocuscomOltClient.php';
+require_once __DIR__ . '/BtponOltClient.php';
 
 class OltSyncService {
     public const DEFAULT_SYNC_INTERVAL_SECONDS = 7200; // 2 Hours
@@ -32,18 +34,33 @@ class OltSyncService {
             return self::getLocalData($db, $tenantId, $deviceId, $oltDev);
         }
 
-        $port = (int)($oltDev['web_port'] ?: 1010);
-        $user = $oltDev['api_username'] ?: 'star';
-        $pass = $oltDev['api_password'] ?: 'star321';
-        $proto = ($port == 80) ? 'http' : 'https';
+        $vendor = strtolower(trim($oltDev['vendor'] ?? 'vsol'));
+        $isBtpon = in_array($vendor, ['btpon', 'tbs', 'ip-com', 'ipcom']);
+        $isFocuscom = ($vendor === 'focuscom');
 
-        $totalPonPorts = (int)($oltDev['total_pon_ports'] ?? 8);
-        if ($totalPonPorts <= 0) $totalPonPorts = 8;
+        $defaultPort = $isBtpon ? 16148 : ($isFocuscom ? 2322 : 1010);
+        $port = (int)($oltDev['web_port'] ?: $defaultPort);
+        $user = $oltDev['api_username'] ?: (($isFocuscom || $isBtpon) ? 'admin' : 'star');
+        $pass = $oltDev['api_password'] ?: (($isFocuscom || $isBtpon) ? 'admin' : 'star321');
+        $proto = ($port == 443) ? 'https' : 'http';
+        if ($vendor === 'vsol' && $port != 80) {
+            $proto = 'https';
+        }
+
+        $totalPonPorts = (int)($oltDev['total_pon_ports'] ?? ($isFocuscom ? 4 : 8));
+        if ($totalPonPorts <= 0) $totalPonPorts = ($isFocuscom ? 4 : 8);
         $ponType = strtolower($oltDev['pon_type'] ?? 'epon');
 
         // Dynamic timeout: 45s for 8+ port OLTs with hundreds of ONUs, 25s for 4-port
         $timeout = ($totalPonPorts > 4) ? 45 : 25;
-        $client = new VsolOltClient($ip, $port, $user, $pass, $proto, $timeout);
+
+        if ($isBtpon) {
+            $client = new BtponOltClient($ip, $port, $user, $pass, $proto, $timeout);
+        } elseif ($isFocuscom) {
+            $client = new FocuscomOltClient($ip, $port, $user, $pass, $proto, $timeout);
+        } else {
+            $client = new VsolOltClient($ip, $port, $user, $pass, $proto, $timeout);
+        }
         $sysInfo = $client->getSystemInfo($totalPonPorts);
         $ponPorts = $client->getPonPorts($totalPonPorts, $ponType);
         $onus = $client->getOnus(null, true);
@@ -51,7 +68,11 @@ class OltSyncService {
         // Option 2: Live MAC Address Table from OLT (includes Router MAC, VLAN ID, Port ID)
         $macTable = [];
         try {
-            $macTable = $client->getMacTable();
+            if ($isBtpon || $isFocuscom) {
+                $macTable = $client->getMacTable(null, $onus);
+            } else {
+                $macTable = $client->getMacTable();
+            }
         } catch (\Throwable $e) {}
 
         if (!$sysInfo && empty($onus)) {
@@ -65,9 +86,15 @@ class OltSyncService {
         // Auto-migrate olt_onus schema if missing columns (router_mac, vlan_id, pppoe_username)
         self::ensureOltSchema($db);
 
-        $defaultModel = ($totalPonPorts > 4) 
-            ? "VSOL " . strtoupper($ponType) . " {$totalPonPorts}-Port OLT" 
-            : 'V1601E04-DP';
+        if ($isBtpon) {
+            $defaultModel = 'BTPON PTF-EP8X4G8';
+        } elseif ($isFocuscom) {
+            $defaultModel = 'Focuscom EP5800-04';
+        } else {
+            $defaultModel = ($totalPonPorts > 4) 
+                ? "VSOL " . strtoupper($ponType) . " {$totalPonPorts}-Port OLT" 
+                : 'V1601E04-DP';
+        }
 
         $onlineCount = 0;
         foreach ($onus as $o) {

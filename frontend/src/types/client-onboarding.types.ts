@@ -38,6 +38,8 @@ export interface CreateClientPayload {
   installationCharge?: number;
   /** Optional 6-digit numeric Customer ID. If provided and unique per tenant, used; else auto-generated. */
   customerCode?: string;
+  /** Active reservation lease token */
+  leaseToken?: string;
 }
 
 export interface CreateClientResponse {

@@ -91,6 +91,17 @@ export interface RechargeHistoryCombinedParams {
   limit?: number;
 }
 
+export interface CustomerPaymentsReportParams {
+  userId?: string;
+  createdBy?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  search?: string;
+  method?: string;
+  page?: number;
+  limit?: number;
+}
+
 export interface RechargeHistoryParams {
   userId?: string;
   initiator?: string;
@@ -110,11 +121,58 @@ export const paymentsService = {
     return response.data;
   },
 
-  async getCustomerPayments(customerId: string): Promise<PaymentResponse[]> {
-    const response = await api.get<{ success: boolean; data: PaymentResponse[] }>(
-      `/payments/customers/${customerId}`,
-    );
-    return response.data.data;
+  async getCustomerPayments(params: CustomerPaymentsReportParams | string = {}): Promise<{
+    data: Array<{
+      ref: string;
+      ref_no: string;
+      initiator_name: string;
+      collector_name: string;
+      pop_name: string;
+      pop_in_charge_name: string;
+      debit: number;
+      credit: number | null;
+      balance: number;
+      balance_after: number;
+      created_at: string;
+      description: string;
+      customer_name?: string;
+      customer_code?: string;
+      method?: string;
+    }>;
+    meta?: {
+      total: number;
+      page: number;
+      limit: number;
+    };
+    total?: number;
+  }> {
+    if (typeof params === 'string') {
+      const response = await api.get<{ success: boolean; data: any }>(`/payments/customers/${params}`);
+      return { data: Array.isArray(response.data?.data) ? response.data.data : [] };
+    }
+    const searchParams = new URLSearchParams();
+    if (params.userId) searchParams.set('userId', params.userId);
+    if (params.createdBy) searchParams.set('createdBy', params.createdBy);
+    if (params.dateFrom) searchParams.set('dateFrom', params.dateFrom);
+    if (params.dateTo) searchParams.set('dateTo', params.dateTo);
+    if (params.search) searchParams.set('search', params.search);
+    if (params.method) searchParams.set('method', params.method);
+    if (params.page != null) searchParams.set('page', String(params.page));
+    if (params.limit != null) searchParams.set('limit', String(params.limit));
+    const qs = searchParams.toString();
+    const response = await api.get<{
+      success: boolean;
+      total: number;
+      current_page: number;
+      per_page: number;
+      meta?: { total: number; page: number; limit: number };
+      data: any[];
+    }>(`/payments/customer-payments${qs ? `?${qs}` : ''}`);
+    return {
+      data: response.data?.data || [],
+      meta: response.data?.meta || { total: response.data?.total || 0, page: response.data?.current_page || 1, limit: response.data?.per_page || 25 },
+      total: response.data?.total || 0,
+    };
   },
 
   async getOnlineTransactions(params: OnlineTransactionsParams = {}): Promise<OnlineTransactionsResponse['data']> {

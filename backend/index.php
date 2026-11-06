@@ -141,6 +141,12 @@ if ($method === 'GET' && $uri === '/customers') {
 if ($method === 'GET' && $uri === '/customers/next-code') {
     CustomersController::nextCode();
 }
+if ($method === 'POST' && ($uri === '/customers/reserve-id' || $uri === '/api/customers/reserve-id' || $uri === '/api/customers/reserve-id.php')) {
+    CustomersController::reserveId();
+}
+if ($method === 'POST' && ($uri === '/customers/release-id' || $uri === '/api/customers/release-id' || $uri === '/api/customers/release-id.php')) {
+    CustomersController::releaseId();
+}
 if ($method === 'GET' && $uri === '/customers/reports/reseller-wise') {
     CustomersController::reportsResellerWise();
 }
@@ -253,6 +259,9 @@ if ($method === 'GET' && $uri === '/payments/merchant-payments') {
 }
 if ($method === 'GET' && $uri === '/payments/recharge-history') {
     PaymentsController::rechargeHistory();
+}
+if ($method === 'GET' && ($uri === '/payments/customer-payments' || $uri === '/payments/recharge-history-combined')) {
+    PaymentsController::customerPayments();
 }
 if ($method === 'POST' && $uri === '/payments/bkash/callback') {
     PaymentsController::bkashCallback();

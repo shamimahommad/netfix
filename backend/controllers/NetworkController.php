@@ -33,7 +33,7 @@ class NetworkController {
             if ($type === 'mikrotik') {
                 $where[] = "(vendor = 'mikrotik' OR device_type = 'router')";
             } elseif ($type === 'olt') {
-                $where[] = "(device_type = 'olt' OR vendor = 'olt' OR vendor IN ('vsol', 'bdcom', 'huawei', 'zte', 'cdata', 'syrotech'))";
+                $where[] = "(device_type = 'olt' OR vendor = 'olt' OR vendor IN ('vsol', 'bdcom', 'huawei', 'zte', 'cdata', 'syrotech', 'focuscom', 'btpon', 'tbs', 'ip-com'))";
             }
         }
 
@@ -155,7 +155,7 @@ class NetworkController {
         if ($type === 'router' || $type === 'mikrotik') {
             $where[] = "(device_type = 'router' OR vendor = 'mikrotik') AND device_type != 'olt'";
         } elseif ($type === 'olt') {
-            $where[] = "(device_type = 'olt' OR vendor = 'vsol' OR vendor = 'huawei' OR vendor = 'zte')";
+            $where[] = "(device_type = 'olt' OR vendor IN ('olt', 'vsol', 'bdcom', 'huawei', 'zte', 'cdata', 'syrotech', 'focuscom', 'btpon', 'tbs', 'ip-com'))";
         } elseif ($type !== 'all') {
             $where[] = "device_type = :dtype";
             $params['dtype'] = $type;

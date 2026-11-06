@@ -38,6 +38,7 @@ import { resellerService, Reseller } from '@/services/reseller.service';
 import { NetworkDevice, NetworkPackage, NetworkProtocol } from '@/types/network.types';
 import { ServiceArea, SubArea } from '@/types/service-area.types';
 import { CreateClientPayload } from '@/types/client-onboarding.types';
+import { useCustomerIdReservation } from '@/hooks/useCustomerIdReservation';
 import { BD_DISTRICTS, getThanaNamesForDistrict } from '@/data/bd-districts-thanas';
 import MapPickerModal from '@/components/MapPickerModal';
 import { PageHeader } from '@/components/common';
@@ -128,6 +129,21 @@ export default function AddClientPage() {
   const [locationInput, setLocationInput] = useState('');
 
   const userId = (user as { user_id?: string } | null)?.user_id ?? '';
+
+  const {
+    reservedCode,
+    leaseToken,
+    isReserving: isIdReserving,
+    error: reservationError,
+    commit: commitReservation,
+    release: releaseReservation,
+  } = useCustomerIdReservation({ autoReserve: true });
+
+  useEffect(() => {
+    if (reservedCode) {
+      setForm((p) => ({ ...p, customerCode: reservedCode }));
+    }
+  }, [reservedCode]);
 
   const resellerLabel = useMemo(() => {
     if (!user) return '—';
@@ -306,20 +322,7 @@ export default function AddClientPage() {
     loadAreas();
   }, []);
 
-  // Auto-fill Customer ID from backend sequence (strictly numeric 6-digit serial)
-  useEffect(() => {
-    customersService
-      .getNextCustomerCode()
-      .then((res) => {
-        if (res?.customerCode) {
-          const cleanCode = String(res.customerCode).replace(/\D/g, '').padStart(6, '0');
-          setForm((p) => ({ ...p, customerCode: cleanCode }));
-        }
-      })
-      .catch(() => {
-        // Fallback or leave manual
-      });
-  }, []);
+
 
   useEffect(() => {
     if (step !== 4 || !canSelectOwner) return;
@@ -417,12 +420,14 @@ export default function AddClientPage() {
         installationCharge: (form.installationCharge ?? 0) > 0 ? form.installationCharge : undefined,
         customerCode:
           (form.customerCode?.replace(/\D/g, '').length ?? 0) >= 6 ? form.customerCode?.replace(/\D/g, '') : undefined,
+        leaseToken: leaseToken || undefined,
         latitude: form.latitude != null ? form.latitude : undefined,
         longitude: form.longitude != null ? form.longitude : undefined,
         initialStatus: 'active',
       };
 
       const res = await customersService.onboardClient(payload);
+      commitReservation();
       toast.success('Customer created and provisioned successfully');
 
       const cid =
@@ -454,7 +459,10 @@ export default function AddClientPage() {
         actions={
           <button
             type="button"
-            onClick={() => navigate('/dashboard/customers/all')}
+            onClick={() => {
+              releaseReservation();
+              navigate('/dashboard/customers/all');
+            }}
             className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm shadow-2xs"
           >
             Cancel
@@ -479,22 +487,20 @@ export default function AddClientPage() {
                     setStep(s.n);
                   }
                 }}
-                className={`flex items-center gap-2.5 p-2.5 rounded-lg text-left transition-all ${
-                  isActive
+                className={`flex items-center gap-2.5 p-2.5 rounded-lg text-left transition-all ${isActive
                     ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-600/20'
                     : isCompleted
-                    ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100/60'
-                    : 'bg-slate-50 text-slate-600 dark:bg-slate-800/60 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
+                      ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100/60'
+                      : 'bg-slate-50 text-slate-600 dark:bg-slate-800/60 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
               >
                 <div
-                  className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-xs font-bold ${
-                    isActive
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-xs font-bold ${isActive
                       ? 'bg-white/20 text-white'
                       : isCompleted
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                  }`}
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                    }`}
                 >
                   {isCompleted ? <Check className="w-3.5 h-3.5" /> : <Icon className="w-3.5 h-3.5" />}
                 </div>
@@ -572,9 +578,8 @@ export default function AddClientPage() {
                     type="text"
                     value={form.clientName}
                     onChange={(e) => setForm((p) => ({ ...p, clientName: e.target.value }))}
-                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all ${
-                      errors.clientName ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
-                    }`}
+                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all ${errors.clientName ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
+                      }`}
                     placeholder="e.g. Tanvir Ahmed"
                   />
                 </div>
@@ -592,9 +597,8 @@ export default function AddClientPage() {
                     type="text"
                     value={form.mobileNo}
                     onChange={(e) => setForm((p) => ({ ...p, mobileNo: e.target.value }))}
-                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all ${
-                      errors.mobileNo ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
-                    }`}
+                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all ${errors.mobileNo ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
+                      }`}
                     placeholder="017XXXXXXXX"
                   />
                 </div>
@@ -604,9 +608,20 @@ export default function AddClientPage() {
 
               {/* Customer ID */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
-                  Customer ID (System Code)
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                    Customer ID (System Code)
+                  </label>
+                  {isIdReserving ? (
+                    <span className="text-[10px] font-semibold text-blue-500 animate-pulse flex items-center gap-1">
+                      <Clock className="w-3 h-3" /> Reserving ID...
+                    </span>
+                  ) : form.customerCode ? (
+                    <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <Check className="w-3 h-3" /> Reserved (15m lease)
+                    </span>
+                  ) : null}
+                </div>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
@@ -615,11 +630,12 @@ export default function AddClientPage() {
                     tabIndex={-1}
                     value={form.customerCode || ''}
                     className="w-full pl-9 pr-3.5 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-mono font-bold text-sm outline-none cursor-not-allowed select-none shadow-inner"
-                    placeholder="Auto-generating (e.g. 100001)..."
+                    placeholder={isIdReserving ? 'Reserving unique ID...' : 'Auto-generating (e.g. 100001)...'}
                   />
                 </div>
                 <p className="mt-1 text-[11px] text-slate-400">Strictly numeric globally unique serial ID (e.g. 100001).</p>
                 {errors.customerCode && <p className="mt-1 text-xs text-rose-500 font-medium">{errors.customerCode}</p>}
+                {reservationError && <p className="mt-1 text-xs text-rose-500 font-medium">{reservationError}</p>}
               </div>
 
               {/* Email */}
@@ -633,9 +649,8 @@ export default function AddClientPage() {
                     type="email"
                     value={form.email || ''}
                     onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all ${
-                      errors.email ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
-                    }`}
+                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all ${errors.email ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
+                      }`}
                     placeholder="customer@domain.com"
                   />
                 </div>
@@ -765,9 +780,8 @@ export default function AddClientPage() {
                     rows={2}
                     value={form.address || ''}
                     onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))}
-                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all resize-none ${
-                      errors.address ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
-                    }`}
+                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all resize-none ${errors.address ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
+                      }`}
                     placeholder="House / Holding, Road no, Floor/Flat, Block/Sector..."
                   />
                 </div>
@@ -806,9 +820,8 @@ export default function AddClientPage() {
                     value={form.thana || ''}
                     onChange={(e) => setForm((p) => ({ ...p, thana: e.target.value }))}
                     disabled={!form.district}
-                    className={`w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed ${
-                      errors.thana ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
-                    }`}
+                    className={`w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed ${errors.thana ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
+                      }`}
                   >
                     <option value="">{form.district ? 'Select Thana' : 'Select District first'}</option>
                     {form.district &&
@@ -927,8 +940,8 @@ export default function AddClientPage() {
                     locationInput !== ''
                       ? locationInput
                       : form.latitude != null && form.longitude != null
-                      ? `${form.latitude}, ${form.longitude}`
-                      : ''
+                        ? `${form.latitude}, ${form.longitude}`
+                        : ''
                   }
                   onChange={(e) => {
                     const v = e.target.value;
@@ -975,9 +988,8 @@ export default function AddClientPage() {
                 <select
                   value={form.serverId}
                   onChange={(e) => setForm((p) => ({ ...p, serverId: e.target.value }))}
-                  className={`w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${
-                    errors.serverId ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
-                  }`}
+                  className={`w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${errors.serverId ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
+                    }`}
                 >
                   <option value="">Select Router</option>
                   {servers.length === 0 && <option value="0">Default Gateway / Standalone</option>}
@@ -997,9 +1009,8 @@ export default function AddClientPage() {
                 <select
                   value={form.protocol}
                   onChange={(e) => setForm((p) => ({ ...p, protocol: e.target.value as NetworkProtocol }))}
-                  className={`w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${
-                    errors.protocol ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
-                  }`}
+                  className={`w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${errors.protocol ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
+                    }`}
                 >
                   {PROTOCOLS.map((p) => (
                     <option key={p.value} value={p.value}>
@@ -1044,9 +1055,8 @@ export default function AddClientPage() {
 
               {/* Package Grid Container */}
               <div
-                className={`rounded-xl border ${
-                  errors.packageId ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
-                } overflow-hidden bg-slate-50/50 dark:bg-slate-800/20`}
+                className={`rounded-xl border ${errors.packageId ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
+                  } overflow-hidden bg-slate-50/50 dark:bg-slate-800/20`}
               >
                 {packagesLoading ? (
                   <div className="p-8 text-center text-slate-500 text-xs flex items-center justify-center gap-2">
@@ -1084,11 +1094,10 @@ export default function AddClientPage() {
                               return next;
                             });
                           }}
-                          className={`p-3.5 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
-                            isSelected
+                          className={`p-3.5 rounded-xl border text-left transition-all relative flex flex-col justify-between ${isSelected
                               ? 'bg-blue-50/80 dark:bg-blue-900/30 border-blue-500 ring-2 ring-blue-500/20 shadow-xs'
                               : 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
-                          }`}
+                            }`}
                         >
                           <div>
                             <div className="flex items-start justify-between gap-1 mb-1.5">
@@ -1162,9 +1171,8 @@ export default function AddClientPage() {
                     value={form.username}
                     onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
                     placeholder="Type PPPoE username"
-                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-mono placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${
-                      errors.username ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
-                    }`}
+                    className={`w-full pl-9 pr-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-mono placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${errors.username ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
+                      }`}
                   />
                 </div>
                 {errors.username && <p className="mt-1 text-xs text-rose-500 font-medium">{errors.username}</p>}
@@ -1181,9 +1189,8 @@ export default function AddClientPage() {
                     value={form.password}
                     onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
                     placeholder="Type PPPoE password"
-                    className={`w-full pl-9 pr-9 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-mono placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${
-                      errors.password ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
-                    }`}
+                    className={`w-full pl-9 pr-9 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-mono placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${errors.password ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
+                      }`}
                   />
                   <button
                     type="button"
@@ -1232,10 +1239,10 @@ export default function AddClientPage() {
                     : form.clientCategory === 'prepaid' ||
                       form.clientCategory === 'postpaid' ||
                       form.clientCategory === 'vip'
-                    ? 'Today (Awaiting First Payment / Recharge)'
-                    : expiryPreview
-                    ? expiryPreview.toLocaleDateString('en-GB')
-                    : 'Select a package plan'}
+                      ? 'Today (Awaiting First Payment / Recharge)'
+                      : expiryPreview
+                        ? expiryPreview.toLocaleDateString('en-GB')
+                        : 'Select a package plan'}
                 </p>
                 <p className="text-[11px] text-slate-400 mt-1">Updates on billing cycle renewal or recharge</p>
               </div>
@@ -1328,11 +1335,10 @@ export default function AddClientPage() {
                             clientCategory: cat.val as CreateClientPayload['clientCategory'],
                           }))
                         }
-                        className={`p-2.5 rounded-lg border text-center transition-all flex flex-col items-center justify-center gap-1 ${
-                          isChecked
+                        className={`p-2.5 rounded-lg border text-center transition-all flex flex-col items-center justify-center gap-1 ${isChecked
                             ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-500 text-blue-700 dark:text-blue-300 font-semibold ring-1 ring-blue-500/20'
                             : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50'
-                        }`}
+                          }`}
                       >
                         <CatIcon className={`w-4 h-4 ${cat.color || ''}`} />
                         <span className="text-xs">{cat.label}</span>
@@ -1545,8 +1551,8 @@ export default function AddClientPage() {
                       {form.clientCategory === 'free'
                         ? 'Lifetime'
                         : expiryPreview
-                        ? expiryPreview.toLocaleDateString('en-GB')
-                        : '—'}
+                          ? expiryPreview.toLocaleDateString('en-GB')
+                          : '—'}
                     </span>
                   </div>
                 </div>

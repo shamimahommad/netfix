@@ -158,8 +158,136 @@ class PaymentsController {
         self::onlineTransactions();
     }
 
+    public static function customerPayments(): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $page = max(1, (int)($_GET['page'] ?? 1));
+        $limit = max(1, min(100, (int)($_GET['limit'] ?? 25)));
+        $offset = ($page - 1) * $limit;
+
+        $userId = !empty($_GET['userId']) ? (int)$_GET['userId'] : null;
+        $createdBy = !empty($_GET['createdBy']) ? (int)$_GET['createdBy'] : (!empty($_GET['pop_in_charge']) ? (int)$_GET['pop_in_charge'] : null);
+        $dateFrom = !empty($_GET['dateFrom']) ? trim($_GET['dateFrom']) : null;
+        $dateTo = !empty($_GET['dateTo']) ? trim($_GET['dateTo']) : null;
+        $method = !empty($_GET['method']) ? trim($_GET['method']) : null;
+        $search = !empty($_GET['search']) ? trim($_GET['search']) : null;
+
+        $where = ["t.tenant_id = :tid"];
+        $params = ['tid' => $tenantId];
+
+        if ($userId) {
+            $where[] = "t.initiator_user_id = :userId";
+            $params['userId'] = $userId;
+        }
+
+        if ($createdBy) {
+            $where[] = "(t.collector_user_id = :createdBy OR u_coll.user_id = :createdBy)";
+            $params['createdBy'] = $createdBy;
+        }
+
+        if ($dateFrom) {
+            $where[] = "DATE(t.created_at) >= :dateFrom";
+            $params['dateFrom'] = $dateFrom;
+        }
+
+        if ($dateTo) {
+            $where[] = "DATE(t.created_at) <= :dateTo";
+            $params['dateTo'] = $dateTo;
+        }
+
+        if ($method) {
+            $where[] = "LOWER(t.method) = :method";
+            $params['method'] = strtolower($method);
+        }
+
+        if ($search) {
+            $where[] = "(t.transaction_ref LIKE :search OR t.description LIKE :search OR c.full_name LIKE :search OR c.customer_code LIKE :search)";
+            $params['search'] = "%{$search}%";
+        }
+
+        $whereSql = implode(' AND ', $where);
+
+        // Count total matching
+        $countStmt = $db->prepare("SELECT COUNT(*) FROM transactions t 
+            LEFT JOIN customers c ON c.customer_id = t.customer_id
+            LEFT JOIN users u_coll ON u_coll.user_id = t.collector_user_id
+            WHERE {$whereSql}");
+        $countStmt->execute($params);
+        $total = (int)$countStmt->fetchColumn();
+
+        // Fetch paginated rows
+        $dataStmt = $db->prepare("SELECT 
+            t.transaction_id,
+            t.transaction_ref,
+            t.transaction_type,
+            t.amount,
+            t.method,
+            t.running_balance_after_transaction,
+            t.description,
+            t.created_at,
+            c.full_name as customer_name,
+            c.customer_code,
+            TRIM(CONCAT(COALESCE(u_init.first_name, ''), ' ', COALESCE(u_init.last_name, ''))) as initiator_name,
+            u_init.username as initiator_username,
+            TRIM(CONCAT(COALESCE(u_coll.first_name, ''), ' ', COALESCE(u_coll.last_name, ''))) as collector_name,
+            u_coll.username as collector_username
+            FROM transactions t
+            LEFT JOIN customers c ON c.customer_id = t.customer_id
+            LEFT JOIN users u_init ON u_init.user_id = t.initiator_user_id
+            LEFT JOIN users u_coll ON u_coll.user_id = t.collector_user_id
+            WHERE {$whereSql}
+            ORDER BY t.transaction_id DESC
+            LIMIT {$limit} OFFSET {$offset}");
+        $dataStmt->execute($params);
+        $rows = $dataStmt->fetchAll();
+
+        $dataRows = [];
+        foreach ($rows as $r) {
+            $isDebit = ($r['transaction_type'] === 'RENEW_DEBIT');
+            $amount = (float)$r['amount'];
+            $debit = $isDebit ? $amount : 0.0;
+            $credit = $isDebit ? null : $amount;
+
+            $initName = !empty($r['initiator_name']) ? $r['initiator_name'] : (!empty($r['initiator_username']) ? $r['initiator_username'] : (!empty($r['customer_name']) ? $r['customer_name'] : 'System / Online'));
+            $collName = !empty($r['collector_name']) ? $r['collector_name'] : (!empty($r['collector_username']) ? $r['collector_username'] : 'Head Office / Online');
+
+            $dataRows[] = [
+                'ref' => $r['transaction_ref'] ?: ('TRX-' . $r['transaction_id']),
+                'ref_no' => $r['transaction_ref'] ?: ('TRX-' . $r['transaction_id']),
+                'initiator_name' => $initName,
+                'collector_name' => $collName,
+                'pop_name' => $collName,
+                'pop_in_charge_name' => $collName,
+                'debit' => $debit,
+                'credit' => $credit,
+                'balance' => (float)($r['running_balance_after_transaction'] ?? 0),
+                'balance_after' => (float)($r['running_balance_after_transaction'] ?? 0),
+                'created_at' => $r['created_at'],
+                'description' => $r['description'] ?: 'Customer transaction',
+                'customer_name' => $r['customer_name'] ?: '—',
+                'customer_code' => $r['customer_code'] ?: '—',
+                'method' => $r['method'] ?: '—',
+            ];
+        }
+
+        Response::json([
+            'success' => true,
+            'total' => $total,
+            'current_page' => $page,
+            'per_page' => $limit,
+            'meta' => [
+                'total' => $total,
+                'page' => $page,
+                'limit' => $limit,
+            ],
+            'data' => $dataRows,
+        ]);
+    }
+
     public static function rechargeHistory(): void {
-        self::onlineTransactions();
+        self::customerPayments();
     }
 
     public static function bkashCallback(): void {

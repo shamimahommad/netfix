@@ -129,6 +129,33 @@ export const customersService = {
     return response.data;
   },
 
+  async reserveCustomerCode(sessionToken?: string): Promise<{
+    success: boolean;
+    customer_code: string;
+    lease_token: string;
+    expires_in: number;
+    reused?: boolean;
+  }> {
+    const response = await api.post<{
+      success: boolean;
+      customer_code: string;
+      lease_token: string;
+      expires_in: number;
+      reused?: boolean;
+    }>('/customers/reserve-id', {
+      session_token: sessionToken,
+    });
+    return response.data;
+  },
+
+  async releaseCustomerCode(customerCode: string, leaseToken: string): Promise<{ success: boolean; message: string }> {
+    const response = await api.post<{ success: boolean; message: string }>('/customers/release-id', {
+      customer_code: customerCode,
+      lease_token: leaseToken,
+    });
+    return response.data;
+  },
+
   /** Customers with latitude/longitude for map display (includes username, expDate, status for marker color) */
   async getCustomersForMap(): Promise<
     {

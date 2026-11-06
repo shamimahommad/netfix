@@ -251,22 +251,26 @@ const formatDate = (dateString: string | null): string => {
 const formatDateTime = (dateString: string | null | undefined): string => {
   if (!dateString) return '—';
   const cleanStr = String(dateString).trim();
-  if (cleanStr.startsWith('1970') || cleanStr.startsWith('jan/01/1970') || cleanStr.startsWith('0000') || cleanStr === '—') {
+  if (cleanStr.startsWith('1970') || cleanStr.startsWith('jan/01/1970') || cleanStr.startsWith('0000') || cleanStr === '—' || cleanStr.toLowerCase() === 'never') {
     return 'Never';
   }
-  const date = new Date(cleanStr.replace(' ', 'T'));
+  let date = new Date(cleanStr.replace(' ', 'T'));
   if (isNaN(date.getTime())) {
-    // Return raw RouterOS date string if standard parsing fails
+    // Handle RouterOS date string format like 'nov/06/2026 18:38:50'
+    date = new Date(cleanStr.replace(/\//g, ' '));
+  }
+  if (isNaN(date.getTime())) {
+    // Return raw date string if parsing fails
     return cleanStr;
   }
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const year = String(date.getFullYear()).slice(-2);
-  const hours = String(date.getHours()).padStart(2, '0');
+  const hours = date.getHours();
   const minutes = String(date.getMinutes()).padStart(2, '0');
-  const ampm = date.getHours() >= 12 ? 'PM' : 'AM';
-  const displayHours = date.getHours() % 12 || 12;
-  return `${day}-${month}-${year} ${displayHours}:${minutes} ${ampm}`;
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  const displayHours = hours % 12 || 12;
+  return `${day}-${month}-${year} ${String(displayHours).padStart(2, '0')}:${minutes} ${ampm}`;
 };
 
 const formatUptime = (seconds: number | string | null | undefined): string => {
@@ -290,12 +294,22 @@ const formatUptime = (seconds: number | string | null | undefined): string => {
   return parts.join(' ');
 };
 
-const formatTraffic = (bytes: number | null): string => {
-  if (bytes === null || bytes === undefined || bytes === 0) return '';
-  const gb = bytes / (1024 * 1024 * 1024);
-  if (gb >= 1) return `${gb.toFixed(1)}GB`;
-  const mb = bytes / (1024 * 1024);
-  return `${mb.toFixed(1)}MB`;
+const formatTraffic = (bytes: number | string | null | undefined): string => {
+  if (bytes === null || bytes === undefined) return '0 GB';
+  const num = Number(bytes);
+  if (isNaN(num) || num <= 0) return '0 GB';
+  const gb = num / (1024 * 1024 * 1024);
+  if (gb >= 1) {
+    return `${gb.toFixed(2)} GB`;
+  }
+  if (gb >= 0.01) {
+    return `${gb.toFixed(2)} GB`;
+  }
+  const mb = num / (1024 * 1024);
+  if (mb >= 1) {
+    return `${mb.toFixed(1)} MB`;
+  }
+  return `${(num / (1024 * 1024 * 1024)).toFixed(3)} GB`;
 };
 
 
@@ -1628,9 +1642,9 @@ export default function CustomerDetailPage() {
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  <p className="text-sm text-gray-600 dark:text-gray-400 w-20 font-medium">Last Logout:</p>
-                  <p className="text-base font-semibold text-slate-900 dark:text-slate-100">
-                    {formatDateTime(network.lastLogoutTime) || '—'}
+                  <p className="text-sm text-gray-600 dark:text-gray-400 w-20 font-medium flex-shrink-0">Last Logout:</p>
+                  <p className="text-sm sm:text-base font-semibold text-slate-900 dark:text-slate-100 min-w-0">
+                    {formatDateTime(network.lastLogoutTime) || 'Never'}
                     {network.lastDisconnectReason ? (
                       <span className="ml-2 text-xs font-normal text-slate-500 dark:text-slate-400">
                         ({network.lastDisconnectReason})
@@ -1638,22 +1652,20 @@ export default function CustomerDetailPage() {
                     ) : null}
                   </p>
                 </div>
-                <div className="flex gap-2">
-                  <p className="text-sm text-gray-600 dark:text-gray-400 w-20 font-medium">Traffic:</p>
-                  <div className="flex gap-4">
+                <div className="flex gap-2 items-center">
+                  <p className="text-sm text-gray-600 dark:text-gray-400 w-20 font-medium flex-shrink-0">Traffic:</p>
+                  <div className="flex items-center gap-3 min-w-0 flex-wrap sm:flex-nowrap">
                     <div className="flex items-center gap-1">
-                      <span className="text-xs text-gray-500 dark:text-gray-400">Download:</span>
-                      <p className="text-base font-semibold text-blue-600 dark:text-blue-400">
-                        {/* FIX: Swap to match correct mapping - Download = rx-byte = uploadBytes */}
-                        {formatTraffic(network.uploadBytes) || '—'}
-                      </p>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Download:</span>
+                      <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
+                        {formatTraffic(network.downloadBytes)}
+                      </span>
                     </div>
                     <div className="flex items-center gap-1">
-                      <span className="text-xs text-gray-500 dark:text-gray-400">Upload:</span>
-                      <p className="text-base font-semibold text-green-600 dark:text-green-400">
-                        {/* FIX: Swap to match correct mapping - Upload = tx-byte = downloadBytes */}
-                        {formatTraffic(network.downloadBytes) || '—'}
-                      </p>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Upload:</span>
+                      <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                        {formatTraffic(network.uploadBytes)}
+                      </span>
                     </div>
                   </div>
                 </div>
