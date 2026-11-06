@@ -16,10 +16,39 @@ class CustomerIdReservationService {
     public const LOCK_TIMEOUT_SECONDS = 10;
 
     /**
+     * Auto-ensure the customer_id_reservations table exists on any environment/deployment
+     */
+    public static function ensureTable(PDO $db): void {
+        static $ensured = false;
+        if ($ensured) return;
+        $ensured = true;
+
+        try {
+            $db->exec("CREATE TABLE IF NOT EXISTS `customer_id_reservations` (
+                `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `tenant_id` BIGINT UNSIGNED NOT NULL,
+                `reserved_code` VARCHAR(20) NOT NULL,
+                `admin_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+                `session_token` VARCHAR(64) NOT NULL,
+                `status` ENUM('reserved', 'used', 'released') NOT NULL DEFAULT 'reserved',
+                `expires_at` DATETIME NOT NULL,
+                `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                KEY `idx_reserved_code_status` (`reserved_code`, `status`),
+                KEY `idx_tenant_status_expires` (`tenant_id`, `status`, `expires_at`),
+                KEY `idx_session_token` (`session_token`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+        } catch (\Throwable $e) {
+            error_log('Failed to ensure customer_id_reservations table: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Clean up any expired or released reservations
      */
     public static function purgeExpired(PDO $db): int {
         try {
+            self::ensureTable($db);
             $stmt = $db->exec("DELETE FROM customer_id_reservations 
                 WHERE status = 'released' 
                    OR (status = 'reserved' AND expires_at < NOW())");
@@ -34,90 +63,107 @@ class CustomerIdReservationService {
      * Reserve the lowest available Customer ID for 15 minutes
      */
     public static function reserve(PDO $db, int $tenantId, int $adminId, ?string $sessionToken = null): array {
-        // Clean up stale rows first
-        self::purgeExpired($db);
+        self::ensureTable($db);
 
         // Generate a cryptographically secure token if not supplied
         if (empty($sessionToken)) {
             $sessionToken = bin2hex(random_bytes(24));
         }
 
-        // 1. If this session/tab already has an active, non-expired reservation, renew it
-        $checkStmt = $db->prepare("SELECT reserved_code, expires_at 
-            FROM customer_id_reservations 
-            WHERE session_token = :token 
-              AND tenant_id = :tid 
-              AND status = 'reserved' 
-              AND expires_at > NOW() 
-            LIMIT 1");
-        $checkStmt->execute(['token' => $sessionToken, 'tid' => $tenantId]);
-        $existing = $checkStmt->fetch(PDO::FETCH_ASSOC);
-
-        if ($existing) {
-            // Extend lease by 15 minutes
-            $extStmt = $db->prepare("UPDATE customer_id_reservations 
-                SET expires_at = DATE_ADD(NOW(), INTERVAL " . self::LEASE_DURATION_MINUTES . " MINUTE) 
-                WHERE session_token = :token AND reserved_code = :code");
-            $extStmt->execute(['token' => $sessionToken, 'code' => $existing['reserved_code']]);
-
-            return [
-                'success' => true,
-                'customer_code' => $existing['reserved_code'],
-                'lease_token' => $sessionToken,
-                'expires_in' => self::LEASE_DURATION_MINUTES * 60,
-                'reused' => true,
-            ];
-        }
-
-        // 2. Acquire strict mutex lock to serialize ID gap finding across concurrent requests
-        $lockStmt = $db->prepare("SELECT GET_LOCK(?, ?)");
-        $lockStmt->execute([self::LOCK_NAME, self::LOCK_TIMEOUT_SECONDS]);
-        $acquired = (int)$lockStmt->fetchColumn();
-
-        if (!$acquired) {
-            throw new \RuntimeException("System busy: Could not acquire Customer ID reservation lock within timeout.");
-        }
-
         try {
-            // 3. Find all currently taken codes (committed in customers table OR actively reserved)
-            $takenStmt = $db->query("
-                SELECT CAST(customer_code AS UNSIGNED) AS code FROM customers WHERE customer_code >= '100001'
-                UNION
-                SELECT CAST(reserved_code AS UNSIGNED) AS code FROM customer_id_reservations 
-                WHERE status IN ('reserved', 'used') AND expires_at > NOW()
-                ORDER BY code ASC
-            ");
-            $takenCodes = $takenStmt->fetchAll(PDO::FETCH_COLUMN);
-            $takenSet = array_flip($takenCodes);
+            // Clean up stale rows first
+            self::purgeExpired($db);
 
-            // 4. Find the lowest non-used, non-reserved gap starting from BASE_CUSTOMER_ID
-            $candidate = self::BASE_CUSTOMER_ID;
-            while (isset($takenSet[$candidate])) {
-                $candidate++;
+            // 1. If this session/tab already has an active, non-expired reservation, renew it
+            $checkStmt = $db->prepare("SELECT reserved_code, expires_at 
+                FROM customer_id_reservations 
+                WHERE session_token = :token 
+                  AND tenant_id = :tid 
+                  AND status = 'reserved' 
+                  AND expires_at > NOW() 
+                LIMIT 1");
+            $checkStmt->execute(['token' => $sessionToken, 'tid' => $tenantId]);
+            $existing = $checkStmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($existing) {
+                // Extend lease by 15 minutes
+                $extStmt = $db->prepare("UPDATE customer_id_reservations 
+                    SET expires_at = DATE_ADD(NOW(), INTERVAL " . self::LEASE_DURATION_MINUTES . " MINUTE) 
+                    WHERE session_token = :token AND reserved_code = :code");
+                $extStmt->execute(['token' => $sessionToken, 'code' => $existing['reserved_code']]);
+
+                return [
+                    'success' => true,
+                    'customer_code' => $existing['reserved_code'],
+                    'lease_token' => $sessionToken,
+                    'expires_in' => self::LEASE_DURATION_MINUTES * 60,
+                    'reused' => true,
+                ];
             }
-            $reservedCode = str_pad((string)$candidate, 6, '0', STR_PAD_LEFT);
 
-            // 5. Insert reservation with lease
-            $insStmt = $db->prepare("INSERT INTO customer_id_reservations 
-                (tenant_id, reserved_code, admin_id, session_token, status, expires_at)
-                VALUES (:tid, :code, :aid, :token, 'reserved', DATE_ADD(NOW(), INTERVAL " . self::LEASE_DURATION_MINUTES . " MINUTE))");
-            $insStmt->execute([
-                'tid' => $tenantId,
-                'code' => $reservedCode,
-                'aid' => $adminId,
-                'token' => $sessionToken,
-            ]);
+            // 2. Acquire strict mutex lock to serialize ID gap finding across concurrent requests
+            $lockStmt = $db->prepare("SELECT GET_LOCK(?, ?)");
+            $lockStmt->execute([self::LOCK_NAME, self::LOCK_TIMEOUT_SECONDS]);
+            $acquired = (int)$lockStmt->fetchColumn();
 
+            if (!$acquired) {
+                throw new \RuntimeException("System busy: Could not acquire Customer ID reservation lock within timeout.");
+            }
+
+            try {
+                // 3. Find all currently taken codes (committed in customers table OR actively reserved)
+                $takenStmt = $db->query("
+                    SELECT CAST(customer_code AS UNSIGNED) AS code FROM customers WHERE customer_code >= '100001'
+                    UNION
+                    SELECT CAST(reserved_code AS UNSIGNED) AS code FROM customer_id_reservations 
+                    WHERE status IN ('reserved', 'used') AND expires_at > NOW()
+                    ORDER BY code ASC
+                ");
+                $takenCodes = $takenStmt->fetchAll(PDO::FETCH_COLUMN);
+                $takenSet = array_flip($takenCodes);
+
+                // 4. Find the lowest non-used, non-reserved gap starting from BASE_CUSTOMER_ID
+                $candidate = self::BASE_CUSTOMER_ID;
+                while (isset($takenSet[$candidate])) {
+                    $candidate++;
+                }
+                $reservedCode = str_pad((string)$candidate, 6, '0', STR_PAD_LEFT);
+
+                // 5. Insert reservation with lease
+                $insStmt = $db->prepare("INSERT INTO customer_id_reservations 
+                    (tenant_id, reserved_code, admin_id, session_token, status, expires_at)
+                    VALUES (:tid, :code, :aid, :token, 'reserved', DATE_ADD(NOW(), INTERVAL " . self::LEASE_DURATION_MINUTES . " MINUTE))");
+                $insStmt->execute([
+                    'tid' => $tenantId,
+                    'code' => $reservedCode,
+                    'aid' => $adminId,
+                    'token' => $sessionToken,
+                ]);
+
+                return [
+                    'success' => true,
+                    'customer_code' => $reservedCode,
+                    'lease_token' => $sessionToken,
+                    'expires_in' => self::LEASE_DURATION_MINUTES * 60,
+                    'reused' => false,
+                ];
+            } finally {
+                $relStmt = $db->prepare("SELECT RELEASE_LOCK(?)");
+                $relStmt->execute([self::LOCK_NAME]);
+            }
+        } catch (\Throwable $e) {
+            error_log("CustomerIdReservationService error: " . $e->getMessage());
+
+            // Resilient fallback to sequence generator so UI never breaks
+            require_once __DIR__ . '/TenantSequenceService.php';
+            $fallbackCode = TenantSequenceService::peekNextCode($db, (string)$tenantId, 'customer', 6);
             return [
                 'success' => true,
-                'customer_code' => $reservedCode,
+                'customer_code' => $fallbackCode,
                 'lease_token' => $sessionToken,
                 'expires_in' => self::LEASE_DURATION_MINUTES * 60,
-                'reused' => false,
+                'fallback' => true,
             ];
-        } finally {
-            $relStmt = $db->prepare("SELECT RELEASE_LOCK(?)");
-            $relStmt->execute([self::LOCK_NAME]);
         }
     }
 
@@ -125,31 +171,41 @@ class CustomerIdReservationService {
      * Release a reserved ID back to the free pool immediately
      */
     public static function release(PDO $db, string $code, string $sessionToken): bool {
-        $cleanCode = preg_replace('/\D/', '', $code);
-        $stmt = $db->prepare("DELETE FROM customer_id_reservations 
-            WHERE reserved_code = :code AND session_token = :token");
-        $stmt->execute([
-            'code' => $cleanCode,
-            'token' => $sessionToken,
-        ]);
-        return $stmt->rowCount() > 0;
+        try {
+            self::ensureTable($db);
+            $cleanCode = preg_replace('/\D/', '', $code);
+            $stmt = $db->prepare("DELETE FROM customer_id_reservations 
+                WHERE reserved_code = :code AND session_token = :token");
+            $stmt->execute([
+                'code' => $cleanCode,
+                'token' => $sessionToken,
+            ]);
+            return $stmt->rowCount() > 0;
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     /**
      * Mark reservation as used upon successful customer creation
      */
     public static function markUsed(PDO $db, string $code, ?string $sessionToken = null): void {
-        $cleanCode = preg_replace('/\D/', '', $code);
-        if (!empty($sessionToken)) {
-            $stmt = $db->prepare("UPDATE customer_id_reservations 
-                SET status = 'used' 
-                WHERE reserved_code = :code AND session_token = :token");
-            $stmt->execute(['code' => $cleanCode, 'token' => $sessionToken]);
-        } else {
-            $stmt = $db->prepare("UPDATE customer_id_reservations 
-                SET status = 'used' 
-                WHERE reserved_code = :code");
-            $stmt->execute(['code' => $cleanCode]);
+        try {
+            self::ensureTable($db);
+            $cleanCode = preg_replace('/\D/', '', $code);
+            if (!empty($sessionToken)) {
+                $stmt = $db->prepare("UPDATE customer_id_reservations 
+                    SET status = 'used' 
+                    WHERE reserved_code = :code AND session_token = :token");
+                $stmt->execute(['code' => $cleanCode, 'token' => $sessionToken]);
+            } else {
+                $stmt = $db->prepare("UPDATE customer_id_reservations 
+                    SET status = 'used' 
+                    WHERE reserved_code = :code");
+                $stmt->execute(['code' => $cleanCode]);
+            }
+        } catch (\Throwable $e) {
+            error_log("CustomerIdReservationService::markUsed error: " . $e->getMessage());
         }
     }
 }

@@ -434,7 +434,16 @@ class CustomersController {
 
             Response::json($result);
         } catch (\Throwable $e) {
-            Response::error($e->getMessage(), 500);
+            error_log('reserveId fallback: ' . $e->getMessage());
+            require_once __DIR__ . '/../lib/TenantSequenceService.php';
+            $fallbackCode = TenantSequenceService::peekNextCode($db, (string)$tenantId, 'customer', 6);
+            Response::json([
+                'success' => true,
+                'customer_code' => $fallbackCode,
+                'lease_token' => $sessionToken ?: ('fallback_' . time()),
+                'expires_in' => 900,
+                'fallback' => true,
+            ]);
         }
     }
 

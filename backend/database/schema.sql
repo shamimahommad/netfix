@@ -124,6 +124,26 @@ LOCK TABLES `commission_logs` WRITE;
 UNLOCK TABLES;
 
 --
+-- Table structure for table `customer_id_reservations`
+--
+
+CREATE TABLE IF NOT EXISTS `customer_id_reservations` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) unsigned NOT NULL,
+  `reserved_code` varchar(20) NOT NULL,
+  `admin_id` bigint(20) unsigned NOT NULL DEFAULT 0,
+  `session_token` varchar(64) NOT NULL,
+  `status` enum('reserved','used','released') NOT NULL DEFAULT 'reserved',
+  `expires_at` datetime NOT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_reserved_code_status` (`reserved_code`,`status`),
+  KEY `idx_tenant_status_expires` (`tenant_id`,`status`,`expires_at`),
+  KEY `idx_session_token` (`session_token`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
 -- Table structure for table `customer_network_accounts`
 --
 

@@ -66,10 +66,26 @@ class Database {
         $checked = true;
 
         try {
+            // Always ensure critical auxiliary tables exist even if main schema was already imported
+            $pdo->exec("CREATE TABLE IF NOT EXISTS `customer_id_reservations` (
+                `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                `tenant_id` BIGINT UNSIGNED NOT NULL,
+                `reserved_code` VARCHAR(20) NOT NULL,
+                `admin_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+                `session_token` VARCHAR(64) NOT NULL,
+                `status` ENUM('reserved', 'used', 'released') NOT NULL DEFAULT 'reserved',
+                `expires_at` DATETIME NOT NULL,
+                `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                KEY `idx_reserved_code_status` (`reserved_code`, `status`),
+                KEY `idx_tenant_status_expires` (`tenant_id`, `status`, `expires_at`),
+                KEY `idx_session_token` (`session_token`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
             // Check if users table exists in the current database
             $stmt = $pdo->query("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'users' LIMIT 1");
             if ($stmt && $stmt->fetchColumn()) {
-                return; // Tables already exist!
+                return; // Core tables already exist!
             }
 
             // Tables missing - locate schema.sql
