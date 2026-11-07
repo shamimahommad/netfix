@@ -1,5 +1,6 @@
 import { api } from '@/lib/api';
 import {
+  NetworkDevice,
   CreateNetworkDevicePayload,
   CreateNetworkDeviceResponse,
   CreateOltDevicePayload,

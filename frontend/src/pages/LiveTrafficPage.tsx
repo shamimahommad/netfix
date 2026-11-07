@@ -70,7 +70,7 @@ export default function LiveTrafficPage() {
   const [chartType, setChartType] = useState<'bar' | 'area'>('bar');
   const [isPolling, setIsPolling] = useState<boolean>(false);
 
-  const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFetchingRef = useRef<boolean>(false);
   const maxHistoryPoints = 40; // Number of bars shown on graph
 

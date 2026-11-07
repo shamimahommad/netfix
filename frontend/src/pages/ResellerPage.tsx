@@ -18,6 +18,7 @@ import {
   Shield,
   CreditCard,
   Wallet,
+  Layers,
   X,
   CheckCircle2,
   RotateCw,
