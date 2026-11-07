@@ -167,7 +167,7 @@ export default function TenantLayout() {
         submenu: [
           { label: getResellerWiseReportLabel(user?.role_code), path: '/dashboard/report/reseller-wise-customers' },
           { label: 'Area Wise Customers', path: '/dashboard/report/area-wise-customers' },
-          ...(canSeeServerWiseReport(user?.role_code, user?.user_type)
+          ...(canSeeServerWiseReport(user?.role_code || (user as any)?.role, user?.user_type)
             ? [{ label: 'Server Wise Customers', path: '/dashboard/report/server-wise-customers' }]
             : []),
           { label: 'Financial Statement / Ledger', path: '/dashboard/report/ledger' },
@@ -202,7 +202,7 @@ export default function TenantLayout() {
     });
 
     // Network menu: only for admin / manager / tenant_admin / isp_admin / saas_admin
-    if (canSeeNetwork(user?.role_code, user?.user_type)) {
+    if (canSeeNetwork(user?.role_code || (user as any)?.role, user?.user_type)) {
       const networkSubmenu: SidebarItem['submenu'] = [
         { label: 'Mikrotik', path: '/dashboard/network/mikrotik' },
         { label: 'OLT', path: '/dashboard/network/olt' },
@@ -228,7 +228,7 @@ export default function TenantLayout() {
     });
 
     return items;
-  }, [isMapEnabled, isMonitoringEnabled, isSmsEnabled, resellerLabels.menu, resellerLabels.list, user?.role_code]);
+  }, [isMapEnabled, isMonitoringEnabled, isSmsEnabled, resellerLabels.menu, resellerLabels.list, user?.role_code, (user as any)?.role, user?.user_type]);
 
   const userType = user?.user_type || 'isp';
 

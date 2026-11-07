@@ -7,6 +7,7 @@
 require_once __DIR__ . '/VsolOltClient.php';
 require_once __DIR__ . '/FocuscomOltClient.php';
 require_once __DIR__ . '/BtponOltClient.php';
+require_once __DIR__ . '/BdcomOltClient.php';
 
 class OltSyncService {
     public const DEFAULT_SYNC_INTERVAL_SECONDS = 7200; // 2 Hours
@@ -35,26 +36,29 @@ class OltSyncService {
         }
 
         $vendor = strtolower(trim($oltDev['vendor'] ?? 'vsol'));
+        $isBdcom = ($vendor === 'bdcom');
         $isBtpon = in_array($vendor, ['btpon', 'tbs', 'ip-com', 'ipcom']);
         $isFocuscom = ($vendor === 'focuscom');
 
-        $defaultPort = $isBtpon ? 16148 : ($isFocuscom ? 2322 : 1010);
-        $port = (int)($oltDev['web_port'] ?: $defaultPort);
-        $user = $oltDev['api_username'] ?: (($isFocuscom || $isBtpon) ? 'admin' : 'star');
-        $pass = $oltDev['api_password'] ?: (($isFocuscom || $isBtpon) ? 'admin' : 'star321');
+        $defaultPort = $isBdcom ? 23 : ($isBtpon ? 16148 : ($isFocuscom ? 2322 : 1010));
+        $port = (int)($oltDev['web_port'] ?: ($oltDev['management_port'] ?: $defaultPort));
+        $user = $oltDev['api_username'] ?: (($isBdcom || $isFocuscom || $isBtpon) ? 'admin' : 'star');
+        $pass = $oltDev['api_password'] ?: (($isBdcom || $isFocuscom || $isBtpon) ? 'admin' : 'star321');
         $proto = ($port == 443) ? 'https' : 'http';
         if ($vendor === 'vsol' && $port != 80) {
             $proto = 'https';
         }
 
-        $totalPonPorts = (int)($oltDev['total_pon_ports'] ?? ($isFocuscom ? 4 : 8));
-        if ($totalPonPorts <= 0) $totalPonPorts = ($isFocuscom ? 4 : 8);
+        $totalPonPorts = (int)($oltDev['total_pon_ports'] ?? (($isFocuscom || $isBdcom) ? 4 : 8));
+        if ($totalPonPorts <= 0) $totalPonPorts = (($isFocuscom || $isBdcom) ? 4 : 8);
         $ponType = strtolower($oltDev['pon_type'] ?? 'epon');
 
         // Dynamic timeout: 45s for 8+ port OLTs with hundreds of ONUs, 25s for 4-port
         $timeout = ($totalPonPorts > 4) ? 45 : 25;
 
-        if ($isBtpon) {
+        if ($isBdcom) {
+            $client = new BdcomOltClient($ip, $port, $user, $pass, 'telnet', $timeout);
+        } elseif ($isBtpon) {
             $client = new BtponOltClient($ip, $port, $user, $pass, $proto, $timeout);
         } elseif ($isFocuscom) {
             $client = new FocuscomOltClient($ip, $port, $user, $pass, $proto, $timeout);
@@ -68,7 +72,7 @@ class OltSyncService {
         // Option 2: Live MAC Address Table from OLT (includes Router MAC, VLAN ID, Port ID)
         $macTable = [];
         try {
-            if ($isBtpon || $isFocuscom) {
+            if ($isBdcom || $isBtpon || $isFocuscom) {
                 $macTable = $client->getMacTable(null, $onus);
             } else {
                 $macTable = $client->getMacTable();
@@ -86,7 +90,9 @@ class OltSyncService {
         // Auto-migrate olt_onus schema if missing columns (router_mac, vlan_id, pppoe_username)
         self::ensureOltSchema($db);
 
-        if ($isBtpon) {
+        if ($isBdcom) {
+            $defaultModel = 'BDCOM P3600-04';
+        } elseif ($isBtpon) {
             $defaultModel = 'BTPON PTF-EP8X4G8';
         } elseif ($isFocuscom) {
             $defaultModel = 'Focuscom EP5800-04';
