@@ -520,7 +520,8 @@ class NetworkController {
                 try {
                     $api = new RouterosAPI();
                     $api->port = !empty($device['management_port']) ? (int)$device['management_port'] : 8728;
-                    $api->timeout = 3;
+                    $api->timeout = 2;
+                    $api->attempts = 1;
                     if ($api->connect($device['management_ip'], $device['api_username'], $device['api_password'] ?? '')) {
                         $cmd = ($protocol === 'hotspot') ? '/ip/hotspot/user/profile/print' : '/ppp/profile/print';
                         $results = $api->comm($cmd);

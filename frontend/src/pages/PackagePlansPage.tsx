@@ -162,8 +162,10 @@ export default function PackagePlansPage() {
   };
 
   useEffect(() => {
-    fetchProfiles(formData.serverId, formData.protocol);
-  }, [formData.serverId, formData.protocol, servers]);
+    if (isModalOpen) {
+      fetchProfiles(formData.serverId, formData.protocol);
+    }
+  }, [isModalOpen, formData.serverId, formData.protocol]);
 
   const loadPackages = async (page = 1) => {
     setLoading(true);
