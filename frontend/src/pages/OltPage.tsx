@@ -546,7 +546,9 @@ export default function OltPage() {
                     {formErrors.managementIp && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.managementIp}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Management HTTP API Port</label>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                      {formData.vendor === 'bdcom' ? 'Web GUI Port (Optional for BDCOM)' : 'Management HTTP API Port'}
+                    </label>
                     <input
                       type="number"
                       min={1}
@@ -554,15 +556,25 @@ export default function OltPage() {
                       value={formData.webPort ?? 80}
                       onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || 80 }))}
                       className={inputClass('webPort')}
-                      placeholder="80 or 1010"
+                      placeholder={formData.vendor === 'bdcom' ? '1080 or leave default' : '80 or 1010'}
                     />
-                    <p className="mt-1 text-xs text-slate-500">Default: 80 (or 1010 for VSOL, 2322 for Focuscom, 16148 for BTPON). Used internally by NetFix to sync ONUs & telemetry.</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {formData.vendor === 'bdcom' 
+                        ? 'BDCOM strictly uses Telnet CLI socket for high-speed sync. Web port is optional.' 
+                        : 'Default: 80 (or 1010 for VSOL, 2322 for Focuscom, 16148 for BTPON). Used internally by NetFix to sync ONUs & telemetry.'}
+                    </p>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Telnet / SSH CLI Port</label>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                      Telnet / SSH CLI Port {formData.vendor === 'bdcom' && <span className="text-emerald-500 font-bold">(Primary for BDCOM Sync)</span>}
+                    </label>
                     <input type="number" min={1} max={65535} value={formData.managementPort ?? 23} onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23 }))} className={inputClass('managementPort')} />
                     {formErrors.managementPort && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.managementPort}</p>}
-                    <p className="mt-1 text-xs text-slate-500">Default: 23 (Telnet) or 22 (SSH)</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {formData.vendor === 'bdcom' 
+                        ? 'Default: 23 (or custom port like 1081). BDCOM connects via Telnet CLI directly on this port to fetch ONUs & telemetry.' 
+                        : 'Default: 23 (Telnet) or 22 (SSH)'}
+                    </p>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">CLI Username</label>
@@ -687,7 +699,9 @@ export default function OltPage() {
                     {formErrors.managementIp && <p className="mt-1 text-xs text-red-600">{formErrors.managementIp}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Management HTTP API Port</label>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                      {formData.vendor === 'bdcom' ? 'Web GUI Port (Optional for BDCOM)' : 'Management HTTP API Port'}
+                    </label>
                     <input
                       type="number"
                       min={1}
@@ -695,13 +709,24 @@ export default function OltPage() {
                       value={formData.webPort ?? 80}
                       onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || 80 }))}
                       className={inputClass('webPort')}
-                      placeholder="80 or 1010"
+                      placeholder={formData.vendor === 'bdcom' ? '1080 or leave default' : '80 or 1010'}
                     />
-                    <p className="mt-1 text-xs text-slate-500">Default: 80 (or 1010 for VSOL, 2322 for Focuscom, 16148 for BTPON). Used internally by NetFix to sync ONUs & telemetry.</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {formData.vendor === 'bdcom' 
+                        ? 'BDCOM strictly uses Telnet CLI socket for high-speed sync. Web port is optional.' 
+                        : 'Default: 80 (or 1010 for VSOL, 2322 for Focuscom, 16148 for BTPON). Used internally by NetFix to sync ONUs & telemetry.'}
+                    </p>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Telnet / SSH CLI Port</label>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                      Telnet / SSH CLI Port {formData.vendor === 'bdcom' && <span className="text-emerald-500 font-bold">(Primary for BDCOM Sync)</span>}
+                    </label>
                     <input type="number" min={1} max={65535} value={formData.managementPort ?? 23} onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23 }))} className={inputClass('managementPort')} />
+                    <p className="mt-1 text-xs text-slate-500">
+                      {formData.vendor === 'bdcom' 
+                        ? 'Default: 23 (or custom port like 1081). BDCOM connects via Telnet CLI directly on this port to fetch ONUs & telemetry.' 
+                        : 'Default: 23 (Telnet) or 22 (SSH)'}
+                    </p>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Username</label>

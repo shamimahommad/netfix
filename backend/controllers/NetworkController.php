@@ -399,10 +399,18 @@ class NetworkController {
         $type = strtolower($device['device_type'] ?? 'router');
 
         if ($type === 'olt') {
-            // For OLT: Web Management / Sync API port is priority, then CLI telnet/ssh port
-            if (!empty($device['web_port'])) $ports[] = (int)$device['web_port'];
-            if (!empty($device['management_port'])) $ports[] = (int)$device['management_port'];
-            if (empty($ports)) $ports = [80, 23];
+            $vendor = strtolower(trim($device['vendor'] ?? ''));
+            if ($vendor === 'bdcom') {
+                // For BDCOM OLT: Telnet CLI port (management_port e.g. 1081 / 23) is top priority
+                if (!empty($device['management_port'])) $ports[] = (int)$device['management_port'];
+                if (!empty($device['web_port'])) $ports[] = (int)$device['web_port'];
+                if (empty($ports)) $ports = [23, 1081];
+            } else {
+                // For Web API OLTs (VSOL, BTPON, Focuscom): Web API port is priority
+                if (!empty($device['web_port'])) $ports[] = (int)$device['web_port'];
+                if (!empty($device['management_port'])) $ports[] = (int)$device['management_port'];
+                if (empty($ports)) $ports = [80, 23];
+            }
         } else {
             // For MikroTik / Router: API port (management_port), Winbox port, Web port
             if (!empty($device['management_port'])) $ports[] = (int)$device['management_port'];

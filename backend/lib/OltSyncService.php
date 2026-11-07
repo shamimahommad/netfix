@@ -40,8 +40,14 @@ class OltSyncService {
         $isBtpon = in_array($vendor, ['btpon', 'tbs', 'ip-com', 'ipcom']);
         $isFocuscom = ($vendor === 'focuscom');
 
-        $defaultPort = $isBdcom ? 23 : ($isBtpon ? 16148 : ($isFocuscom ? 2322 : 1010));
-        $port = (int)($oltDev['web_port'] ?: ($oltDev['management_port'] ?: $defaultPort));
+        if ($isBdcom) {
+            // BDCOM communicates strictly via Telnet CLI socket.
+            // Priority: management_port (e.g. 1081 or 23) -> web_port -> default 23
+            $port = (int)($oltDev['management_port'] ?: ($oltDev['web_port'] ?: 23));
+        } else {
+            $defaultPort = $isBtpon ? 16148 : ($isFocuscom ? 2322 : 1010);
+            $port = (int)($oltDev['web_port'] ?: ($oltDev['management_port'] ?: $defaultPort));
+        }
         $user = $oltDev['api_username'] ?: (($isBdcom || $isFocuscom || $isBtpon) ? 'admin' : 'star');
         $pass = $oltDev['api_password'] ?: (($isBdcom || $isFocuscom || $isBtpon) ? 'admin' : 'star321');
         $proto = ($port == 443) ? 'https' : 'http';
@@ -82,7 +88,8 @@ class OltSyncService {
         if (!$sysInfo && empty($onus)) {
             // If connection failed, return honest error so user knows hardware was unreachable
             $local = self::getLocalData($db, $tenantId, $deviceId, $oltDev);
-            $local['syncError'] = "Could not connect to OLT hardware at {$ip}:{$port}. Please verify the IP address, API/Web port, and credentials.";
+            $protoName = $isBdcom ? 'Telnet CLI' : 'API/Web';
+            $local['syncError'] = "Could not connect to OLT {$protoName} at {$ip}:{$port}. Please verify the IP address, {$protoName} port, and credentials.";
             $local['isOnline'] = false;
             return $local;
         }
