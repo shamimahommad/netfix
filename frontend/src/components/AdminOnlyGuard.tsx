@@ -4,7 +4,11 @@ import ErrorPage from '@/pages/ErrorPage';
 const ADMIN_ROLES = ['admin', 'manager', 'isp_admin', 'tenant_admin', 'saas_admin', 'super_admin'];
 
 function isAdminRole(roleCode: string | undefined): boolean {
-  const r = (roleCode ?? '').toLowerCase();
+  const r = (roleCode ?? '').toLowerCase().trim();
+  if (!r) return false;
+  if (['reseller', 'sub_reseller', 'dealer', 'agent', 'customer'].includes(r)) {
+    return false;
+  }
   return ADMIN_ROLES.includes(r);
 }
 
@@ -18,7 +22,7 @@ interface AdminOnlyGuardProps {
  */
 export function AdminOnlyGuard({ children }: AdminOnlyGuardProps) {
   const { user, isAuthenticated } = useAuthStore();
-  const roleCode = user?.role_code;
+  const roleCode = user?.role_code || (user as any)?.role;
 
   if (!isAuthenticated || !user) {
     return children; // Let RouteGuard handle unauthenticated

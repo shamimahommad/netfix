@@ -14,6 +14,12 @@ require_once __DIR__ . '/../../lib/routeros_api.class.php';
 
 try {
     $user = AuthMiddleware::requireAuth();
+    $role = strtolower(trim($user['role'] ?? ''));
+    if (!in_array($role, ['saas_admin', 'admin', 'manager', 'isp_admin', 'tenant_admin', 'super_admin'], true)) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'status' => 'error', 'message' => 'Access denied']);
+        exit;
+    }
 } catch (\Throwable $e) {
     http_response_code(401);
     echo json_encode(['success' => false, 'status' => 'error', 'message' => 'Unauthorized']);

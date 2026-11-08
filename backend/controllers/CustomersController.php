@@ -1311,6 +1311,11 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
 
     public static function importBatch(): void {
         $user = AuthMiddleware::requireAuth();
+        $role = strtolower(trim($user['role'] ?? ''));
+        if (!in_array($role, ['saas_admin', 'admin', 'manager', 'isp_admin', 'tenant_admin', 'super_admin'], true)) {
+            Response::error('Access denied. Customer import is restricted to ISP administrators only.', 403);
+            return;
+        }
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 

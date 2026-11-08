@@ -11,8 +11,18 @@ require_once __DIR__ . '/../lib/RouterosAPI.php';
 require_once __DIR__ . '/../lib/TenantSequenceService.php';
 
 class NetworkController {
+    public static function requireAdminOrCompanyRole(array $user): void {
+        $role = strtolower(trim($user['role'] ?? ''));
+        $allowed = ['saas_admin', 'admin', 'manager', 'isp_admin', 'tenant_admin', 'super_admin'];
+        if (!in_array($role, $allowed, true)) {
+            Response::error('Access denied. Network and system management is restricted to ISP administrators only.', 403);
+            exit;
+        }
+    }
+
     public static function index(): void {
         $user = AuthMiddleware::requireAuth();
+        self::requireAdminOrCompanyRole($user);
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
@@ -503,7 +513,8 @@ class NetworkController {
     }
 
     public static function testConnection(): void {
-        AuthMiddleware::requireAuth();
+        $user = AuthMiddleware::requireAuth();
+        self::requireAdminOrCompanyRole($user);
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
 
         $testType = strtolower(trim($input['testType'] ?? 'ping'));
@@ -1561,6 +1572,7 @@ class NetworkController {
 
     public static function mikrotikImportPreview(): void {
         $user = AuthMiddleware::requireAuth();
+        self::requireAdminOrCompanyRole($user);
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
@@ -1702,6 +1714,7 @@ class NetworkController {
 
     public static function mikrotikImportConfirm(): void {
         $user = AuthMiddleware::requireAuth();
+        self::requireAdminOrCompanyRole($user);
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 

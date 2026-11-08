@@ -38,18 +38,20 @@ function getResellerWiseReportLabel(roleCode: string | undefined): string {
   return 'Reseller Wise Customers'; // admin, manager, tenant_admin, isp_admin
 }
 
-/** Network menu and Server-wise report are only for admin-level roles or SaaS admin inspecting tenant. */
-function canSeeNetwork(roleCode: string | undefined, userType?: string): boolean {
+/**
+ * Strict check for ISP Admin / Company-level roles.
+ * Returns true ONLY for: 'admin', 'manager', 'isp_admin', 'tenant_admin', 'saas_admin', 'super_admin' (or userType === 'saas').
+ * Returns FALSE for: 'reseller', 'sub_reseller', 'dealer', 'agent', 'customer', or any lower tier / undefined role.
+ */
+function isIspAdminRole(roleCode: string | undefined, userType?: string): boolean {
   if (userType === 'saas') return true;
-  const r = (roleCode ?? '').toLowerCase();
-  return r === 'admin' || r === 'manager' || r === 'isp_admin' || r === 'tenant_admin' || r === 'saas_admin';
-}
-
-/** Server Wise Customers report is restricted to ISP admin / company roles only */
-function canSeeServerWiseReport(roleCode: string | undefined, userType?: string): boolean {
-  if (userType === 'saas') return true;
-  const r = (roleCode ?? '').toLowerCase();
-  return r === 'admin' || r === 'manager' || r === 'isp_admin' || r === 'tenant_admin' || r === 'saas_admin' || r === 'super_admin';
+  const r = (roleCode ?? '').toLowerCase().trim();
+  if (!r) return false;
+  // Explicitly deny reseller and subordinate hierarchy roles
+  if (['reseller', 'sub_reseller', 'dealer', 'agent', 'customer'].includes(r)) {
+    return false;
+  }
+  return ['admin', 'manager', 'isp_admin', 'tenant_admin', 'saas_admin', 'super_admin'].includes(r);
 }
 
 export default function TenantLayout() {
@@ -59,6 +61,7 @@ export default function TenantLayout() {
 
   const sidebarItems: SidebarItem[] = useMemo(() => {
     const items: SidebarItem[] = [];
+    const canSeeAdminTabs = isIspAdminRole(user?.role_code || (user as any)?.role, user?.user_type);
 
     if (user?.user_type === 'saas') {
       items.push({
@@ -167,7 +170,7 @@ export default function TenantLayout() {
         submenu: [
           { label: getResellerWiseReportLabel(user?.role_code), path: '/dashboard/report/reseller-wise-customers' },
           { label: 'Area Wise Customers', path: '/dashboard/report/area-wise-customers' },
-          ...(canSeeServerWiseReport(user?.role_code || (user as any)?.role, user?.user_type)
+          ...(canSeeAdminTabs
             ? [{ label: 'Server Wise Customers', path: '/dashboard/report/server-wise-customers' }]
             : []),
           { label: 'Financial Statement / Ledger', path: '/dashboard/report/ledger' },
@@ -201,8 +204,8 @@ export default function TenantLayout() {
       ],
     });
 
-    // Network menu: only for admin / manager / tenant_admin / isp_admin / saas_admin
-    if (canSeeNetwork(user?.role_code || (user as any)?.role, user?.user_type)) {
+    // Network menu: ONLY for ISP Admin / company roles (hidden for reseller and lower tiers)
+    if (canSeeAdminTabs) {
       const networkSubmenu: SidebarItem['submenu'] = [
         { label: 'Mikrotik', path: '/dashboard/network/mikrotik' },
         { label: 'OLT', path: '/dashboard/network/olt' },
@@ -221,13 +224,16 @@ export default function TenantLayout() {
       });
     }
 
-    items.push({
-      label: 'Settings',
-      icon: <SettingsIcon />,
-      submenu: [
-        { label: 'Import', path: '/dashboard/settings/import' },
-      ],
-    });
+    // Settings menu: ONLY for ISP Admin / company roles (hidden for reseller and lower tiers)
+    if (canSeeAdminTabs) {
+      items.push({
+        label: 'Settings',
+        icon: <SettingsIcon />,
+        submenu: [
+          { label: 'Import', path: '/dashboard/settings/import' },
+        ],
+      });
+    }
 
     return items;
   }, [isMapEnabled, isMonitoringEnabled, isSmsEnabled, resellerLabels.menu, resellerLabels.list, user?.role_code, (user as any)?.role, user?.user_type]);

@@ -41,6 +41,7 @@ import { dashboardService, DashboardStats, DashboardCharts, RecentActivityItem }
 import { billingService, InvoiceDto } from '@/services/billing.service';
 import { formatInvoiceIdDisplay } from '@/lib/formatInvoiceId';
 import { useTenantStore } from '@/stores/tenantStore';
+import { useAuthStore } from '@/stores/authStore';
 import PageHeader from '@/components/common/PageHeader';
 
 type BillingAccountRow = {
@@ -51,6 +52,10 @@ type BillingAccountRow = {
 };
 
 export default function TenantDashboard() {
+  const { user } = useAuthStore();
+  const role = (user?.role_code || (user as any)?.role || '').toLowerCase();
+  const isIspAdmin = user?.user_type === 'saas' || ['admin', 'manager', 'isp_admin', 'tenant_admin', 'saas_admin', 'super_admin'].includes(role);
+
   const [stats, setStats] = useState<DashboardStats>({
     totalCustomers: 0,
     totalActive: 0,
@@ -1444,76 +1449,78 @@ export default function TenantDashboard() {
         </div>
       </div>
 
-      {/* 7. Network Infrastructure Quick Links (New Added Section) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Server className="w-4 h-4 text-slate-500" />
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-              Infrastructure & System Shortcuts
-            </h3>
+      {/* 7. Network Infrastructure Quick Links (ISP Admin only) */}
+      {isIspAdmin && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Server className="w-4 h-4 text-slate-500" />
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                Infrastructure & System Shortcuts
+              </h3>
+            </div>
+            <span className="text-xs text-slate-400">Quick jump</span>
           </div>
-          <span className="text-xs text-slate-400">Quick jump</span>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard/network/mikrotik')}
+              className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 hover:bg-blue-50/50 dark:hover:bg-blue-900/20 hover:border-blue-200 dark:hover:border-blue-800 transition-all text-left"
+            >
+              <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                <Server className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-900 dark:text-white truncate">MikroTik Routers</p>
+                <p className="text-[11px] text-slate-400 truncate">Manage NAS & API</p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard/network/olt')}
+              className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20 hover:border-emerald-200 dark:hover:border-emerald-800 transition-all text-left"
+            >
+              <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                <Activity className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-900 dark:text-white truncate">OLT & PON</p>
+                <p className="text-[11px] text-slate-400 truncate">Fiber optical lines</p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard/service-area/areas')}
+              className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 hover:bg-purple-50/50 dark:hover:bg-purple-900/20 hover:border-purple-200 dark:hover:border-purple-800 transition-all text-left"
+            >
+              <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                <Layers className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-900 dark:text-white truncate">Coverage Areas</p>
+                <p className="text-[11px] text-slate-400 truncate">Zones & sub-areas</p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard/reseller')}
+              className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 hover:bg-amber-50/50 dark:hover:bg-amber-900/20 hover:border-amber-200 dark:hover:border-amber-800 transition-all text-left"
+            >
+              <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                <Users className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-900 dark:text-white truncate">Resellers & POP</p>
+                <p className="text-[11px] text-slate-400 truncate">Sub-networks</p>
+              </div>
+            </button>
+          </div>
         </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <button
-            type="button"
-            onClick={() => navigate('/dashboard/network/mikrotik')}
-            className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 hover:bg-blue-50/50 dark:hover:bg-blue-900/20 hover:border-blue-200 dark:hover:border-blue-800 transition-all text-left"
-          >
-            <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-              <Server className="w-4 h-4" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-bold text-slate-900 dark:text-white truncate">MikroTik Routers</p>
-              <p className="text-[11px] text-slate-400 truncate">Manage NAS & API</p>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => navigate('/dashboard/network/olt')}
-            className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20 hover:border-emerald-200 dark:hover:border-emerald-800 transition-all text-left"
-          >
-            <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-              <Activity className="w-4 h-4" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-bold text-slate-900 dark:text-white truncate">OLT & PON</p>
-              <p className="text-[11px] text-slate-400 truncate">Fiber optical lines</p>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => navigate('/dashboard/service-area/areas')}
-            className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 hover:bg-purple-50/50 dark:hover:bg-purple-900/20 hover:border-purple-200 dark:hover:border-purple-800 transition-all text-left"
-          >
-            <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
-              <Layers className="w-4 h-4" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-bold text-slate-900 dark:text-white truncate">Coverage Areas</p>
-              <p className="text-[11px] text-slate-400 truncate">Zones & sub-areas</p>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => navigate('/dashboard/reseller')}
-            className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 hover:bg-amber-50/50 dark:hover:bg-amber-900/20 hover:border-amber-200 dark:hover:border-amber-800 transition-all text-left"
-          >
-            <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
-              <Users className="w-4 h-4" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-bold text-slate-900 dark:text-white truncate">Resellers & POP</p>
-              <p className="text-[11px] text-slate-400 truncate">Sub-networks</p>
-            </div>
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
