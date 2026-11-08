@@ -224,7 +224,9 @@ export default function TenantLayout() {
     items.push({
       label: 'Settings',
       icon: <SettingsIcon />,
-      path: '/dashboard/settings',
+      submenu: [
+        { label: 'Import', path: '/dashboard/settings/import' },
+      ],
     });
 
     return items;

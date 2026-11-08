@@ -159,6 +159,9 @@ if ($method === 'GET' && $uri === '/customers/reports/server-wise') {
 if ($method === 'POST' && $uri === '/customers/onboard') {
     CustomersController::onboard();
 }
+if ($method === 'POST' && $uri === '/customers/import-batch') {
+    CustomersController::importBatch();
+}
 if ($method === 'POST' && $uri === '/customers') {
     CustomersController::create();
 }
@@ -458,6 +461,12 @@ if ($method === 'GET' && preg_match('#^/monitoring/servers/([^/]+)/interfaces$#'
 }
 if ($method === 'GET' && ($uri === '/network/mikrotik/pppoe-logs' || $uri === '/network/pppoe-logs')) {
     NetworkController::pppoeLogs();
+}
+if ($method === 'GET' && $uri === '/network/mikrotik/import-preview') {
+    NetworkController::mikrotikImportPreview();
+}
+if ($method === 'POST' && $uri === '/network/mikrotik/import-confirm') {
+    NetworkController::mikrotikImportConfirm();
 }
 
 // ---------------------------------------------------------------------

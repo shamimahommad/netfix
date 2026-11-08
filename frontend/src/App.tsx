@@ -48,6 +48,7 @@ import TopupBalancePage from './pages/TopupBalancePage';
 import ResellerWiseCustomersPage from './pages/ResellerWiseCustomersPage';
 import MyPackagesPage from './pages/MyPackagesPage';
 import AreaWiseCustomersPage from './pages/AreaWiseCustomersPage';
+import ImportPage from './pages/ImportPage';
 import ServerWiseCustomersPage from './pages/ServerWiseCustomersPage';
 import InvoicesReportPage from './pages/InvoicesReportPage';
 import FinancialLedgerPage from './pages/FinancialLedgerPage';
@@ -268,7 +269,8 @@ function AppContent() {
               <Route path="network" element={<Navigate to="/dashboard/network/mikrotik" replace />} />
               <Route path="service-area/areas" element={<ServiceAreasPage />} />
               <Route path="service-area/sub-areas" element={<SubAreasPage />} />
-              <Route path="settings" element={<PlaceholderPage title="Settings" description="Configure system settings and preferences." />} />
+              <Route path="settings" element={<Navigate to="/dashboard/settings/import" replace />} />
+              <Route path="settings/import" element={<AdminOnlyGuard><ImportPage /></AdminOnlyGuard>} />
               <Route path="profile" element={<ProfilePage />} />
               <Route path="change-password" element={<ChangePasswordPage />} />
               {/* Dashboard catch-all: 404 for unknown paths under /dashboard */}

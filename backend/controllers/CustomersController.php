@@ -1275,5 +1275,263 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             'message' => 'Customer account reactivated successfully',
         ]);
     }
+
+    public static function importBatch(): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+
+        $clients = $data['clients'] ?? [];
+        if (empty($clients) || !is_array($clients)) {
+            Response::error('No clients provided for import', 400);
+            return;
+        }
+
+        $importTarget = $data['importTarget'] ?? 'admin';
+        $importAs = strtolower($data['importAs'] ?? 'prepaid');
+        $globalExpiryDate = !empty($data['expiryDate']) ? trim($data['expiryDate']) : null;
+        $globalInvoiceMonth = !empty($data['invoiceMonth']) ? trim($data['invoiceMonth']) : date('Y-m');
+        $createInvoice = !empty($data['createInvoice']);
+        $defaultDeviceId = $data['defaultDeviceId'] ?? null;
+        $defaultPackageId = $data['defaultPackageId'] ?? null;
+        $defaultAreaId = $data['defaultAreaId'] ?? null;
+
+        $db = Database::getConnection();
+        $db->beginTransaction();
+
+        try {
+            // Determine owner
+            $ownerId = ($importTarget !== 'admin' && !empty($importTarget)) ? (int)$importTarget : (int)$user['user_id'];
+            $ownerUser = HierarchySecurityService::getUser($ownerId);
+            $ownerRole = $ownerUser['role'] ?? 'admin';
+            $ownerLevel = $ownerUser['role_level'] ?? 100;
+            $ownerPath = $ownerUser['hierarchy_path'] ?? "/{$ownerId}/";
+
+            // Pre-fetch routers for tenant
+            $routerStmt = $db->prepare("SELECT network_device_id, LOWER(device_name) as dname, management_ip FROM network_devices WHERE tenant_id = :tid OR :is_saas = 1");
+            $routerStmt->execute(['tid' => $tenantId, 'is_saas' => ($user['role'] === 'saas_admin' ? 1 : 0)]);
+            $routerMap = [];
+            $firstRouterId = null;
+            while ($r = $routerStmt->fetch()) {
+                if (!$firstRouterId) $firstRouterId = $r['network_device_id'];
+                $routerMap[trim($r['dname'])] = $r['network_device_id'];
+                $routerMap[trim($r['management_ip'])] = $r['network_device_id'];
+            }
+
+            // Pre-fetch packages for tenant
+            $pkgStmt = $db->prepare("SELECT access_profile_id, LOWER(name) as pname, LOWER(profile_name) as pprof, price FROM access_profiles WHERE tenant_id = :tid OR :is_saas = 1");
+            $pkgStmt->execute(['tid' => $tenantId, 'is_saas' => ($user['role'] === 'saas_admin' ? 1 : 0)]);
+            $pkgMap = [];
+            $pkgPrices = [];
+            $firstPkgId = null;
+            while ($p = $pkgStmt->fetch()) {
+                if (!$firstPkgId) $firstPkgId = $p['access_profile_id'];
+                $pkgMap[trim($p['pname'])] = $p['access_profile_id'];
+                $pkgPrices[$p['access_profile_id']] = (float)$p['price'];
+                if (!empty($p['pprof'])) {
+                    $pkgMap[trim($p['pprof'])] = $p['access_profile_id'];
+                }
+            }
+
+            // Pre-fetch areas
+            $areaStmt = $db->prepare("SELECT service_area_id, LOWER(name) as aname FROM service_areas WHERE tenant_id = :tid");
+            $areaStmt->execute(['tid' => $tenantId]);
+            $areaMap = [];
+            while ($a = $areaStmt->fetch()) {
+                $areaMap[trim($a['aname'])] = $a['service_area_id'];
+            }
+
+            // Pre-fetch existing pppoe usernames and customer codes
+            $existingUsernamesStmt = $db->prepare("SELECT LOWER(username) FROM customer_network_accounts WHERE tenant_id = :tid");
+            $existingUsernamesStmt->execute(['tid' => $tenantId]);
+            $existingUsernames = array_flip($existingUsernamesStmt->fetchAll(PDO::FETCH_COLUMN));
+
+            $existingCodesStmt = $db->prepare("SELECT customer_code FROM customers WHERE tenant_id = :tid");
+            $existingCodesStmt->execute(['tid' => $tenantId]);
+            $existingCodes = array_flip($existingCodesStmt->fetchAll(PDO::FETCH_COLUMN));
+
+            $imported = 0;
+            $skipped = 0;
+            $errors = [];
+
+            // Prepared statements
+            $stmtCustomer = $db->prepare("INSERT INTO customers 
+                (tenant_id, customer_code, customer_type, full_name, email, phone, installation_address, status, billing_status, connection_date, owner_id, owner_role, owner_role_level, owner_path, metadata, created_by)
+                VALUES (:tid, :code, :type, :name, :email, :phone, :addr, :status, 'Paid', :conn_date, :oid, :orole, :olevel, :opath, :meta, :created_by)");
+
+            $stmtService = $db->prepare("INSERT INTO customer_services 
+                (tenant_id, customer_id, access_profile_id, network_device_id, protocol, billing_cycle, status, starts_at, expires_at, created_by)
+                VALUES (:tid, :cid, :pid, :did, 'pppoe', 'monthly', 'active', :starts, :expires, :uid)");
+
+            $stmtNet = $db->prepare("INSERT INTO customer_network_accounts 
+                (tenant_id, customer_id, network_device_id, protocol, username, password, status, is_online)
+                VALUES (:tid, :cid, :did, 'pppoe', :uname, :pwd, 'active', 0)");
+
+            $stmtInvoice = $db->prepare("INSERT INTO invoices 
+                (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, created_by)
+                VALUES (:tid, :cid, :sid, :inv_num, :inv_date, DATE_ADD(:inv_date_calc, INTERVAL 10 DAY), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :uid)");
+
+            foreach ($clients as $idx => $row) {
+                $name = trim($row['name'] ?? $row['full_name'] ?? $row['client_name'] ?? '');
+                $pppoeId = trim($row['pppoe_id'] ?? $row['username'] ?? $row['user_id'] ?? '');
+                $rawPkg = trim($row['package'] ?? $row['plan'] ?? $row['package_name'] ?? '');
+                $phone = trim($row['mobile'] ?? $row['phone'] ?? $row['mobile_no'] ?? '');
+                $password = trim($row['pppoe_pass'] ?? $row['password'] ?? 'pass123');
+                $email = !empty($row['email']) ? trim($row['email']) : null;
+                $address = !empty($row['address']) ? trim($row['address']) : 'Dhaka, Bangladesh';
+                $status = !empty($row['status']) ? strtolower(trim($row['status'])) : 'active';
+                if (!in_array($status, ['active', 'suspended', 'pending', 'cancelled'])) $status = 'active';
+
+                if (empty($name) || empty($pppoeId)) {
+                    $errors[] = "Row #" . ($idx + 1) . ": Name and PPPoE Username are required";
+                    $skipped++;
+                    continue;
+                }
+
+                $lowerPppoe = strtolower($pppoeId);
+                if (isset($existingUsernames[$lowerPppoe])) {
+                    $errors[] = "Row #" . ($idx + 1) . " (User: {$pppoeId}): PPPoE username already exists in software";
+                    $skipped++;
+                    continue;
+                }
+
+                // Resolve package
+                $pkgId = $defaultPackageId;
+                if (!empty($rawPkg) && isset($pkgMap[strtolower($rawPkg)])) {
+                    $pkgId = $pkgMap[strtolower($rawPkg)];
+                } elseif (!empty($row['package_id']) && isset($pkgPrices[$row['package_id']])) {
+                    $pkgId = $row['package_id'];
+                }
+                if (!$pkgId) {
+                    $pkgId = $firstPkgId;
+                }
+                if (!$pkgId) {
+                    $errors[] = "Row #" . ($idx + 1) . " (User: {$pppoeId}): No valid package found in system";
+                    $skipped++;
+                    continue;
+                }
+
+                // Resolve router
+                $deviceId = $defaultDeviceId;
+                $rawRouter = trim($row['router'] ?? $row['server'] ?? '');
+                if (!empty($rawRouter) && isset($routerMap[strtolower($rawRouter)])) {
+                    $deviceId = $routerMap[strtolower($rawRouter)];
+                }
+                if (!$deviceId) {
+                    $deviceId = $firstRouterId;
+                }
+                if (!$deviceId) {
+                    $errors[] = "Row #" . ($idx + 1) . " (User: {$pppoeId}): No network router configured";
+                    $skipped++;
+                    continue;
+                }
+
+                // Resolve area
+                $areaId = $defaultAreaId;
+                $rawArea = trim($row['area'] ?? $row['zone'] ?? '');
+                if (!empty($rawArea) && isset($areaMap[strtolower($rawArea)])) {
+                    $areaId = $areaMap[strtolower($rawArea)];
+                }
+
+                // Generate customer code
+                $rawCode = preg_replace('/\D/', '', (string)($row['client_code'] ?? ''));
+                if (!empty($rawCode) && strlen($rawCode) >= 6 && !isset($existingCodes[$rawCode])) {
+                    $customerCode = $rawCode;
+                } else {
+                    $customerCode = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'customer', 6);
+                }
+                $existingCodes[$customerCode] = true;
+
+                // Dates
+                $joinDate = !empty($row['join_date']) ? date('Y-m-d', strtotime($row['join_date'])) : date('Y-m-d');
+                $rowExpiry = !empty($row['expiry_date']) ? date('Y-m-d', strtotime($row['expiry_date'])) : null;
+                $effectiveExpiry = $globalExpiryDate ?: ($rowExpiry ?: date('Y-m-d', strtotime('+30 days')));
+
+                // Insert customer
+                $stmtCustomer->execute([
+                    'tid' => $tenantId,
+                    'code' => $customerCode,
+                    'type' => 'individual',
+                    'name' => $name,
+                    'email' => $email,
+                    'phone' => $phone ?: '01700000000',
+                    'addr' => $address,
+                    'status' => $status,
+                    'conn_date' => $joinDate,
+                    'oid' => $ownerId,
+                    'orole' => $ownerRole,
+                    'olevel' => $ownerLevel,
+                    'opath' => $ownerPath,
+                    'meta' => json_encode([
+                        'service_area_id' => $areaId,
+                        'zone' => $row['zone'] ?? null,
+                        'onu_mac' => $row['onu_mac'] ?? null,
+                        'ip_address' => $row['ip_address'] ?? null,
+                        'remarks' => $row['remarks'] ?? null,
+                    ]),
+                    'created_by' => $user['user_id'],
+                ]);
+                $customerId = $db->lastInsertId();
+
+                // Insert customer service
+                $stmtService->execute([
+                    'tid' => $tenantId,
+                    'cid' => $customerId,
+                    'pid' => $pkgId,
+                    'did' => $deviceId,
+                    'starts' => $joinDate . ' 00:00:00',
+                    'expires' => $effectiveExpiry . ' 23:59:59',
+                    'uid' => $user['user_id'],
+                ]);
+                $serviceId = $db->lastInsertId();
+
+                // Insert network account
+                $stmtNet->execute([
+                    'tid' => $tenantId,
+                    'cid' => $customerId,
+                    'did' => $deviceId,
+                    'uname' => $pppoeId,
+                    'pwd' => $password,
+                ]);
+                $existingUsernames[$lowerPppoe] = true;
+
+                // Create invoice if postpaid + requested
+                if ($createInvoice) {
+                    $pkgPrice = $pkgPrices[$pkgId] ?? (!empty($row['monthly_bill']) ? (float)$row['monthly_bill'] : 0.00);
+                    $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 6);
+                    $invDate = !empty($globalInvoiceMonth) ? date('Y-m-d', strtotime($globalInvoiceMonth . '-01')) : date('Y-m-d');
+                    $stmtInvoice->execute([
+                        'tid' => $tenantId,
+                        'cid' => $customerId,
+                        'sid' => $serviceId,
+                        'inv_num' => $invNumber,
+                        'inv_date' => $invDate,
+                        'inv_date_calc' => $invDate,
+                        'sub' => $pkgPrice,
+                        'tot' => $pkgPrice,
+                        'paid' => $pkgPrice,
+                        'base' => $pkgPrice,
+                        'sell' => $pkgPrice,
+                        'uid' => $user['user_id'],
+                    ]);
+                }
+
+                $imported++;
+            }
+
+            $db->commit();
+
+            Response::json([
+                'success' => true,
+                'message' => "Successfully imported {$imported} client(s)" . ($skipped > 0 ? " ({$skipped} skipped)" : ""),
+                'importedCount' => $imported,
+                'skippedCount' => $skipped,
+                'errors' => $errors,
+            ]);
+        } catch (Throwable $e) {
+            $db->rollBack();
+            Response::error('Failed to import clients: ' . $e->getMessage(), 500);
+        }
+    }
 }
 

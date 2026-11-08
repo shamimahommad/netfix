@@ -1233,5 +1233,344 @@ class NetworkController {
             'status_message' => $connected ? 'Logs retrieved from live router' : 'Router unreachable or API disconnected',
         ]);
     }
+
+    public static function mikrotikImportPreview(): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $deviceId = trim($_GET['deviceId'] ?? '');
+        $profileFilter = trim($_GET['profile'] ?? '');
+        $hideExisting = filter_var($_GET['hideExisting'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+        if (empty($deviceId)) {
+            Response::error('Router device ID is required', 400);
+            return;
+        }
+
+        $devStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :did AND (tenant_id = :tid OR :is_saas = 1) LIMIT 1");
+        $devStmt->execute(['did' => $deviceId, 'tid' => $tenantId, 'is_saas' => (($user['role'] ?? '') === 'saas_admin' ? 1 : 0)]);
+        $router = $devStmt->fetch();
+
+        if (!$router) {
+            Response::error('Router not found or unauthorized', 404);
+            return;
+        }
+
+        // Fetch packages to map
+        $pkgStmt = $db->prepare("SELECT access_profile_id, name, profile_name, price FROM access_profiles WHERE (tenant_id = :tid OR :is_saas = 1) AND status = 'active'");
+        $pkgStmt->execute(['tid' => $tenantId, 'is_saas' => (($user['role'] ?? '') === 'saas_admin' ? 1 : 0)]);
+        $dbPackages = $pkgStmt->fetchAll();
+        $pkgMap = [];
+        foreach ($dbPackages as $p) {
+            $pkgMap[strtolower(trim($p['name']))] = $p;
+            if (!empty($p['profile_name'])) {
+                $pkgMap[strtolower(trim($p['profile_name']))] = $p;
+            }
+        }
+
+        // Fetch existing PPPoE accounts
+        $existingStmt = $db->prepare("SELECT LOWER(cna.username) as uname, c.customer_code, c.full_name, c.phone 
+            FROM customer_network_accounts cna 
+            JOIN customers c ON c.customer_id = cna.customer_id 
+            WHERE cna.tenant_id = :tid AND cna.protocol = 'pppoe'");
+        $existingStmt->execute(['tid' => $tenantId]);
+        $existingUsers = [];
+        while ($r = $existingStmt->fetch()) {
+            $existingUsers[$r['uname']] = $r;
+        }
+
+        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+        $api = MikrotikSyncService::connect($router, 4);
+
+        if (!$api) {
+            Response::error("Could not connect to MikroTik router {$router['device_name']} ({$router['management_ip']}:{$router['management_port']}). Please check router connection, IP reachable, and API port 8728.", 503);
+            return;
+        }
+
+        try {
+            $commParams = [];
+            if (!empty($profileFilter) && $profileFilter !== '-- All Profiles --' && $profileFilter !== 'all') {
+                $commParams['?profile'] = $profileFilter;
+            }
+            $secrets = $api->comm('/ppp/secret/print', $commParams);
+            $api->disconnect();
+
+            if (!is_array($secrets)) {
+                $secrets = [];
+            }
+
+            $users = [];
+            $newCount = 0;
+            $existingCount = 0;
+
+            foreach ($secrets as $sec) {
+                $username = trim($sec['name'] ?? '');
+                if (empty($username)) continue;
+
+                $lowerUname = strtolower($username);
+                $exists = isset($existingUsers[$lowerUname]);
+
+                if ($exists) {
+                    $existingCount++;
+                    if ($hideExisting) {
+                        continue;
+                    }
+                } else {
+                    $newCount++;
+                }
+
+                $comment = trim($sec['comment'] ?? '');
+                $password = trim($sec['password'] ?? '');
+                $profile = trim($sec['profile'] ?? 'default');
+                $callerId = trim($sec['caller-id'] ?? '');
+                $disabled = ($sec['disabled'] ?? 'false') === 'true';
+
+                // Try to extract name and phone from comment
+                $suggestedName = '';
+                $suggestedPhone = '';
+                if (!empty($comment)) {
+                    if (preg_match('/(01[3-9]\d{8})/', $comment, $pm)) {
+                        $suggestedPhone = $pm[1];
+                        $cleanComment = trim(str_replace($pm[1], '', $comment), " -:,_");
+                        if (!empty($cleanComment)) {
+                            $suggestedName = $cleanComment;
+                        }
+                    } else {
+                        $suggestedName = $comment;
+                    }
+                }
+                if (empty($suggestedName)) {
+                    $suggestedName = ucwords(str_replace(['.', '_', '-'], ' ', $username));
+                }
+
+                // Match package
+                $matchedPkg = $pkgMap[strtolower($profile)] ?? null;
+
+                $users[] = [
+                    'username' => $username,
+                    'password' => $password,
+                    'profile' => $profile,
+                    'comment' => $comment,
+                    'caller_id' => $callerId,
+                    'disabled' => $disabled,
+                    'exists_in_db' => $exists,
+                    'existing_info' => $exists ? $existingUsers[$lowerUname] : null,
+                    'suggested_name' => $suggestedName,
+                    'suggested_phone' => $suggestedPhone,
+                    'matched_package_id' => $matchedPkg ? $matchedPkg['access_profile_id'] : null,
+                    'matched_package_name' => $matchedPkg ? $matchedPkg['name'] : null,
+                    'matched_package_price' => $matchedPkg ? (float)$matchedPkg['price'] : 0,
+                ];
+            }
+
+            Response::json([
+                'success' => true,
+                'router' => [
+                    'id' => $router['network_device_id'],
+                    'name' => $router['device_name'],
+                    'ip' => $router['management_ip'],
+                ],
+                'total' => count($users),
+                'new_count' => $newCount,
+                'existing_count' => $existingCount,
+                'data' => $users,
+            ]);
+        } catch (Throwable $e) {
+            Response::error('Failed to query MikroTik secrets: ' . $e->getMessage(), 500);
+        }
+    }
+
+    public static function mikrotikImportConfirm(): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+
+        $deviceId = $data['deviceId'] ?? null;
+        $users = $data['users'] ?? [];
+
+        if (empty($deviceId) || empty($users) || !is_array($users)) {
+            Response::error('Router ID and users list are required', 400);
+            return;
+        }
+
+        $importAs = strtolower($data['importAs'] ?? 'prepaid');
+        $expiryDate = !empty($data['expiryDate']) ? trim($data['expiryDate']) : null;
+        $invoiceMonth = !empty($data['invoiceMonth']) ? trim($data['invoiceMonth']) : date('Y-m');
+        $generateInvoice = !empty($data['generateInvoice']);
+        $savePasswords = isset($data['savePasswords']) ? (bool)$data['savePasswords'] : true;
+        $doNotOverwrite = isset($data['doNotOverwriteExisting']) ? (bool)$data['doNotOverwriteExisting'] : true;
+        $resellerId = !empty($data['resellerId']) ? (int)$data['resellerId'] : null;
+        $areaId = $data['areaId'] ?? null;
+        $subAreaId = $data['subAreaId'] ?? null;
+        $defaultPackageId = $data['defaultPackageId'] ?? null;
+
+        $db = Database::getConnection();
+        $db->beginTransaction();
+
+        try {
+            // Validate router
+            $devStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :did AND (tenant_id = :tid OR :is_saas = 1) LIMIT 1");
+            $devStmt->execute(['did' => $deviceId, 'tid' => $tenantId, 'is_saas' => (($user['role'] ?? '') === 'saas_admin' ? 1 : 0)]);
+            $router = $devStmt->fetch();
+            if (!$router) {
+                $db->rollBack();
+                Response::error('Invalid network router', 404);
+                return;
+            }
+
+            // Determine owner
+            $ownerId = $resellerId ?: (int)$user['user_id'];
+            $ownerUser = HierarchySecurityService::getUser($ownerId);
+            $ownerRole = $ownerUser['role'] ?? 'admin';
+            $ownerLevel = $ownerUser['role_level'] ?? 100;
+            $ownerPath = $ownerUser['hierarchy_path'] ?? "/{$ownerId}/";
+
+            // Pre-fetch packages
+            $pkgStmt = $db->prepare("SELECT access_profile_id, LOWER(name) as pname, LOWER(profile_name) as pprof, price FROM access_profiles WHERE tenant_id = :tid OR :is_saas = 1");
+            $pkgStmt->execute(['tid' => $tenantId, 'is_saas' => (($user['role'] ?? '') === 'saas_admin' ? 1 : 0)]);
+            $pkgMap = [];
+            $pkgPrices = [];
+            $firstPkgId = null;
+            while ($p = $pkgStmt->fetch()) {
+                if (!$firstPkgId) $firstPkgId = $p['access_profile_id'];
+                $pkgMap[trim($p['pname'])] = $p['access_profile_id'];
+                $pkgPrices[$p['access_profile_id']] = (float)$p['price'];
+                if (!empty($p['pprof'])) {
+                    $pkgMap[trim($p['pprof'])] = $p['access_profile_id'];
+                }
+            }
+
+            // Existing accounts
+            $existingStmt = $db->prepare("SELECT LOWER(username) FROM customer_network_accounts WHERE tenant_id = :tid");
+            $existingStmt->execute(['tid' => $tenantId]);
+            $existingUsernames = array_flip($existingStmt->fetchAll(PDO::FETCH_COLUMN));
+
+            $stmtCustomer = $db->prepare("INSERT INTO customers 
+                (tenant_id, customer_code, customer_type, full_name, email, phone, installation_address, status, billing_status, connection_date, owner_id, owner_role, owner_role_level, owner_path, metadata, created_by)
+                VALUES (:tid, :code, 'individual', :name, :email, :phone, :addr, :status, 'Paid', CURDATE(), :oid, :orole, :olevel, :opath, :meta, :created_by)");
+
+            $stmtService = $db->prepare("INSERT INTO customer_services 
+                (tenant_id, customer_id, access_profile_id, network_device_id, protocol, billing_cycle, status, starts_at, expires_at, created_by)
+                VALUES (:tid, :cid, :pid, :did, 'pppoe', 'monthly', 'active', NOW(), :expires, :uid)");
+
+            $stmtNet = $db->prepare("INSERT INTO customer_network_accounts 
+                (tenant_id, customer_id, network_device_id, protocol, username, password, status, is_online)
+                VALUES (:tid, :cid, :did, 'pppoe', :uname, :pwd, 'active', 0)");
+
+            $stmtInvoice = $db->prepare("INSERT INTO invoices 
+                (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, created_by)
+                VALUES (:tid, :cid, :sid, :inv_num, :inv_date, DATE_ADD(:inv_date_calc, INTERVAL 10 DAY), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :uid)");
+
+            $imported = 0;
+            $skipped = 0;
+
+            foreach ($users as $u) {
+                $username = trim($u['username'] ?? '');
+                if (empty($username)) continue;
+
+                $lowerUname = strtolower($username);
+                if (isset($existingUsernames[$lowerUname])) {
+                    if ($doNotOverwrite) {
+                        $skipped++;
+                        continue;
+                    }
+                }
+
+                $name = trim($u['name'] ?? $u['suggested_name'] ?? ucwords(str_replace(['.', '_', '-'], ' ', $username)));
+                $phone = trim($u['phone'] ?? $u['suggested_phone'] ?? '01700000000');
+                $password = $savePasswords ? trim($u['password'] ?? 'pass123') : 'pass123';
+                $disabled = !empty($u['disabled']);
+                $custStatus = $disabled ? 'suspended' : 'active';
+
+                // Resolve package
+                $pkgId = $u['packageId'] ?? $u['matched_package_id'] ?? null;
+                if (!$pkgId && !empty($u['profile']) && isset($pkgMap[strtolower($u['profile'])])) {
+                    $pkgId = $pkgMap[strtolower($u['profile'])];
+                }
+                if (!$pkgId) {
+                    $pkgId = $defaultPackageId ?: $firstPkgId;
+                }
+
+                $customerCode = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'customer', 6);
+                $effectiveExpiry = $expiryDate ?: date('Y-m-d', strtotime('+30 days'));
+
+                $stmtCustomer->execute([
+                    'tid' => $tenantId,
+                    'code' => $customerCode,
+                    'name' => $name,
+                    'email' => null,
+                    'phone' => $phone,
+                    'addr' => 'Dhaka, Bangladesh',
+                    'status' => $custStatus,
+                    'oid' => $ownerId,
+                    'orole' => $ownerRole,
+                    'olevel' => $ownerLevel,
+                    'opath' => $ownerPath,
+                    'meta' => json_encode([
+                        'service_area_id' => $areaId,
+                        'sub_area_id' => $subAreaId,
+                        'mikrotik_caller_id' => $u['caller_id'] ?? null,
+                        'mikrotik_comment' => $u['comment'] ?? null,
+                    ]),
+                    'created_by' => $user['user_id'],
+                ]);
+                $customerId = $db->lastInsertId();
+
+                $stmtService->execute([
+                    'tid' => $tenantId,
+                    'cid' => $customerId,
+                    'pid' => $pkgId,
+                    'did' => $deviceId,
+                    'expires' => $effectiveExpiry . ' 23:59:59',
+                    'uid' => $user['user_id'],
+                ]);
+                $serviceId = $db->lastInsertId();
+
+                $stmtNet->execute([
+                    'tid' => $tenantId,
+                    'cid' => $customerId,
+                    'did' => $deviceId,
+                    'uname' => $username,
+                    'pwd' => $password,
+                ]);
+                $existingUsernames[$lowerUname] = true;
+
+                if ($generateInvoice && $pkgId) {
+                    $pkgPrice = $pkgPrices[$pkgId] ?? 0.00;
+                    $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 6);
+                    $invDate = !empty($invoiceMonth) ? date('Y-m-d', strtotime($invoiceMonth . '-01')) : date('Y-m-d');
+                    $stmtInvoice->execute([
+                        'tid' => $tenantId,
+                        'cid' => $customerId,
+                        'sid' => $serviceId,
+                        'inv_num' => $invNumber,
+                        'inv_date' => $invDate,
+                        'inv_date_calc' => $invDate,
+                        'sub' => $pkgPrice,
+                        'tot' => $pkgPrice,
+                        'paid' => $pkgPrice,
+                        'base' => $pkgPrice,
+                        'sell' => $pkgPrice,
+                        'uid' => $user['user_id'],
+                    ]);
+                }
+
+                $imported++;
+            }
+
+            $db->commit();
+
+            Response::json([
+                'success' => true,
+                'message' => "Successfully imported {$imported} PPPoE user(s) from MikroTik" . ($skipped > 0 ? " ({$skipped} existing users skipped)" : ""),
+                'importedCount' => $imported,
+                'skippedCount' => $skipped,
+            ]);
+        } catch (Throwable $e) {
+            $db->rollBack();
+            Response::error('Failed to import MikroTik users: ' . $e->getMessage(), 500);
+        }
+    }
 }
 
