@@ -12,7 +12,7 @@ import { ActionDropdown } from '@/components/ui/ActionDropdown';
 import { usePingStatus } from '@/hooks/usePingStatus';
 import { usePingStatusStore } from '@/stores/pingStatusStore';
 import { PageHeader } from '@/components/common';
-import { Lock, Zap } from 'lucide-react';
+import { Lock, Zap, Radio, Key, RefreshCw, X, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 const getStatusBadgeClass = (status: NetworkDevice['status']): string => {
   const classes: Record<NetworkDevice['status'], string> = {
@@ -128,6 +128,93 @@ export default function OltPage() {
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
+  // Pre-flight Connection & Login Testing States
+  const [isTestingPing, setIsTestingPing] = useState(false);
+  const [isTestingLogin, setIsTestingLogin] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    type: 'ping' | 'login';
+    success: boolean;
+    message: string;
+    latencyMs?: number | null;
+  } | null>(null);
+
+  const handleTestPing = async (targetForm: typeof formData) => {
+    if (!targetForm.managementIp) {
+      toast.error('Please enter Management IP address first');
+      return;
+    }
+    setIsTestingPing(true);
+    setTestResult(null);
+    try {
+      const res = await networkService.testDeviceConnection({
+        testType: 'ping',
+        deviceType: 'olt',
+        vendor: targetForm.vendor || 'vsol',
+        managementIp: targetForm.managementIp,
+        managementPort: targetForm.managementPort,
+        webPort: targetForm.webPort,
+      });
+      setTestResult({
+        type: 'ping',
+        success: res.success,
+        message: res.message,
+        latencyMs: res.latencyMs,
+      });
+      if (res.success) {
+        toast.success(res.message);
+      } else {
+        toast.error(res.message || 'Ping failed');
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.message || err.message || 'Ping test failed';
+      setTestResult({ type: 'ping', success: false, message: msg });
+      toast.error(msg);
+    } finally {
+      setIsTestingPing(false);
+    }
+  };
+
+  const handleTestLogin = async (targetForm: typeof formData) => {
+    if (!targetForm.managementIp) {
+      toast.error('Please enter Management IP address first');
+      return;
+    }
+    if (!targetForm.apiUsername) {
+      toast.error('Please enter CLI/API Username first');
+      return;
+    }
+    setIsTestingLogin(true);
+    setTestResult(null);
+    try {
+      const res = await networkService.testDeviceConnection({
+        testType: 'login',
+        deviceType: 'olt',
+        vendor: targetForm.vendor || 'vsol',
+        managementIp: targetForm.managementIp,
+        managementPort: targetForm.managementPort,
+        webPort: targetForm.webPort,
+        apiUsername: targetForm.apiUsername,
+        apiPassword: targetForm.apiPassword,
+      });
+      setTestResult({
+        type: 'login',
+        success: res.success,
+        message: res.message,
+      });
+      if (res.success) {
+        toast.success(res.message);
+      } else {
+        toast.error(res.message || 'Login test failed');
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.message || err.message || 'Login test failed';
+      setTestResult({ type: 'login', success: false, message: msg });
+      toast.error(msg);
+    } finally {
+      setIsTestingLogin(false);
+    }
+  };
+
   useEffect(() => {
     loadDevices();
   }, []);
@@ -159,7 +246,7 @@ export default function OltPage() {
     }
   };
 
-  const validateForm = (isEdit = false): boolean => {
+  const validateForm = (_isEdit = false): boolean => {
     const errors: Record<string, string> = {};
     if (!formData.deviceName.trim()) errors.deviceName = 'Device name is required';
     if (!formData.managementIp.trim()) {
@@ -403,17 +490,15 @@ export default function OltPage() {
       isProduction: true,
     });
     setFormErrors({});
+    setTestResult(null);
+    setIsTestingPing(false);
+    setIsTestingLogin(false);
     networkService.getNextDeviceCode().then((res) => {
       if (res?.deviceCode) {
         setFormData((prev) => ({ ...prev, deviceCode: res.deviceCode }));
       }
     }).catch(() => {});
   };
-
-  const inputClass = (field: string) =>
-    `w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-teal-500 dark:focus:ring-teal-400 focus:border-teal-500 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 transition-all ${
-      formErrors[field] ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
-    }`;
 
   return (
     <div className="w-full min-w-0 space-y-6">
@@ -454,100 +539,150 @@ export default function OltPage() {
 
         {/* Add OLT Modal */}
         {showAddModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-              <div className="p-6 border-b border-slate-200 dark:border-slate-700">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold bg-gradient-to-r from-teal-600 to-cyan-600 dark:from-teal-400 dark:to-cyan-400 bg-clip-text text-transparent">
-                    Add OLT Device
-                  </h2>
-                  <button
-                    onClick={() => { setShowAddModal(false); resetForm(); }}
-                    className="p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"
-                  >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              <form onSubmit={handleAddSubmit} className="p-6 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl w-full max-w-2xl overflow-hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+              {/* Header */}
+              <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/60 dark:bg-slate-900/60">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center">
+                    <Zap className="w-5 h-5" />
+                  </div>
                   <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300">Device ID</label>
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                        <Lock className="w-3 h-3" /> System Locked (Unique)
+                    <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                      Add OLT Device
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-teal-50 dark:bg-teal-900/40 text-teal-600 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
+                        Optical Line Terminal
                       </span>
-                    </div>
+                    </h2>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Configure OLT hardware, vendor protocol and ports</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setShowAddModal(false); resetForm(); }}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Form Body */}
+              <form onSubmit={handleAddSubmit} className="p-5 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Device ID */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Device ID (System Locked)
+                    </label>
                     <div className="relative">
                       <input
                         type="text"
                         readOnly
                         tabIndex={-1}
                         value={formData.deviceCode || ''}
-                        className="w-full pl-10 pr-4 py-3 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none text-slate-800 dark:text-slate-200 font-mono font-bold tracking-wider cursor-not-allowed select-none shadow-inner"
-                        placeholder="Auto-generating (e.g. 300001)..."
+                        className="w-full pl-8 pr-3 py-1.5 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 font-mono text-xs font-bold tracking-wider cursor-not-allowed select-none"
+                        placeholder="Auto-generating..."
                       />
-                      <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <Lock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                     </div>
-                    <p className="mt-1 text-[11px] text-slate-400">Strictly numeric globally unique device ID (auto-assigned, cannot be edited).</p>
                   </div>
+
+                  {/* Device Name */}
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Device Name <span className="text-red-500">*</span></label>
-                    <input type="text" required value={formData.deviceName} onChange={(e) => setFormData((p) => ({ ...p, deviceName: e.target.value }))} className={inputClass('deviceName')} placeholder="e.g., Main OLT (Dhanmondi POP)" />
-                    {formErrors.deviceName && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.deviceName}</p>}
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Device Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.deviceName}
+                      onChange={(e) => setFormData((p) => ({ ...p, deviceName: e.target.value }))}
+                      className={`w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100 transition-all ${
+                        formErrors.deviceName ? 'border-red-500' : 'border-slate-200 dark:border-slate-700'
+                      }`}
+                      placeholder="e.g., Main OLT (Gulshan POP)"
+                    />
+                    {formErrors.deviceName && <p className="mt-0.5 text-[11px] text-red-500">{formErrors.deviceName}</p>}
                   </div>
+                </div>
+
+                {/* Vendor & PON Architecture Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">OLT Brand / Vendor <span className="text-red-500">*</span></label>
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      OLT Brand / Vendor <span className="text-red-500">*</span>
+                    </label>
                     <select
                       value={formData.vendor || 'vsol'}
                       onChange={(e) => setFormData((p) => ({ ...p, vendor: e.target.value }))}
-                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 font-medium"
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100 font-medium"
                     >
-                      <option value="btpon">TBS / BTPON (PTF-EP4X / PTF-EP8X Series)</option>
-                      <option value="focuscom">Focuscom (EP5800 / EPON Series)</option>
                       <option value="vsol">VSOL (V1600 Series EPON/GPON)</option>
                       <option value="bdcom">BDCOM (P3310, GP3600 Series)</option>
-                      <option value="huawei">Huawei (SmartAX MA5608T / MA5800)</option>
+                      <option value="btpon">BTPON / TBS (PTF Series)</option>
+                      <option value="focuscom">Focuscom (EP5800 Series)</option>
+                      <option value="huawei">Huawei (MA5608T / MA5800)</option>
                       <option value="zte">ZTE (C300 / C320)</option>
-                      <option value="cdata">CDATA (FD1104, FD1208 Series)</option>
+                      <option value="cdata">CDATA (FD1104, FD1208)</option>
                       <option value="syrotech">Syrotech</option>
-                      <option value="other">Generic / Other SNMP OLT</option>
+                      <option value="other">Generic / Other OLT</option>
                     </select>
                   </div>
+
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">PON Architecture</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <select
-                        value={formData.ponType || 'gpon'}
-                        onChange={(e) => setFormData((p) => ({ ...p, ponType: e.target.value }))}
-                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 font-medium text-sm"
-                      >
-                        <option value="gpon">GPON (2.5G/1.25G)</option>
-                        <option value="epon">EPON (1.25G/1.25G)</option>
-                        <option value="xgs-pon">XGS-PON (10G)</option>
-                      </select>
-                      <select
-                        value={formData.totalPonPorts || 8}
-                        onChange={(e) => setFormData((p) => ({ ...p, totalPonPorts: parseInt(e.target.value) || 8 }))}
-                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 font-medium text-sm"
-                      >
-                        <option value={4}>4 PON Ports</option>
-                        <option value={8}>8 PON Ports</option>
-                        <option value={16}>16 PON Ports</option>
-                        <option value={32}>32 PON Ports</option>
-                      </select>
-                    </div>
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      PON Type
+                    </label>
+                    <select
+                      value={formData.ponType || 'epon'}
+                      onChange={(e) => setFormData((p) => ({ ...p, ponType: e.target.value }))}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100 font-medium"
+                    >
+                      <option value="epon">EPON (1.25G)</option>
+                      <option value="gpon">GPON (2.5G/1.25G)</option>
+                      <option value="xgs-pon">XGS-PON (10G)</option>
+                    </select>
                   </div>
+
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Management IP <span className="text-red-500">*</span></label>
-                    <input type="text" required value={formData.managementIp} onChange={(e) => setFormData((p) => ({ ...p, managementIp: e.target.value }))} className={inputClass('managementIp')} placeholder="e.g., 192.168.1.10" />
-                    {formErrors.managementIp && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.managementIp}</p>}
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      PON Ports
+                    </label>
+                    <select
+                      value={formData.totalPonPorts || 8}
+                      onChange={(e) => setFormData((p) => ({ ...p, totalPonPorts: parseInt(e.target.value) || 8 }))}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100 font-medium"
+                    >
+                      <option value={4}>4 PON Ports</option>
+                      <option value={8}>8 PON Ports</option>
+                      <option value={16}>16 PON Ports</option>
+                      <option value={32}>32 PON Ports</option>
+                    </select>
                   </div>
+                </div>
+
+                {/* Network & Ports 3-column Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      {formData.vendor === 'bdcom' ? 'Web GUI Port (Optional for BDCOM)' : 'Management HTTP API Port'}
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Management IP <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.managementIp}
+                      onChange={(e) => setFormData((p) => ({ ...p, managementIp: e.target.value }))}
+                      className={`w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border rounded-xl font-mono text-sm outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100 transition-all ${
+                        formErrors.managementIp ? 'border-red-500' : 'border-slate-200 dark:border-slate-700'
+                      }`}
+                      placeholder="e.g., 192.168.1.10"
+                    />
+                    {formErrors.managementIp && <p className="mt-0.5 text-[11px] text-red-500">{formErrors.managementIp}</p>}
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Web API Port
                     </label>
                     <input
                       type="number"
@@ -555,73 +690,139 @@ export default function OltPage() {
                       max={65535}
                       value={formData.webPort ?? 80}
                       onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || 80 }))}
-                      className={inputClass('webPort')}
-                      placeholder={formData.vendor === 'bdcom' ? '1080 or leave default' : '80 or 1010'}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                      placeholder="80 (or 1010/2322)"
                     />
-                    <p className="mt-1 text-xs text-slate-500">
-                      {formData.vendor === 'bdcom' 
-                        ? 'BDCOM strictly uses Telnet CLI socket for high-speed sync. Web port is optional.' 
-                        : 'Default: 80 (or 1010 for VSOL, 2322 for Focuscom, 16148 for BTPON). Used internally by NetFix to sync ONUs & telemetry.'}
-                    </p>
                   </div>
+
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      Telnet / SSH CLI Port {formData.vendor === 'bdcom' && <span className="text-emerald-500 font-bold">(Primary for BDCOM Sync)</span>}
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Telnet / CLI Port {formData.vendor === 'bdcom' && <span className="text-emerald-500 font-bold">(BDCOM)</span>}
                     </label>
-                    <input type="number" min={1} max={65535} value={formData.managementPort ?? 23} onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23 }))} className={inputClass('managementPort')} />
-                    {formErrors.managementPort && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.managementPort}</p>}
-                    <p className="mt-1 text-xs text-slate-500">
-                      {formData.vendor === 'bdcom' 
-                        ? 'Default: 23 (or custom port like 1081). BDCOM connects via Telnet CLI directly on this port to fetch ONUs & telemetry.' 
-                        : 'Default: 23 (Telnet) or 22 (SSH)'}
-                    </p>
+                    <input
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={formData.managementPort ?? 23}
+                      onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23 }))}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                      placeholder="23 (or 1081)"
+                    />
                   </div>
+                </div>
+
+                {/* Credentials */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">CLI Username</label>
-                    <input type="text" value={formData.apiUsername || ''} onChange={(e) => setFormData((p) => ({ ...p, apiUsername: e.target.value }))} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100" placeholder="admin" />
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      CLI / API Username
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.apiUsername || ''}
+                      onChange={(e) => setFormData((p) => ({ ...p, apiUsername: e.target.value }))}
+                      className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                      placeholder="admin"
+                    />
                   </div>
+
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">CLI Password</label>
-                    <input type="password" value={formData.apiPassword || ''} onChange={(e) => setFormData((p) => ({ ...p, apiPassword: e.target.value }))} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100" placeholder="CLI Password" />
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      CLI / API Password
+                    </label>
+                    <input
+                      type="password"
+                      value={formData.apiPassword || ''}
+                      onChange={(e) => setFormData((p) => ({ ...p, apiPassword: e.target.value }))}
+                      className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                      placeholder="Enter password"
+                    />
                   </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">SNMP Community & Port</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <input
-                        type="text"
-                        value={formData.snmpCommunity || 'public'}
-                        onChange={(e) => setFormData((p) => ({ ...p, snmpCommunity: e.target.value }))}
-                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 text-sm"
-                        placeholder="public"
-                      />
-                      <input
-                        type="number"
-                        min={1}
-                        max={65535}
-                        value={formData.snmpPort ?? 161}
-                        onChange={(e) => setFormData((p) => ({ ...p, snmpPort: parseInt(e.target.value) || 161 }))}
-                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 text-sm"
-                        placeholder="161"
-                      />
+                </div>
+
+                {/* Pre-flight Testing & Verification Section */}
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-teal-500 animate-pulse"></div>
+                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        Pre-flight OLT Verification:
+                      </span>
                     </div>
-                    <p className="mt-1 text-xs text-slate-500">For optical power & ONU polling (default: public:161)</p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleTestPing(formData)}
+                        disabled={isTestingPing || isTestingLogin || !formData.managementIp}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isTestingPing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Radio className="w-3.5 h-3.5" />}
+                        <span>{isTestingPing ? 'Pinging...' : 'PING Test'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleTestLogin(formData)}
+                        disabled={isTestingPing || isTestingLogin || !formData.managementIp || !formData.apiUsername}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-teal-200 dark:border-teal-800 bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isTestingLogin ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Key className="w-3.5 h-3.5" />}
+                        <span>{isTestingLogin ? 'Checking...' : 'Login Test'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {testResult && (
+                    <div className={`mt-2 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between border ${
+                      testResult.success
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                        : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        {testResult.success ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+                        )}
+                        <span>{testResult.message}</span>
+                      </div>
+                      {testResult.latencyMs !== undefined && testResult.latencyMs !== null && (
+                        <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-white/70 dark:bg-slate-900/70">
+                          {testResult.latencyMs} ms
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Inline SNMP & Production Row */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 py-1.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">SNMP: {formData.snmpCommunity || 'public'}:{formData.snmpPort ?? 161}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Production Device</span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" checked={formData.isProduction || false} onChange={(e) => setFormData((p) => ({ ...p, isProduction: e.target.checked }))} className="sr-only peer" />
+                      <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all dark:border-slate-600 peer-checked:bg-teal-600"></div>
+                    </label>
                   </div>
                 </div>
-                <div className="flex items-center justify-between p-4 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-xl border border-emerald-100 dark:border-emerald-800">
-                  <div>
-                    <h3 className="font-semibold text-slate-900 dark:text-slate-100">Production Device</h3>
-                    <p className="text-sm text-slate-600 dark:text-slate-400">Mark as production-ready</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" checked={formData.isProduction || false} onChange={(e) => setFormData((p) => ({ ...p, isProduction: e.target.checked }))} className="sr-only peer" />
-                    <div className="w-14 h-7 bg-slate-200 dark:bg-slate-700 rounded-full peer peer-checked:bg-gradient-to-r peer-checked:from-emerald-600 peer-checked:to-teal-600 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:after:translate-x-7"></div>
-                  </label>
-                </div>
-                <div className="flex justify-end gap-4 pt-4 border-t border-slate-200 dark:border-slate-700">
-                  <button type="button" onClick={() => { setShowAddModal(false); resetForm(); }} className="px-6 py-3 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-slate-50 dark:hover:bg-slate-600">
+
+                {/* Form Actions Footer */}
+                <div className="flex items-center justify-end gap-3 pt-2.5 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => { setShowAddModal(false); resetForm(); }}
+                    className="px-4 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-all"
+                  >
                     Cancel
                   </button>
-                  <button type="submit" disabled={isSubmitting} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm hover:shadow active:scale-95 disabled:opacity-50 transition-all">
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="px-5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold rounded-xl transition-all shadow-sm hover:shadow active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
                     {isSubmitting ? 'Adding...' : 'Add OLT'}
                   </button>
                 </div>
@@ -632,144 +833,216 @@ export default function OltPage() {
 
         {/* Edit OLT Modal */}
         {showEditModal && editingDevice && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-              <div className="p-6 border-b border-slate-200 dark:border-slate-700">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold bg-gradient-to-r from-teal-600 to-cyan-600 dark:from-teal-400 dark:to-cyan-400 bg-clip-text text-transparent">
-                    Edit OLT Device
-                  </h2>
-                  <button onClick={() => { setShowEditModal(false); setEditingDevice(null); resetForm(); }} className="p-2 text-slate-500 hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700">
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
-                </div>
-              </div>
-              <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Device Name <span className="text-red-500">*</span></label>
-                    <input type="text" required value={formData.deviceName} onChange={(e) => setFormData((p) => ({ ...p, deviceName: e.target.value }))} className={inputClass('deviceName')} />
-                    {formErrors.deviceName && <p className="mt-1 text-xs text-red-600">{formErrors.deviceName}</p>}
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl w-full max-w-2xl overflow-hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+              <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/60 dark:bg-slate-900/60">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center">
+                    <Zap className="w-5 h-5" />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">OLT Brand / Vendor <span className="text-red-500">*</span></label>
+                    <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                      Edit OLT Device
+                    </h2>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Update OLT configuration and credentials</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setShowEditModal(false); setEditingDevice(null); resetForm(); }}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleEditSubmit} className="p-5 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Device Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.deviceName}
+                      onChange={(e) => setFormData((p) => ({ ...p, deviceName: e.target.value }))}
+                      className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                    />
+                    {formErrors.deviceName && <p className="mt-0.5 text-[11px] text-red-500">{formErrors.deviceName}</p>}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Management IP <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.managementIp}
+                      onChange={(e) => setFormData((p) => ({ ...p, managementIp: e.target.value }))}
+                      className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-sm outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                    />
+                    {formErrors.managementIp && <p className="mt-0.5 text-[11px] text-red-500">{formErrors.managementIp}</p>}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      OLT Vendor
+                    </label>
                     <select
                       value={formData.vendor || 'vsol'}
                       onChange={(e) => setFormData((p) => ({ ...p, vendor: e.target.value }))}
-                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 font-medium"
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
                     >
-                      <option value="btpon">TBS / BTPON (PTF-EP4X / PTF-EP8X Series)</option>
-                      <option value="focuscom">Focuscom (EP5800 / EPON Series)</option>
-                      <option value="vsol">VSOL (V1600 Series EPON/GPON)</option>
-                      <option value="bdcom">BDCOM (P3310, GP3600 Series)</option>
-                      <option value="huawei">Huawei (SmartAX MA5608T / MA5800)</option>
-                      <option value="zte">ZTE (C300 / C320)</option>
-                      <option value="cdata">CDATA (FD1104, FD1208 Series)</option>
+                      <option value="vsol">VSOL</option>
+                      <option value="bdcom">BDCOM</option>
+                      <option value="btpon">BTPON / TBS</option>
+                      <option value="focuscom">Focuscom</option>
+                      <option value="huawei">Huawei</option>
+                      <option value="zte">ZTE</option>
+                      <option value="cdata">CDATA</option>
                       <option value="syrotech">Syrotech</option>
-                      <option value="other">Generic / Other SNMP OLT</option>
+                      <option value="other">Other</option>
                     </select>
                   </div>
+
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">PON Architecture</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <select
-                        value={formData.ponType || 'gpon'}
-                        onChange={(e) => setFormData((p) => ({ ...p, ponType: e.target.value }))}
-                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 font-medium text-sm"
-                      >
-                        <option value="gpon">GPON (2.5G/1.25G)</option>
-                        <option value="epon">EPON (1.25G/1.25G)</option>
-                        <option value="xgs-pon">XGS-PON (10G)</option>
-                      </select>
-                      <select
-                        value={formData.totalPonPorts || 8}
-                        onChange={(e) => setFormData((p) => ({ ...p, totalPonPorts: parseInt(e.target.value) || 8 }))}
-                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 font-medium text-sm"
-                      >
-                        <option value={4}>4 PON Ports</option>
-                        <option value={8}>8 PON Ports</option>
-                        <option value={16}>16 PON Ports</option>
-                        <option value={32}>32 PON Ports</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Management IP <span className="text-red-500">*</span></label>
-                    <input type="text" required value={formData.managementIp} onChange={(e) => setFormData((p) => ({ ...p, managementIp: e.target.value }))} className={inputClass('managementIp')} />
-                    {formErrors.managementIp && <p className="mt-1 text-xs text-red-600">{formErrors.managementIp}</p>}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      {formData.vendor === 'bdcom' ? 'Web GUI Port (Optional for BDCOM)' : 'Management HTTP API Port'}
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Web Port
                     </label>
                     <input
                       type="number"
-                      min={1}
-                      max={65535}
                       value={formData.webPort ?? 80}
                       onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || 80 }))}
-                      className={inputClass('webPort')}
-                      placeholder={formData.vendor === 'bdcom' ? '1080 or leave default' : '80 or 1010'}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
                     />
-                    <p className="mt-1 text-xs text-slate-500">
-                      {formData.vendor === 'bdcom' 
-                        ? 'BDCOM strictly uses Telnet CLI socket for high-speed sync. Web port is optional.' 
-                        : 'Default: 80 (or 1010 for VSOL, 2322 for Focuscom, 16148 for BTPON). Used internally by NetFix to sync ONUs & telemetry.'}
-                    </p>
                   </div>
+
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      Telnet / SSH CLI Port {formData.vendor === 'bdcom' && <span className="text-emerald-500 font-bold">(Primary for BDCOM Sync)</span>}
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Telnet / CLI Port
                     </label>
-                    <input type="number" min={1} max={65535} value={formData.managementPort ?? 23} onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23 }))} className={inputClass('managementPort')} />
-                    <p className="mt-1 text-xs text-slate-500">
-                      {formData.vendor === 'bdcom' 
-                        ? 'Default: 23 (or custom port like 1081). BDCOM connects via Telnet CLI directly on this port to fetch ONUs & telemetry.' 
-                        : 'Default: 23 (Telnet) or 22 (SSH)'}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Username</label>
-                    <input type="text" value={formData.apiUsername || ''} onChange={(e) => setFormData((p) => ({ ...p, apiUsername: e.target.value }))} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-teal-500 outline-none text-slate-900 dark:text-slate-100" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Password (leave blank to keep)</label>
-                    <input type="password" value={formData.apiPassword || ''} onChange={(e) => setFormData((p) => ({ ...p, apiPassword: e.target.value }))} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-teal-500 outline-none text-slate-900 dark:text-slate-100" placeholder="Optional" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">SNMP Community & Port</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <input
-                        type="text"
-                        value={formData.snmpCommunity || 'public'}
-                        onChange={(e) => setFormData((p) => ({ ...p, snmpCommunity: e.target.value }))}
-                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 text-sm"
-                        placeholder="public"
-                      />
-                      <input
-                        type="number"
-                        min={1}
-                        max={65535}
-                        value={formData.snmpPort ?? 161}
-                        onChange={(e) => setFormData((p) => ({ ...p, snmpPort: parseInt(e.target.value) || 161 }))}
-                        className="w-full px-3 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-slate-100 text-sm"
-                        placeholder="161"
-                      />
-                    </div>
+                    <input
+                      type="number"
+                      value={formData.managementPort ?? 23}
+                      onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23 }))}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                    />
                   </div>
                 </div>
-                <div className="flex items-center justify-between p-4 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-xl border border-emerald-100 dark:border-emerald-800">
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <h3 className="font-semibold text-slate-900 dark:text-slate-100">Production Device</h3>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      CLI / API Username
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.apiUsername || ''}
+                      onChange={(e) => setFormData((p) => ({ ...p, apiUsername: e.target.value }))}
+                      className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Password (leave blank to keep current)
+                    </label>
+                    <input
+                      type="password"
+                      value={formData.apiPassword || ''}
+                      onChange={(e) => setFormData((p) => ({ ...p, apiPassword: e.target.value }))}
+                      className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                      placeholder="Leave blank to keep current"
+                    />
+                  </div>
+                </div>
+
+                {/* Pre-flight Testing & Verification Section */}
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-teal-500 animate-pulse"></div>
+                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        Connection Verification:
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleTestPing(formData)}
+                        disabled={isTestingPing || isTestingLogin || !formData.managementIp}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isTestingPing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Radio className="w-3.5 h-3.5" />}
+                        <span>{isTestingPing ? 'Pinging...' : 'PING Test'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleTestLogin(formData)}
+                        disabled={isTestingPing || isTestingLogin || !formData.managementIp || !formData.apiUsername}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-teal-200 dark:border-teal-800 bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isTestingLogin ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Key className="w-3.5 h-3.5" />}
+                        <span>{isTestingLogin ? 'Checking...' : 'Login Test'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {testResult && (
+                    <div className={`mt-2 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between border ${
+                      testResult.success
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                        : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        {testResult.success ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+                        )}
+                        <span>{testResult.message}</span>
+                      </div>
+                      {testResult.latencyMs !== undefined && testResult.latencyMs !== null && (
+                        <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-white/70 dark:bg-slate-900/70">
+                          {testResult.latencyMs} ms
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Inline Production Row */}
+                <div className="flex items-center justify-between px-3 py-1.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Mark as Production Device</span>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" checked={formData.isProduction || false} onChange={(e) => setFormData((p) => ({ ...p, isProduction: e.target.checked }))} className="sr-only peer" />
-                    <div className="w-14 h-7 bg-slate-200 dark:bg-slate-700 rounded-full peer peer-checked:bg-gradient-to-r peer-checked:from-emerald-600 peer-checked:to-teal-600 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:after:translate-x-7"></div>
+                    <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all dark:border-slate-600 peer-checked:bg-teal-600"></div>
                   </label>
                 </div>
-                <div className="flex justify-end gap-4 pt-4 border-t border-slate-200 dark:border-slate-700">
-                  <button type="button" onClick={() => { setShowEditModal(false); setEditingDevice(null); resetForm(); }} className="px-6 py-3 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-slate-50 dark:hover:bg-slate-600">Cancel</button>
-                  <button type="submit" disabled={isSubmitting} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm hover:shadow active:scale-95 disabled:opacity-50 transition-all">{isSubmitting ? 'Updating...' : 'Update OLT'}</button>
+
+                {/* Form Actions Footer */}
+                <div className="flex items-center justify-end gap-3 pt-2.5 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => { setShowEditModal(false); setEditingDevice(null); resetForm(); }}
+                    className="px-4 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="px-5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold rounded-xl transition-all shadow-sm hover:shadow active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSubmitting ? 'Updating...' : 'Update OLT'}
+                  </button>
                 </div>
               </form>
             </div>

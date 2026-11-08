@@ -58,12 +58,11 @@ if (empty($ip)) {
     exit("Router IP missing\n");
 }
 
-$api = new RouterosAPI();
-$api->timeout = 4;
-$api->attempts = 1;
+require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+$api = MikrotikSyncService::connect($router, 4);
 
 // CONNECT ONCE
-if (!$api->connect($ip, $user, $pass, $port)) {
+if (!$api) {
     $offlinePayload = [
         'success' => false,
         'status'  => 'offline',

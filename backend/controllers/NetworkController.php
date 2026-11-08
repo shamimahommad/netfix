@@ -77,6 +77,7 @@ class NetworkController {
         Response::json([
             'success' => true,
             'data' => $devices,
+            'devices' => $devices,
         ]);
     }
 
@@ -465,16 +466,14 @@ class NetworkController {
         $latencyMs = $probe['latencyMs'];
         $errorMessage = $probe['error'];
 
-        // If TCP port open on MikroTik router, verify credentials via RouterOS API
+        // If TCP port open on MikroTik router, verify credentials via RouterOS API or REST
         if ($probe['online'] && strtolower($device['device_type'] ?? '') === 'router' && !empty($device['api_username'])) {
             try {
-                require_once __DIR__ . '/../lib/RouterosAPI.php';
-                $api = new RouterosAPI();
-                $api->port = !empty($device['management_port']) ? (int)$device['management_port'] : 8728;
-                $api->timeout = 2;
-                if (!$api->connect($ip, $device['api_username'], $device['api_password'] ?? '')) {
+                require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+                $api = MikrotikSyncService::connect($device, 2);
+                if (!$api) {
                     $status = 'auth_failed';
-                    $errorMessage = 'TCP port connected, but RouterOS API authentication failed (invalid credentials)';
+                    $errorMessage = 'TCP port connected, but authentication failed (invalid credentials or service disabled)';
                 } else {
                     $api->disconnect();
                 }
@@ -503,6 +502,338 @@ class NetworkController {
         ]);
     }
 
+    public static function testConnection(): void {
+        AuthMiddleware::requireAuth();
+        $input = json_decode(file_get_contents('php://input'), true) ?: [];
+
+        $testType = strtolower(trim($input['testType'] ?? 'ping'));
+        $deviceType = strtolower(trim($input['deviceType'] ?? 'router'));
+        $vendor = strtolower(trim($input['vendor'] ?? ($deviceType === 'router' ? 'mikrotik' : 'vsol')));
+        $rawIp = trim($input['managementIp'] ?? '');
+        $username = trim($input['apiUsername'] ?? '');
+        $password = (string)($input['apiPassword'] ?? '');
+
+        // Sanitize IP: strip http://, https://, and trailing slashes
+        $ip = preg_replace('#^https?://#i', '', $rawIp);
+        $ip = rtrim($ip, '/');
+
+        if (empty($ip)) {
+            Response::error('Management IP address is required for testing', 400);
+            return;
+        }
+
+        $managementPort = !empty($input['managementPort']) ? (int)$input['managementPort'] : null;
+        $webPort = !empty($input['webPort']) ? (int)$input['webPort'] : null;
+        $winboxPort = !empty($input['winboxPort']) ? (int)$input['winboxPort'] : null;
+        $useSsl = !empty($input['useSsl']) || ($managementPort === 8729);
+        if ($useSsl && empty($managementPort)) {
+            $managementPort = 8729;
+        }
+
+        // ==========================================
+        // 1. PING TEST
+        // ==========================================
+        if ($testType === 'ping') {
+            $ports = [];
+            if ($deviceType === 'router' || $vendor === 'mikrotik') {
+                if ($managementPort) $ports[] = $managementPort;
+                if ($webPort) $ports[] = $webPort;
+                if ($winboxPort) $ports[] = $winboxPort;
+                if (empty($ports)) $ports = $useSsl ? [8729, 8291, 50000, 80] : [8728, 8729, 50000, 80, 8291];
+            } else {
+                if ($vendor === 'bdcom') {
+                    if ($managementPort) $ports[] = $managementPort;
+                    if ($webPort) $ports[] = $webPort;
+                    if (empty($ports)) $ports = [23, 1081, 80];
+                } else {
+                    if ($webPort) $ports[] = $webPort;
+                    if ($managementPort) $ports[] = $managementPort;
+                    if (empty($ports)) {
+                        $def = ($vendor === 'btpon') ? 16148 : (($vendor === 'focuscom') ? 2322 : 80);
+                        $ports = [$def, 80, 23];
+                    }
+                }
+            }
+
+            $probe = self::probeDevicePort($ip, $ports, 2.5);
+
+            if ($probe['online']) {
+                Response::json([
+                    'success' => true,
+                    'status' => 'online',
+                    'latencyMs' => $probe['latencyMs'],
+                    'port' => $probe['port'],
+                    'message' => "PING Success! Device reached at {$ip}:{$probe['port']} in {$probe['latencyMs']} ms.",
+                ]);
+                return;
+            } else {
+                Response::json([
+                    'success' => false,
+                    'status' => 'offline',
+                    'latencyMs' => null,
+                    'message' => "PING Failed: Host at {$ip} is not responding on checked ports (" . implode(', ', $ports) . ").",
+                    'error' => $probe['error'] ?? 'Connection timed out',
+                ]);
+                return;
+            }
+        }
+
+        // ==========================================
+        // 2. LOGIN TEST
+        // ==========================================
+        if ($testType === 'login') {
+            if (empty($username)) {
+                Response::error('Username is required for login test', 400);
+                return;
+            }
+
+            try {
+                if ($deviceType === 'router' || $vendor === 'mikrotik') {
+                    $apiType = strtolower(trim($input['apiType'] ?? ''));
+                    $isRest = ($apiType === 'rest' || $managementPort === 50000 || $managementPort === 80 || $managementPort === 443 || ($webPort > 0 && ($managementPort === $webPort || $managementPort === 0)));
+
+                    if ($isRest) {
+                        require_once __DIR__ . '/../lib/MikrotikRestClient.php';
+                        $targetPort = ($managementPort && $managementPort !== 8728 && $managementPort !== 8729) ? $managementPort : ($webPort ?: 80);
+                        $restClient = new MikrotikRestClient();
+                        $restClient->timeout = 5;
+                        if ($restClient->connect($ip, $username, $password, $targetPort)) {
+                            $identity = 'MikroTik';
+                            $idRes = $restClient->comm('/system/identity/print');
+                            if (!empty($idRes[0]['name'])) $identity = $idRes[0]['name'];
+
+                            $version = '';
+                            $board = '';
+                            $res = $restClient->comm('/system/resource/print');
+                            if (!empty($res[0]['version'])) $version = $res[0]['version'];
+                            if (!empty($res[0]['board-name'])) $board = $res[0]['board-name'];
+                            $restClient->disconnect();
+
+                            $details = [];
+                            if ($version) $details[] = "v{$version}";
+                            if ($board) $details[] = $board;
+                            $detailStr = !empty($details) ? ' (' . implode(', ', $details) . ')' : '';
+
+                            Response::json([
+                                'success' => true,
+                                'status' => 'authenticated',
+                                'message' => "Login Successful via REST API (port {$targetPort})! Connected to '{$identity}'{$detailStr}.",
+                                'data' => [
+                                    'identity' => $identity,
+                                    'version' => $version,
+                                    'board' => $board,
+                                    'protocol' => 'REST / www',
+                                ],
+                            ]);
+                            return;
+                        } else {
+                            Response::json([
+                                'success' => false,
+                                'status' => 'auth_failed',
+                                'message' => "REST API Login Failed on port {$targetPort}! " . ($restClient->error_str ?: 'Please verify username, password, or Web service.'),
+                            ]);
+                            return;
+                        }
+                    }
+
+                    // Otherwise try standard binary RouterosAPI
+                    require_once __DIR__ . '/../lib/RouterosAPI.php';
+                    $api = new RouterosAPI();
+                    $api->port = $managementPort ?: ($useSsl ? 8729 : 8728);
+                    $api->ssl = $useSsl || ($api->port === 8729);
+                    $api->timeout = 3;
+
+                    $connected = @$api->connect($ip, $username, $password);
+                    if ($connected) {
+                        $identity = 'MikroTik';
+                        try {
+                            $idRes = $api->comm('/system/identity/print');
+                            if (!empty($idRes[0]['name'])) $identity = $idRes[0]['name'];
+                        } catch (\Throwable $e) {}
+
+                        $version = '';
+                        $board = '';
+                        try {
+                            $res = $api->comm('/system/resource/print');
+                            if (!empty($res[0]['version'])) $version = $res[0]['version'];
+                            if (!empty($res[0]['board-name'])) $board = $res[0]['board-name'];
+                        } catch (\Throwable $e) {}
+
+                        $api->disconnect();
+
+                        $details = [];
+                        if ($version) $details[] = "v{$version}";
+                        if ($board) $details[] = $board;
+                        $detailStr = !empty($details) ? ' (' . implode(', ', $details) . ')' : '';
+
+                        Response::json([
+                            'success' => true,
+                            'status' => 'authenticated',
+                            'message' => "Login Successful! Connected to '{$identity}'{$detailStr}.",
+                            'data' => [
+                                'identity' => $identity,
+                                'version' => $version,
+                                'board' => $board,
+                            ],
+                        ]);
+                        return;
+                    }
+
+                    // Automatic Fallback: If binary API failed, check if webPort is set (e.g. 50000 or 80) and try REST API!
+                    if ($webPort > 0) {
+                        require_once __DIR__ . '/../lib/MikrotikRestClient.php';
+                        $restClient = new MikrotikRestClient();
+                        $restClient->timeout = 5;
+                        if ($restClient->connect($ip, $username, $password, $webPort)) {
+                            $identity = 'MikroTik';
+                            $idRes = $restClient->comm('/system/identity/print');
+                            if (!empty($idRes[0]['name'])) $identity = $idRes[0]['name'];
+
+                            $version = '';
+                            $board = '';
+                            $res = $restClient->comm('/system/resource/print');
+                            if (!empty($res[0]['version'])) $version = $res[0]['version'];
+                            if (!empty($res[0]['board-name'])) $board = $res[0]['board-name'];
+                            $restClient->disconnect();
+
+                            $details = [];
+                            if ($version) $details[] = "v{$version}";
+                            if ($board) $details[] = $board;
+                            $detailStr = !empty($details) ? ' (' . implode(', ', $details) . ')' : '';
+
+                            Response::json([
+                                'success' => true,
+                                'status' => 'authenticated',
+                                'message' => "Login Successful via REST API (port {$webPort})! Connected to '{$identity}'{$detailStr}.",
+                                'data' => [
+                                    'identity' => $identity,
+                                    'version' => $version,
+                                    'board' => $board,
+                                    'protocol' => 'REST / www',
+                                ],
+                            ]);
+                            return;
+                        }
+                    }
+
+                    Response::json([
+                        'success' => false,
+                        'status' => 'auth_failed',
+                        'message' => "Login Failed! Unable to authenticate on port {$api->port}. Check username/password or verify RouterOS API/Web service is enabled.",
+                    ]);
+                    return;
+                } else {
+                    // OLT Login test
+                    if ($vendor === 'bdcom') {
+                        require_once __DIR__ . '/../lib/BdcomOltClient.php';
+                        $port = $managementPort ?: ($webPort ?: 23);
+                        $client = new BdcomOltClient($ip, $port, $username, $password, 'telnet', 6);
+                        $ok = @$client->login();
+                        if ($ok) {
+                            $sys = $client->getSystemInfo(4);
+                            $client->disconnect();
+                            $model = $sys['model'] ?? 'BDCOM OLT';
+                            Response::json([
+                                'success' => true,
+                                'status' => 'authenticated',
+                                'message' => "Login Successful! Connected to {$model} via Telnet CLI.",
+                                'data' => ['model' => $model],
+                            ]);
+                            return;
+                        } else {
+                            Response::json([
+                                'success' => false,
+                                'status' => 'auth_failed',
+                                'message' => "Login Failed! Could not authenticate to BDCOM OLT via Telnet on port {$port}. Verify CLI username and password.",
+                            ]);
+                            return;
+                        }
+                    } elseif (in_array($vendor, ['btpon', 'tbs', 'ip-com', 'ipcom'])) {
+                        require_once __DIR__ . '/../lib/BtponOltClient.php';
+                        $port = $webPort ?: ($managementPort ?: 16148);
+                        $client = new BtponOltClient($ip, $port, $username, $password, 'http', 6);
+                        $ok = @$client->login();
+                        if ($ok) {
+                            $sys = $client->getSystemInfo(8);
+                            $model = $sys['model'] ?? 'BTPON EPON-OLT';
+                            Response::json([
+                                'success' => true,
+                                'status' => 'authenticated',
+                                'message' => "Login Successful! Connected to {$model} via Web Engine.",
+                                'data' => ['model' => $model],
+                            ]);
+                            return;
+                        } else {
+                            Response::json([
+                                'success' => false,
+                                'status' => 'auth_failed',
+                                'message' => "Login Failed! Could not authenticate with BTPON OLT Web API on port {$port}.",
+                            ]);
+                            return;
+                        }
+                    } elseif ($vendor === 'focuscom') {
+                        require_once __DIR__ . '/../lib/FocuscomOltClient.php';
+                        $port = $webPort ?: ($managementPort ?: 2322);
+                        $client = new FocuscomOltClient($ip, $port, $username, $password, 'http', 6);
+                        $ok = @$client->login();
+                        if ($ok) {
+                            $sys = $client->getSystemInfo(4);
+                            $model = $sys['model'] ?? 'Focuscom EP5800-04';
+                            Response::json([
+                                'success' => true,
+                                'status' => 'authenticated',
+                                'message' => "Login Successful! Connected to {$model}.",
+                                'data' => ['model' => $model],
+                            ]);
+                            return;
+                        } else {
+                            Response::json([
+                                'success' => false,
+                                'status' => 'auth_failed',
+                                'message' => "Login Failed! Could not authenticate with Focuscom OLT on port {$port}.",
+                            ]);
+                            return;
+                        }
+                    } else {
+                        // Default VSOL or others
+                        require_once __DIR__ . '/../lib/VsolOltClient.php';
+                        $port = $webPort ?: ($managementPort ?: 80);
+                        $proto = ($port == 443 || $port != 80) ? 'https' : 'http';
+                        $client = new VsolOltClient($ip, $port, $username, $password, $proto, 6);
+                        $ok = @$client->login();
+                        if ($ok) {
+                            $sys = $client->getSystemInfo(4);
+                            $model = $sys['model'] ?? 'VSOL OLT';
+                            Response::json([
+                                'success' => true,
+                                'status' => 'authenticated',
+                                'message' => "Login Successful! Connected to {$model} Web Management Interface.",
+                                'data' => ['model' => $model],
+                            ]);
+                            return;
+                        } else {
+                            Response::json([
+                                'success' => false,
+                                'status' => 'auth_failed',
+                                'message' => "Login Failed! Could not authenticate with VSOL OLT on port {$port}. Verify credentials and Web port.",
+                            ]);
+                            return;
+                        }
+                    }
+                }
+            } catch (\Throwable $e) {
+                Response::json([
+                    'success' => false,
+                    'status' => 'error',
+                    'message' => "Login Test Error: " . $e->getMessage(),
+                ]);
+                return;
+            }
+        }
+
+        Response::error('Invalid test type specified', 400);
+    }
+
     public static function getProfiles(string $deviceId): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
@@ -526,11 +857,9 @@ class NetworkController {
 
         if ($device && !empty($device['management_ip']) && !empty($device['api_username'])) {
                 try {
-                    $api = new RouterosAPI();
-                    $api->port = !empty($device['management_port']) ? (int)$device['management_port'] : 8728;
-                    $api->timeout = 2;
-                    $api->attempts = 1;
-                    if ($api->connect($device['management_ip'], $device['api_username'], $device['api_password'] ?? '')) {
+                    require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+                    $api = MikrotikSyncService::connect($device, 3);
+                    if ($api) {
                         $cmd = ($protocol === 'hotspot') ? '/ip/hotspot/user/profile/print' : '/ppp/profile/print';
                         $results = $api->comm($cmd);
                         $api->disconnect();
@@ -872,7 +1201,11 @@ class NetworkController {
 
         require_once __DIR__ . '/../lib/OltSyncService.php';
         $force = !empty($_GET['refresh']) && $_GET['refresh'] === 'true';
-        $data = OltSyncService::sync($db, $device, $force);
+        if ($force) {
+            $data = OltSyncService::sync($db, $device, true);
+        } else {
+            $data = OltSyncService::getLocalData($db, (int)$device['tenant_id'], (int)$device['network_device_id'], $device);
+        }
 
         Response::json([
             'success' => true,
@@ -1113,20 +1446,12 @@ class NetworkController {
             return;
         }
 
-        require_once __DIR__ . '/../lib/RouterosAPI.php';
-        $api = new RouterosAPI();
-        $api->port = (int)($routerFull['management_port'] ?: 8728);
-        $api->timeout = 3;
-
-        $connected = @$api->connect(
-            $routerFull['management_ip'],
-            $routerFull['api_username'] ?: 'admin',
-            $routerFull['api_password'] ?: ''
-        );
+        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+        $api = MikrotikSyncService::connect($routerFull, 4);
 
         $parsedLogs = [];
 
-        if ($connected) {
+        if ($api) {
             $rawLogs = $api->comm('/log/print');
             $api->disconnect();
 
@@ -1258,14 +1583,14 @@ class NetworkController {
         }
 
         // Fetch packages to map
-        $pkgStmt = $db->prepare("SELECT access_profile_id, name, profile_name, price FROM access_profiles WHERE (tenant_id = :tid OR :is_saas = 1) AND status = 'active'");
+        $pkgStmt = $db->prepare("SELECT access_profile_id, profile_code, profile_name, price FROM access_profiles WHERE (tenant_id = :tid OR :is_saas = 1) AND status = 'active'");
         $pkgStmt->execute(['tid' => $tenantId, 'is_saas' => (($user['role'] ?? '') === 'saas_admin' ? 1 : 0)]);
         $dbPackages = $pkgStmt->fetchAll();
         $pkgMap = [];
         foreach ($dbPackages as $p) {
-            $pkgMap[strtolower(trim($p['name']))] = $p;
-            if (!empty($p['profile_name'])) {
-                $pkgMap[strtolower(trim($p['profile_name']))] = $p;
+            $pkgMap[strtolower(trim($p['profile_name']))] = $p;
+            if (!empty($p['profile_code'])) {
+                $pkgMap[strtolower(trim($p['profile_code']))] = $p;
             }
         }
 
@@ -1326,22 +1651,14 @@ class NetworkController {
                 $callerId = trim($sec['caller-id'] ?? '');
                 $disabled = ($sec['disabled'] ?? 'false') === 'true';
 
-                // Try to extract name and phone from comment
-                $suggestedName = '';
-                $suggestedPhone = '';
-                if (!empty($comment)) {
-                    if (preg_match('/(01[3-9]\d{8})/', $comment, $pm)) {
-                        $suggestedPhone = $pm[1];
-                        $cleanComment = trim(str_replace($pm[1], '', $comment), " -:,_");
-                        if (!empty($cleanComment)) {
-                            $suggestedName = $cleanComment;
-                        }
-                    } else {
-                        $suggestedName = $comment;
-                    }
-                }
-                if (empty($suggestedName)) {
-                    $suggestedName = ucwords(str_replace(['.', '_', '-'], ' ', $username));
+                // Customer PPPoE username is the customer full_name
+                $suggestedName = $username;
+
+                // Default 11-digit phone number: '012' prefix + 8 random digits
+                $random8 = str_pad((string)mt_rand(10000000, 99999999), 8, '0', STR_PAD_LEFT);
+                $suggestedPhone = '012' . $random8;
+                if (!empty($comment) && preg_match('/(01[3-9]\d{8})/', $comment, $pm)) {
+                    $suggestedPhone = $pm[1];
                 }
 
                 // Match package
@@ -1352,6 +1669,8 @@ class NetworkController {
                     'password' => $password,
                     'profile' => $profile,
                     'comment' => $comment,
+                    'address' => $comment,
+                    'suggested_address' => $comment,
                     'caller_id' => $callerId,
                     'disabled' => $disabled,
                     'exists_in_db' => $exists,
@@ -1359,7 +1678,7 @@ class NetworkController {
                     'suggested_name' => $suggestedName,
                     'suggested_phone' => $suggestedPhone,
                     'matched_package_id' => $matchedPkg ? $matchedPkg['access_profile_id'] : null,
-                    'matched_package_name' => $matchedPkg ? $matchedPkg['name'] : null,
+                    'matched_package_name' => $matchedPkg ? $matchedPkg['profile_name'] : null,
                     'matched_package_price' => $matchedPkg ? (float)$matchedPkg['price'] : 0,
                 ];
             }
@@ -1427,7 +1746,7 @@ class NetworkController {
             $ownerPath = $ownerUser['hierarchy_path'] ?? "/{$ownerId}/";
 
             // Pre-fetch packages
-            $pkgStmt = $db->prepare("SELECT access_profile_id, LOWER(name) as pname, LOWER(profile_name) as pprof, price FROM access_profiles WHERE tenant_id = :tid OR :is_saas = 1");
+            $pkgStmt = $db->prepare("SELECT access_profile_id, LOWER(profile_name) as pname, LOWER(profile_code) as pcode, price FROM access_profiles WHERE tenant_id = :tid OR :is_saas = 1");
             $pkgStmt->execute(['tid' => $tenantId, 'is_saas' => (($user['role'] ?? '') === 'saas_admin' ? 1 : 0)]);
             $pkgMap = [];
             $pkgPrices = [];
@@ -1436,8 +1755,8 @@ class NetworkController {
                 if (!$firstPkgId) $firstPkgId = $p['access_profile_id'];
                 $pkgMap[trim($p['pname'])] = $p['access_profile_id'];
                 $pkgPrices[$p['access_profile_id']] = (float)$p['price'];
-                if (!empty($p['pprof'])) {
-                    $pkgMap[trim($p['pprof'])] = $p['access_profile_id'];
+                if (!empty($p['pcode'])) {
+                    $pkgMap[trim($p['pcode'])] = $p['access_profile_id'];
                 }
             }
 
@@ -1477,8 +1796,21 @@ class NetworkController {
                     }
                 }
 
-                $name = trim($u['name'] ?? $u['suggested_name'] ?? ucwords(str_replace(['.', '_', '-'], ' ', $username)));
-                $phone = trim($u['phone'] ?? $u['suggested_phone'] ?? '01700000000');
+                $name = trim($u['name'] ?? $u['suggested_name'] ?? $username);
+                if (empty($name)) {
+                    $name = $username;
+                }
+                $defaultPhone = '012' . str_pad((string)mt_rand(10000000, 99999999), 8, '0', STR_PAD_LEFT);
+                $phone = trim($u['phone'] ?? $u['suggested_phone'] ?? '');
+                if (empty($phone) || !preg_match('/^01\d{9}$/', $phone)) {
+                    $phone = $defaultPhone;
+                }
+
+                $address = trim($u['address'] ?? $u['suggested_address'] ?? $u['comment'] ?? '');
+                if (empty($address)) {
+                    $address = 'Dhaka, Bangladesh';
+                }
+
                 $password = $savePasswords ? trim($u['password'] ?? 'pass123') : 'pass123';
                 $disabled = !empty($u['disabled']);
                 $custStatus = $disabled ? 'suspended' : 'active';
@@ -1501,7 +1833,7 @@ class NetworkController {
                     'name' => $name,
                     'email' => null,
                     'phone' => $phone,
-                    'addr' => 'Dhaka, Bangladesh',
+                    'addr' => $address,
                     'status' => $custStatus,
                     'oid' => $ownerId,
                     'orole' => $ownerRole,

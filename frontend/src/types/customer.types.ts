@@ -33,6 +33,8 @@ export interface Customer {
   uptime_seconds?: number | null;
   upload_bytes?: number | null;
   download_bytes?: number | null;
+  last_offline_at?: string | null;
+  last_disconnect_reason?: string | null;
   session_start_time?: string | null;
   // Legacy fields for backward compatibility
   customerId?: string;

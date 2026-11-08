@@ -120,18 +120,10 @@ for ($i = 0; $i < 8; $i++) {
 }
 
 // 5. Fallback: Direct query if worker hasn't written yet
-$api = new RouterosAPI();
-$api->timeout = 4;
-$api->attempts = 1;
+require_once __DIR__ . '/../../lib/MikrotikSyncService.php';
+$api = MikrotikSyncService::connect($router, 4);
 
-$connected = false;
-try {
-    $connected = $api->connect($ip, $user, $pass, $port);
-} catch (\Throwable $err) {
-    $connected = false;
-}
-
-if (!$connected) {
+if (!$api) {
     echo json_encode([
         'success' => false,
         'status'  => 'offline',

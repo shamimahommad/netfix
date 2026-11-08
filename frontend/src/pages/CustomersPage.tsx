@@ -388,6 +388,24 @@ export default function CustomersPage() {
   const [sortedCustomers, setSortedCustomers] = useState<Customer[]>([]);
   const [isBulkRenewModalOpen, setIsBulkRenewModalOpen] = useState(false);
   const [bulkRenewDuration, setBulkRenewDuration] = useState<string>('full_month');
+  const [isSyncingSessions, setIsSyncingSessions] = useState(false);
+
+  const handleSyncOnlineSessions = async () => {
+    setIsSyncingSessions(true);
+    try {
+      const res = await customersService.syncOnlineSessions();
+      if (res.success) {
+        toast.success(res.message || 'Synced active sessions successfully');
+        await loadCustomers();
+      } else {
+        toast.error(res.message || 'Failed to sync sessions');
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err.message || 'Failed to sync sessions');
+    } finally {
+      setIsSyncingSessions(false);
+    }
+  };
 
   const BULK_RENEW_OPTIONS = [
     { value: 'full_month', label: 'Full Month' },
@@ -661,7 +679,7 @@ export default function CustomersPage() {
     try {
       const filters: any = {
         page: 1,
-        limit: 1000,
+        limit: (type === 'online' || type === 'offline') ? 3000 : 1000,
       };
 
       // For online/offline types, don't use statusFilter (it's not a valid status)
@@ -707,7 +725,7 @@ export default function CustomersPage() {
       }
 
       setCustomers(filteredCustomers);
-      setTotal(filteredCustomers.length);
+      setTotal(response.meta?.total ?? filteredCustomers.length);
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to load customers. Please try again.';
       setError(errorMessage);
@@ -766,17 +784,18 @@ export default function CustomersPage() {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Format traffic: MB or GB. Use "—" for missing; never show 0 as fake value.
+  // Format traffic: B, KB, MB, or GB. Use "—" for missing; never show empty.
   const formatTraffic = (bytes: number | null | undefined): string => {
     if (bytes == null) return '—';
     const num = Number(bytes);
-    if (isNaN(num) || num <= 0) return '0 GB';
+    if (isNaN(num) || num <= 0) return '0 B';
     const gb = num / (1024 * 1024 * 1024);
     if (gb >= 1) return `${gb.toFixed(2)} GB`;
     const mb = num / (1024 * 1024);
-    if (mb >= 1) return `${gb.toFixed(2)} GB (${mb.toFixed(0)} MB)`;
+    if (mb >= 1) return `${mb.toFixed(1)} MB`;
     const kb = num / 1024;
-    return `${(num / (1024 * 1024 * 1024)).toFixed(3)} GB (${kb.toFixed(0)} KB)`;
+    if (kb >= 1) return `${kb.toFixed(0)} KB`;
+    return `${num} B`;
   };
 
   // Calculate remaining days from expiry date (Lifetime = null)
@@ -1303,17 +1322,32 @@ export default function CustomersPage() {
         subtitle={customerType.description}
         badge={`${total} ${type === 'online' ? (total === 1 ? 'Online' : 'Online') : type === 'offline' ? (total === 1 ? 'Offline' : 'Offline') : (total === 1 ? 'Customer' : 'Customers')}`}
         actions={
-          permissions.canCreateCustomer ? (
-            <button
-              onClick={() => navigate('/dashboard/customers/add')}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-lg transition-all shadow-sm active:scale-95"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Add Customer
-            </button>
-          ) : undefined
+          <div className="flex items-center gap-2">
+            {type === 'online' && (
+              <button
+                onClick={handleSyncOnlineSessions}
+                disabled={isSyncingSessions}
+                className="inline-flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm rounded-lg transition-all shadow-sm active:scale-95 disabled:opacity-60 cursor-pointer"
+                title="Sync live PPPoE sessions from MikroTik routers"
+              >
+                <svg className={`w-4 h-4 ${isSyncingSessions ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span>{isSyncingSessions ? 'Syncing...' : 'Sync Active Sessions'}</span>
+              </button>
+            )}
+            {permissions.canCreateCustomer && (
+              <button
+                onClick={() => navigate('/dashboard/customers/add')}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-lg transition-all shadow-sm active:scale-95"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Add Customer
+              </button>
+            )}
+          </div>
         }
       />
 
@@ -1651,6 +1685,7 @@ export default function CustomersPage() {
                     const username = customer.username || '—';
                     const isSelected = selectedCustomers.has(customerId);
                     const remainingDays = calculateRemainingDays(customer.expiry_date);
+                    const isOnline = Boolean(customer.online_status);
                     
                     return (
                       <tr
@@ -1682,7 +1717,9 @@ export default function CustomersPage() {
                             </td>
                             <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
                               <div className="flex items-center gap-2">
-                                <UserIcon className="w-3.5 h-3.5 text-blue-500" />
+                                <span title={isOnline ? 'Online' : 'Offline'} className="inline-flex items-center">
+                                  <UserIcon className={`w-3.5 h-3.5 flex-shrink-0 transition-colors ${isOnline ? 'text-emerald-500 dark:text-emerald-400' : 'text-red-500 dark:text-red-500'}`} />
+                                </span>
                                 <button
                                   onClick={() => handleView(customerId)}
                                   className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline cursor-pointer transition-colors"
@@ -1735,9 +1772,9 @@ export default function CustomersPage() {
                               {formatTraffic(customer.download_bytes)}
                             </td>
                             <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5" title={customer.last_disconnect_reason ? `Reason: ${customer.last_disconnect_reason}` : undefined}>
                                 <CalendarIcon className="w-3.5 h-3.5 text-gray-500" />
-                                {customer.online_status ? '—' : formatDateTime(customer.last_logout_at)}
+                                <span>{formatDateTime(customer.last_logout_at || customer.last_offline_at || null)}</span>
                               </div>
                             </td>
                           </>
@@ -1755,7 +1792,9 @@ export default function CustomersPage() {
                             </td>
                             <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
                               <div className="flex items-center gap-2">
-                                <UserIcon className="w-3.5 h-3.5 text-blue-500" />
+                                <span title={isOnline ? 'Online' : 'Offline'} className="inline-flex items-center">
+                                  <UserIcon className={`w-3.5 h-3.5 flex-shrink-0 transition-colors ${isOnline ? 'text-emerald-500 dark:text-emerald-400' : 'text-red-500 dark:text-red-500'}`} />
+                                </span>
                                 <button
                                   onClick={() => handleView(customerId)}
                                   className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline cursor-pointer transition-colors"
@@ -2118,6 +2157,7 @@ export default function CustomersPage() {
                         const phone = customer.phone || customer.mobile || '—';
                         const username = customer.username || '—';
                         const isSelected = selectedCustomers.has(customerId);
+                        const isOnline = Boolean(customer.online_status);
                         
                         return (
                           <tr
@@ -2149,7 +2189,9 @@ export default function CustomersPage() {
                                 </td>
                                 <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
                                   <div className="flex items-center gap-2">
-                                    <UserIcon className="w-3.5 h-3.5 text-blue-500" />
+                                    <span title={isOnline ? 'Online' : 'Offline'} className="inline-flex items-center">
+                                      <UserIcon className={`w-3.5 h-3.5 flex-shrink-0 transition-colors ${isOnline ? 'text-emerald-500 dark:text-emerald-400' : 'text-red-500 dark:text-red-500'}`} />
+                                    </span>
                                     <button
                                       onClick={() => handleView(customerId)}
                                       className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline cursor-pointer transition-colors"
@@ -2202,9 +2244,9 @@ export default function CustomersPage() {
                                   {formatTraffic(customer.download_bytes)}
                                 </td>
                                 <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                  <div className="flex items-center gap-1.5">
+                                  <div className="flex items-center gap-1.5" title={customer.last_disconnect_reason ? `Reason: ${customer.last_disconnect_reason}` : undefined}>
                                     <CalendarIcon className="w-3.5 h-3.5 text-gray-500" />
-                                    {customer.online_status ? '—' : formatDateTime(customer.last_logout_at)}
+                                    <span>{formatDateTime(customer.last_logout_at || customer.last_offline_at || null)}</span>
                                   </div>
                                 </td>
                               </>
@@ -2222,7 +2264,9 @@ export default function CustomersPage() {
                                 </td>
                                 <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
                                   <div className="flex items-center gap-2">
-                                    <UserIcon className="w-3.5 h-3.5 text-blue-500" />
+                                    <span title={isOnline ? 'Online' : 'Offline'} className="inline-flex items-center">
+                                      <UserIcon className={`w-3.5 h-3.5 flex-shrink-0 transition-colors ${isOnline ? 'text-emerald-500 dark:text-emerald-400' : 'text-red-500 dark:text-red-500'}`} />
+                                    </span>
                                     <button
                                       onClick={() => handleView(customerId)}
                                       className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline cursor-pointer transition-colors"

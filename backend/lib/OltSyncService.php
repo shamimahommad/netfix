@@ -24,8 +24,8 @@ class OltSyncService {
         $now = time();
         $ageSeconds = $now - $lastSyncTime;
 
-        // If not forced and synced recently (within interval), return stored data instantly
-        if (!$force && $lastSyncTime > 0 && $ageSeconds < $intervalSeconds) {
+        // If not explicitly forced, always return local stored DB data instantly in < 5ms
+        if (!$force) {
             return self::getLocalData($db, $tenantId, $deviceId, $oltDev);
         }
 

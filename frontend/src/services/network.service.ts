@@ -14,7 +14,36 @@ import {
   NetworkProtocol,
 } from '@/types/network.types';
 
+export interface TestDeviceConnectionPayload {
+  testType: 'ping' | 'login';
+  deviceType: 'router' | 'olt';
+  vendor?: string;
+  managementIp: string;
+  managementPort?: number;
+  webPort?: number;
+  winboxPort?: number;
+  useSsl?: boolean;
+  apiType?: 'api' | 'api-ssl' | 'rest';
+  apiUsername?: string;
+  apiPassword?: string;
+}
+
+export interface TestDeviceConnectionResponse {
+  success: boolean;
+  status: 'online' | 'offline' | 'authenticated' | 'auth_failed' | 'error';
+  message: string;
+  latencyMs?: number | null;
+  port?: number | null;
+  data?: any;
+  error?: string;
+}
+
 export const networkService = {
+  async testDeviceConnection(payload: TestDeviceConnectionPayload): Promise<TestDeviceConnectionResponse> {
+    const response = await api.post<TestDeviceConnectionResponse>('/network/devices/test-connection', payload);
+    return response.data;
+  },
+
   async createNetworkDevice(payload: CreateNetworkDevicePayload): Promise<CreateNetworkDeviceResponse> {
     const response = await api.post<CreateNetworkDeviceResponse>('/network/devices', payload);
     return response.data;

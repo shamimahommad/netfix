@@ -117,6 +117,7 @@ class SubscriberController {
             if ($router) {
                 $api = new RouterosAPI();
                 $api->port = (int)$router['api_port'];
+                $api->ssl = ($api->port === 8729 || !empty($router['use_ssl']));
                 if ($api->connect($router['ip_address'], $router['username'], $router['password'])) {
                     $api->comm('/ppp/secret/add', [
                         '=name=' . $pppoeUsername,
@@ -207,6 +208,7 @@ class SubscriberController {
         if (!empty($sub['ip_address'])) {
             $api = new RouterosAPI();
             $api->port = (int)$sub['api_port'];
+            $api->ssl = ($api->port === 8729 || !empty($sub['use_ssl']));
             if ($api->connect($sub['ip_address'], $sub['username'], $sub['r_pass'])) {
                 $api->comm('/ppp/secret/set', [
                     '=numbers=' . $sub['pppoe_username'],
@@ -238,6 +240,7 @@ class SubscriberController {
 
         $api = new RouterosAPI();
         $api->port = (int)$row['api_port'];
+        $api->ssl = ($api->port === 8729 || !empty($row['use_ssl']));
         if ($api->connect($row['ip_address'], $row['username'], $row['password'])) {
             $activeList = $api->comm('/ppp/active/print', ['?name=' . $row['pppoe_username']]);
             if (!empty($activeList)) {

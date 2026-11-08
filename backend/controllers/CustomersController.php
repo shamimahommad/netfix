@@ -16,11 +16,25 @@ class CustomersController {
         $db = Database::getConnection();
 
         $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
-        $limit = isset($_GET['limit']) ? max(1, min(100, (int)$_GET['limit'])) : 20;
+        $limit = isset($_GET['limit']) ? max(1, min(5000, (int)$_GET['limit'])) : 20;
         $offset = ($page - 1) * $limit;
 
         $where = ["c.tenant_id = :tid"];
         $params = ['tid' => $tenantId];
+
+        // Filter: type (online, offline, suspended, expiring-soon)
+        if (!empty($_GET['type'])) {
+            $type = strtolower(trim($_GET['type']));
+            if ($type === 'online') {
+                $where[] = "na.is_online = 1";
+            } elseif ($type === 'offline') {
+                $where[] = "(na.is_online = 0 OR na.is_online IS NULL)";
+            } elseif ($type === 'suspended') {
+                $where[] = "c.status = 'suspended'";
+            } elseif ($type === 'expiring-soon') {
+                $where[] = "c.status = 'active' AND cs.expires_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 7 DAY)";
+            }
+        }
 
         // Filter: status
         if (!empty($_GET['status']) && $_GET['status'] !== 'all') {
@@ -50,6 +64,19 @@ class CustomersController {
             $params['ownerId'] = $_GET['ownerId'];
         }
 
+        // Filter: serverId (network_device_id)
+        if (!empty($_GET['serverId']) && $_GET['serverId'] !== 'all') {
+            $where[] = "(cs.network_device_id = :srvId OR na.network_device_id = :srvId2)";
+            $params['srvId'] = $_GET['serverId'];
+            $params['srvId2'] = $_GET['serverId'];
+        }
+
+        // Filter: area
+        if (!empty($_GET['area']) && $_GET['area'] !== 'all') {
+            $where[] = "JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) = :areaId";
+            $params['areaId'] = $_GET['area'];
+        }
+
         // Strict Downward-Only Access Control via Materialized Path
         $callerRole = strtolower($user['role'] ?? '');
         $isLevel0 = in_array($callerRole, ['admin', 'isp_admin', 'manager', 'tenant_admin', 'saas_admin', 'super_admin'], true);
@@ -66,6 +93,7 @@ class CustomersController {
         $countStmt = $db->prepare("SELECT COUNT(DISTINCT c.customer_id) as total 
             FROM customers c 
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id 
+            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status = 'active'
             WHERE {$whereSql}");
         $countStmt->execute($params);
         $total = (int)$countStmt->fetchColumn();
@@ -89,6 +117,8 @@ class CustomersController {
             na.uptime_seconds,
             na.upload_bytes,
             na.download_bytes,
+            na.last_offline_at,
+            na.last_disconnect_reason,
             ap.profile_name as package_name,
             ap.price as package_price,
             cs.expires_at as expiry_date,
@@ -137,6 +167,9 @@ class CustomersController {
                 'uptime_seconds' => (int)($row['uptime_seconds'] ?? 0),
                 'upload_bytes' => (int)($row['upload_bytes'] ?? 0),
                 'download_bytes' => (int)($row['download_bytes'] ?? 0),
+                'last_offline_at' => $row['last_offline_at'],
+                'last_logout_at' => $row['last_offline_at'],
+                'last_disconnect_reason' => $row['last_disconnect_reason'],
                 'package_name' => $row['package_name'],
                 'package_price' => (float)($row['package_price'] ?? 0),
                 'bill_amount' => (float)($row['package_price'] ?? 0),
@@ -1532,6 +1565,22 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             $db->rollBack();
             Response::error('Failed to import clients: ' . $e->getMessage(), 500);
         }
+    }
+
+    public static function syncOnlineSessions(): void {
+        AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+        $routerId = !empty($_GET['router_id']) ? (int)$_GET['router_id'] : null;
+        $result = MikrotikSyncService::syncAllActiveSessions($db, $tenantId, $routerId);
+
+        Response::json([
+            'success' => true,
+            'message' => "Synchronized {$result['totalActive']} active sessions from connected routers ({$result['totalOnlineUpdated']} online).",
+            'data' => $result,
+        ]);
     }
 }
 

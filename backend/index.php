@@ -135,6 +135,9 @@ if ($method === 'GET' && $uri === '/dashboard/recent-activity') {
 // ---------------------------------------------------------------------
 // CUSTOMERS ROUTES
 // ---------------------------------------------------------------------
+if ($method === 'POST' && ($uri === '/customers/sync-online' || $uri === '/customers/sync-active-sessions' || $uri === '/network/sync-active-sessions')) {
+    CustomersController::syncOnlineSessions();
+}
 if ($method === 'GET' && $uri === '/customers') {
     CustomersController::index();
 }
@@ -419,6 +422,9 @@ if ($method === 'GET' && $uri === '/network/devices/dropdown') {
 }
 if ($method === 'GET' && $uri === '/network/devices/ping-status') {
     NetworkController::pingStatus();
+}
+if ($method === 'POST' && $uri === '/network/devices/test-connection') {
+    NetworkController::testConnection();
 }
 if ($method === 'POST' && $uri === '/network/devices') {
     NetworkController::create();

@@ -8,7 +8,7 @@ import { ActionDropdown } from '@/components/ui/ActionDropdown';
 import { usePingStatus } from '@/hooks/usePingStatus';
 import { usePingStatusStore } from '@/stores/pingStatusStore';
 import { PageHeader } from '@/components/common';
-import { Lock, Activity, Server, Cpu, HardDrive, RefreshCw, X, Users, Clock, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Lock, Activity, Server, Cpu, RefreshCw, X, Users, Clock, AlertTriangle, CheckCircle2, Radio, Key } from 'lucide-react';
 
 const getStatusBadgeClass = (status: NetworkDevice['status']): string => {
   const classes: Record<NetworkDevice['status'], string> = {
@@ -103,6 +103,100 @@ export default function MikroTikPage() {
     isProduction: false,
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  // Pre-flight Connection & Login Testing States
+  const [isTestingPing, setIsTestingPing] = useState(false);
+  const [isTestingLogin, setIsTestingLogin] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    type: 'ping' | 'login';
+    success: boolean;
+    message: string;
+    latencyMs?: number | null;
+  } | null>(null);
+  const [useSsl, setUseSsl] = useState<boolean>(false);
+  const [connMode, setConnMode] = useState<'api' | 'ssl' | 'rest'>('api');
+
+  const handleTestPing = async (targetForm: CreateNetworkDevicePayload) => {
+    if (!targetForm.managementIp) {
+      toast.error('Please enter Management IP address first');
+      return;
+    }
+    setIsTestingPing(true);
+    setTestResult(null);
+    try {
+      const res = await networkService.testDeviceConnection({
+        testType: 'ping',
+        deviceType: 'router',
+        vendor: 'mikrotik',
+        managementIp: targetForm.managementIp,
+        managementPort: targetForm.managementPort,
+        winboxPort: targetForm.winboxPort,
+        webPort: targetForm.webPort,
+        useSsl: connMode === 'ssl' || targetForm.managementPort === 8729,
+        apiType: connMode === 'rest' || targetForm.managementPort === 50000 ? 'rest' : (connMode === 'ssl' ? 'api-ssl' : 'api'),
+      });
+      setTestResult({
+        type: 'ping',
+        success: res.success,
+        message: res.message,
+        latencyMs: res.latencyMs,
+      });
+      if (res.success) {
+        toast.success(res.message);
+      } else {
+        toast.error(res.message || 'Ping failed');
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.message || err.message || 'Ping test failed';
+      setTestResult({ type: 'ping', success: false, message: msg });
+      toast.error(msg);
+    } finally {
+      setIsTestingPing(false);
+    }
+  };
+
+  const handleTestLogin = async (targetForm: CreateNetworkDevicePayload) => {
+    if (!targetForm.managementIp) {
+      toast.error('Please enter Management IP address first');
+      return;
+    }
+    if (!targetForm.apiUsername) {
+      toast.error('Please enter API Username first');
+      return;
+    }
+    setIsTestingLogin(true);
+    setTestResult(null);
+    try {
+      const res = await networkService.testDeviceConnection({
+        testType: 'login',
+        deviceType: 'router',
+        vendor: 'mikrotik',
+        managementIp: targetForm.managementIp,
+        managementPort: targetForm.managementPort,
+        webPort: targetForm.webPort,
+        useSsl: connMode === 'ssl' || targetForm.managementPort === 8729,
+        apiType: connMode === 'rest' || targetForm.managementPort === 50000 ? 'rest' : (connMode === 'ssl' ? 'api-ssl' : 'api'),
+        apiUsername: targetForm.apiUsername,
+        apiPassword: targetForm.apiPassword,
+      });
+      setTestResult({
+        type: 'login',
+        success: res.success,
+        message: res.message,
+      });
+      if (res.success) {
+        toast.success(res.message);
+      } else {
+        toast.error(res.message || 'Login test failed');
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.message || err.message || 'Login test failed';
+      setTestResult({ type: 'login', success: false, message: msg });
+      toast.error(msg);
+    } finally {
+      setIsTestingLogin(false);
+    }
+  };
 
   // Diagnostics Modal State with Persistent Live Stream & 5-minute Auto-Pause
   const [selectedRouterForDiag, setSelectedRouterForDiag] = useState<NetworkDevice | null>(null);
@@ -361,6 +455,10 @@ export default function MikroTikPage() {
 
   const handleEdit = (device: NetworkDevice) => {
     setEditingDevice(device);
+    const isRest = device.managementPort === 50000 || device.webPort === 50000 || device.managementPort === 80;
+    const isSsl = !isRest && device.managementPort === 8729;
+    setConnMode(isRest ? 'rest' : (isSsl ? 'ssl' : 'api'));
+    setUseSsl(isSsl);
     setFormData({
       deviceCode: device.deviceCode,
       deviceName: device.deviceName,
@@ -687,7 +785,12 @@ export default function MikroTikPage() {
       deviceType: 'router',
       isProduction: false,
     });
+    setUseSsl(false);
+    setConnMode('api');
     setFormErrors({});
+    setTestResult(null);
+    setIsTestingPing(false);
+    setIsTestingLogin(false);
     networkService.getNextDeviceCode().then((res) => {
       if (res?.deviceCode) {
         setFormData((prev) => ({ ...prev, deviceCode: res.deviceCode }));
@@ -725,221 +828,309 @@ export default function MikroTikPage() {
 
         {/* Add Server Modal */}
         {showAddModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-              <div className="p-6 border-b border-slate-200 dark:border-slate-700">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 bg-clip-text text-transparent">
-                    Add MikroTik Server
-                  </h2>
-                  <button
-                    onClick={() => {
-                      setShowAddModal(false);
-                      resetForm();
-                    }}
-                    className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                  >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl w-full max-w-2xl overflow-hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+              {/* Header */}
+              <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/60 dark:bg-slate-900/60">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                    <Server className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                      Add MikroTik Server
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                        RouterOS
+                      </span>
+                    </h2>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Configure router management IP and API credentials</p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddModal(false);
+                    resetForm();
+                  }}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
 
-              <form onSubmit={handleAddSubmit} className="p-6 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Device Code */}
+              {/* Form Body */}
+              <form onSubmit={handleAddSubmit} className="p-5 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Device ID */}
                   <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label htmlFor="deviceCode" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
-                        Device ID
-                      </label>
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                        <Lock className="w-3 h-3" /> System Locked (Unique)
-                      </span>
-                    </div>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Device ID (System Locked)
+                    </label>
                     <div className="relative">
                       <input
                         type="text"
-                        id="deviceCode"
                         readOnly
                         tabIndex={-1}
                         value={formData.deviceCode || ''}
-                        className="w-full pl-10 pr-4 py-3 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none text-slate-800 dark:text-slate-200 font-mono font-bold tracking-wider cursor-not-allowed select-none shadow-inner"
-                        placeholder="Auto-generating (e.g. 300001)..."
+                        className="w-full pl-8 pr-3 py-1.5 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 font-mono text-xs font-bold tracking-wider cursor-not-allowed select-none"
+                        placeholder="Auto-generating..."
                       />
-                      <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <Lock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                     </div>
-                    <p className="mt-1 text-[11px] text-slate-400">Strictly numeric globally unique server ID (auto-assigned, cannot be edited).</p>
                   </div>
 
                   {/* Device Name */}
                   <div>
-                    <label htmlFor="deviceName" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      Device Name <span className="text-red-500">*</span>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Server Name <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
-                      id="deviceName"
                       required
                       value={formData.deviceName}
                       onChange={(e) => setFormData((prev) => ({ ...prev, deviceName: e.target.value }))}
-                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all ${
-                        formErrors.deviceName ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
+                      className={`w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100 transition-all ${
+                        formErrors.deviceName ? 'border-red-500' : 'border-slate-200 dark:border-slate-700'
                       }`}
-                      placeholder="e.g., Main Office Router"
+                      placeholder="e.g., Core Router-01"
                     />
-                    {formErrors.deviceName && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.deviceName}</p>}
+                    {formErrors.deviceName && <p className="mt-0.5 text-[11px] text-red-500">{formErrors.deviceName}</p>}
                   </div>
 
                   {/* Management IP */}
                   <div>
-                    <label htmlFor="managementIp" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      Management IP <span className="text-red-500">*</span>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Management IP / Host <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
-                      id="managementIp"
                       required
                       value={formData.managementIp}
                       onChange={(e) => setFormData((prev) => ({ ...prev, managementIp: e.target.value }))}
-                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all ${
-                        formErrors.managementIp ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
+                      className={`w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border rounded-xl font-mono text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100 transition-all ${
+                        formErrors.managementIp ? 'border-red-500' : 'border-slate-200 dark:border-slate-700'
                       }`}
-                      placeholder="e.g., 192.168.1.1"
+                      placeholder="e.g., 103.100.20.1"
                     />
-                    {formErrors.managementIp && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.managementIp}</p>}
+                    {formErrors.managementIp && <p className="mt-0.5 text-[11px] text-red-500">{formErrors.managementIp}</p>}
                   </div>
 
                   {/* DNS Name */}
                   <div>
-                    <label htmlFor="dnsName" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      DNS Name
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      DNS Name (Optional)
                     </label>
                     <input
                       type="text"
-                      id="dnsName"
                       value={formData.dnsName}
                       onChange={(e) => setFormData((prev) => ({ ...prev, dnsName: e.target.value }))}
-                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all"
-                      placeholder="e.g., router.example.com"
+                      className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100 transition-all"
+                      placeholder="e.g., core.isp.net"
                     />
                   </div>
+                </div>
 
-                  {/* API Port */}
+                {/* Ports 3-column Grid */}
+                <div className="grid grid-cols-3 gap-2.5">
                   <div>
-                    <label htmlFor="managementPort" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      API Port (Port)
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                        API Port
+                      </label>
+                      <div className="inline-flex items-center p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-[10px] font-semibold">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConnMode('api');
+                            setUseSsl(false);
+                            setFormData((prev) => ({ ...prev, managementPort: 8728 }));
+                          }}
+                          className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${
+                            connMode === 'api'
+                              ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-xs font-bold'
+                              : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                          }`}
+                          title="Standard RouterOS API (Port 8728)"
+                        >
+                          API
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConnMode('ssl');
+                            setUseSsl(true);
+                            setFormData((prev) => ({ ...prev, managementPort: 8729 }));
+                          }}
+                          className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${
+                            connMode === 'ssl'
+                              ? 'bg-emerald-500 text-white shadow-xs font-bold'
+                              : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                          }`}
+                          title="RouterOS API-SSL (Port 8729)"
+                        >
+                          SSL
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConnMode('rest');
+                            setUseSsl(false);
+                            setFormData((prev) => ({ ...prev, managementPort: 50000, webPort: 50000 }));
+                          }}
+                          className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${
+                            connMode === 'rest'
+                              ? 'bg-blue-600 text-white shadow-xs font-bold'
+                              : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                          }`}
+                          title="RouterOS v7 REST API / WWW (Port 50000 or 80)"
+                        >
+                          REST
+                        </button>
+                      </div>
+                    </div>
                     <input
                       type="number"
-                      id="managementPort"
                       min="1"
                       max="65535"
                       value={formData.managementPort}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, managementPort: parseInt(e.target.value) || 8728 }))}
-                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all ${
-                        formErrors.managementPort ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                      placeholder="8728"
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 0;
+                        setFormData((prev) => ({ ...prev, managementPort: val }));
+                        if (val === 8729) { setConnMode('ssl'); setUseSsl(true); }
+                        else if (val === 50000 || val === 80) { setConnMode('rest'); setUseSsl(false); }
+                        else if (val === 8728) { setConnMode('api'); setUseSsl(false); }
+                      }}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100"
+                      placeholder={connMode === 'rest' ? "50000" : (connMode === 'ssl' ? "8729" : "8728")}
                     />
-                    {formErrors.managementPort && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.managementPort}</p>}
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Default: 8728</p>
                   </div>
 
-                  {/* Winbox Port */}
                   <div>
-                    <label htmlFor="winboxPort" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      WinPort (Winbox)
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Winbox Port
                     </label>
                     <input
                       type="number"
-                      id="winboxPort"
                       min="1"
                       max="65535"
                       value={formData.winboxPort}
                       onChange={(e) => setFormData((prev) => ({ ...prev, winboxPort: parseInt(e.target.value) || 8291 }))}
-                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all ${
-                        formErrors.winboxPort ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
-                      }`}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100"
                       placeholder="8291"
                     />
-                    {formErrors.winboxPort && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.winboxPort}</p>}
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Default: 8291</p>
                   </div>
 
-                  {/* Web Port */}
                   <div>
-                    <label htmlFor="webPort" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      WebPort
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Web Port
                     </label>
                     <input
                       type="number"
-                      id="webPort"
                       min="1"
                       max="65535"
                       value={formData.webPort}
                       onChange={(e) => setFormData((prev) => ({ ...prev, webPort: parseInt(e.target.value) || 80 }))}
-                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all ${
-                        formErrors.webPort ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
-                      }`}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100"
                       placeholder="80"
                     />
-                    {formErrors.webPort && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.webPort}</p>}
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Default: 80 (or 443 for HTTPS)</p>
-                  </div>
-
-                  {/* API Username */}
-                  <div>
-                    <label htmlFor="apiUsername" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      Username <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      id="apiUsername"
-                      required
-                      value={formData.apiUsername}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, apiUsername: e.target.value }))}
-                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all ${
-                        formErrors.apiUsername ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                      placeholder="e.g., admin"
-                    />
-                    {formErrors.apiUsername && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.apiUsername}</p>}
-                  </div>
-
-                  {/* API Password */}
-                  <div>
-                    <label htmlFor="apiPassword" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      Password <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="password"
-                      id="apiPassword"
-                      required
-                      value={formData.apiPassword}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, apiPassword: e.target.value }))}
-                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all ${
-                        formErrors.apiPassword ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                      placeholder="Enter API password"
-                    />
-                    {formErrors.apiPassword && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.apiPassword}</p>}
                   </div>
                 </div>
 
-                {/* Is Production Toggle */}
-                <div className="flex items-center justify-between p-4 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-xl border border-emerald-100 dark:border-emerald-800">
-                  <div className="flex items-center space-x-4">
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
-                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
+                {/* API Credentials */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      API Username <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.apiUsername}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, apiUsername: e.target.value }))}
+                      className={`w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100 transition-all ${
+                        formErrors.apiUsername ? 'border-red-500' : 'border-slate-200 dark:border-slate-700'
+                      }`}
+                      placeholder="e.g., admin"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      API Password <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={formData.apiPassword}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, apiPassword: e.target.value }))}
+                      className={`w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100 transition-all ${
+                        formErrors.apiPassword ? 'border-red-500' : 'border-slate-200 dark:border-slate-700'
+                      }`}
+                      placeholder="Enter API password"
+                    />
+                  </div>
+                </div>
+
+                {/* Pre-flight Testing & Verification Section */}
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        Pre-flight Verification:
+                      </span>
                     </div>
-                    <div>
-                      <h3 className="font-semibold text-slate-900 dark:text-slate-100">Production Device</h3>
-                      <p className="text-sm text-slate-600 dark:text-slate-400">Mark this device as production-ready</p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleTestPing(formData)}
+                        disabled={isTestingPing || isTestingLogin || !formData.managementIp}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isTestingPing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Radio className="w-3.5 h-3.5" />}
+                        <span>{isTestingPing ? 'Pinging...' : 'PING Test'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleTestLogin(formData)}
+                        disabled={isTestingPing || isTestingLogin || !formData.managementIp || !formData.apiUsername}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-emerald-200 dark:border-emerald-800 bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isTestingLogin ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Key className="w-3.5 h-3.5" />}
+                        <span>{isTestingLogin ? 'Checking...' : 'Login Test'}</span>
+                      </button>
                     </div>
+                  </div>
+
+                  {testResult && (
+                    <div className={`mt-2 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between border ${
+                      testResult.success
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                        : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        {testResult.success ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+                        )}
+                        <span>{testResult.message}</span>
+                      </div>
+                      {testResult.latencyMs !== undefined && testResult.latencyMs !== null && (
+                        <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-white/70 dark:bg-slate-900/70">
+                          {testResult.latencyMs} ms
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Inline Production Toggle */}
+                <div className="flex items-center justify-between px-3 py-1.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Mark as Production Server</span>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
@@ -948,26 +1139,26 @@ export default function MikroTikPage() {
                       onChange={(e) => setFormData((prev) => ({ ...prev, isProduction: e.target.checked }))}
                       className="sr-only peer"
                     />
-                    <div className="w-14 h-7 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-300 dark:peer-focus:ring-emerald-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all dark:border-slate-600 peer-checked:bg-gradient-to-r peer-checked:from-emerald-600 peer-checked:to-teal-600"></div>
+                    <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all dark:border-slate-600 peer-checked:bg-emerald-600"></div>
                   </label>
                 </div>
 
-                {/* Form Actions */}
-                <div className="flex items-center justify-end gap-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+                {/* Form Actions Footer */}
+                <div className="flex items-center justify-end gap-3 pt-2.5 border-t border-slate-100 dark:border-slate-800">
                   <button
                     type="button"
                     onClick={() => {
                       setShowAddModal(false);
                       resetForm();
                     }}
-                    className="px-6 py-3 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-slate-50 dark:hover:bg-slate-600 transition-all shadow-sm hover:shadow-md"
+                    className="px-4 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-all"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-all shadow-sm hover:shadow active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-all shadow-sm hover:shadow active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isSubmitting ? 'Adding...' : 'Add Server'}
                   </button>
@@ -979,183 +1170,277 @@ export default function MikroTikPage() {
 
         {/* Edit Server Modal */}
         {showEditModal && editingDevice && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-              <div className="p-6 border-b border-slate-200 dark:border-slate-700">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 bg-clip-text text-transparent">
-                    Edit MikroTik Server
-                  </h2>
-                  <button
-                    onClick={() => {
-                      setShowEditModal(false);
-                      setEditingDevice(null);
-                      resetForm();
-                    }}
-                    className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                  >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl w-full max-w-2xl overflow-hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+              <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/60 dark:bg-slate-900/60">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                    <Server className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                      Edit MikroTik Server
+                    </h2>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Update router parameters and API credentials</p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setEditingDevice(null);
+                    resetForm();
+                  }}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
 
-              <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <form onSubmit={handleEditSubmit} className="p-5 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {/* Device Name */}
                   <div>
-                    <label htmlFor="edit-deviceName" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
                       Device Name <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
-                      id="edit-deviceName"
                       required
                       value={formData.deviceName}
                       onChange={(e) => setFormData((prev) => ({ ...prev, deviceName: e.target.value }))}
-                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all ${
-                        formErrors.deviceName ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
+                      className={`w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100 transition-all ${
+                        formErrors.deviceName ? 'border-red-500' : 'border-slate-200 dark:border-slate-700'
                       }`}
                     />
-                    {formErrors.deviceName && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.deviceName}</p>}
+                    {formErrors.deviceName && <p className="mt-0.5 text-[11px] text-red-500">{formErrors.deviceName}</p>}
                   </div>
 
                   {/* Management IP */}
                   <div>
-                    <label htmlFor="edit-managementIp" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
                       Management IP <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
-                      id="edit-managementIp"
                       required
                       value={formData.managementIp}
                       onChange={(e) => setFormData((prev) => ({ ...prev, managementIp: e.target.value }))}
-                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all ${
-                        formErrors.managementIp ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
+                      className={`w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border rounded-xl font-mono text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100 transition-all ${
+                        formErrors.managementIp ? 'border-red-500' : 'border-slate-200 dark:border-slate-700'
                       }`}
                     />
-                    {formErrors.managementIp && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.managementIp}</p>}
+                    {formErrors.managementIp && <p className="mt-0.5 text-[11px] text-red-500">{formErrors.managementIp}</p>}
                   </div>
 
                   {/* DNS Name */}
                   <div>
-                    <label htmlFor="edit-dnsName" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      DNS Name
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      DNS Name (Optional)
                     </label>
                     <input
                       type="text"
-                      id="edit-dnsName"
                       value={formData.dnsName}
                       onChange={(e) => setFormData((prev) => ({ ...prev, dnsName: e.target.value }))}
-                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all"
+                      className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100 transition-all"
                     />
-                  </div>
-
-                  {/* API Port */}
-                  <div>
-                    <label htmlFor="edit-managementPort" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      API Port (Port)
-                    </label>
-                    <input
-                      type="number"
-                      id="edit-managementPort"
-                      min="1"
-                      max="65535"
-                      value={formData.managementPort}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, managementPort: parseInt(e.target.value) || 8728 }))}
-                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all ${
-                        formErrors.managementPort ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                    />
-                    {formErrors.managementPort && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.managementPort}</p>}
-                  </div>
-
-                  {/* Winbox Port */}
-                  <div>
-                    <label htmlFor="edit-winboxPort" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      WinPort (Winbox)
-                    </label>
-                    <input
-                      type="number"
-                      id="edit-winboxPort"
-                      min="1"
-                      max="65535"
-                      value={formData.winboxPort}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, winboxPort: parseInt(e.target.value) || 8291 }))}
-                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all ${
-                        formErrors.winboxPort ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                    />
-                    {formErrors.winboxPort && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.winboxPort}</p>}
-                  </div>
-
-                  {/* Web Port */}
-                  <div>
-                    <label htmlFor="edit-webPort" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      WebPort
-                    </label>
-                    <input
-                      type="number"
-                      id="edit-webPort"
-                      min="1"
-                      max="65535"
-                      value={formData.webPort}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, webPort: parseInt(e.target.value) || 80 }))}
-                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all ${
-                        formErrors.webPort ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                    />
-                    {formErrors.webPort && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.webPort}</p>}
                   </div>
 
                   {/* API Username */}
                   <div>
-                    <label htmlFor="edit-apiUsername" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      Username <span className="text-red-500">*</span>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      API Username <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
-                      id="edit-apiUsername"
                       required
                       value={formData.apiUsername}
                       onChange={(e) => setFormData((prev) => ({ ...prev, apiUsername: e.target.value }))}
-                      className={`w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all ${
-                        formErrors.apiUsername ? 'border-red-500 dark:border-red-400' : 'border-slate-200 dark:border-slate-700'
+                      className={`w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100 transition-all ${
+                        formErrors.apiUsername ? 'border-red-500' : 'border-slate-200 dark:border-slate-700'
                       }`}
-                    />
-                    {formErrors.apiUsername && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{formErrors.apiUsername}</p>}
-                  </div>
-
-                  {/* API Password */}
-                  <div>
-                    <label htmlFor="edit-apiPassword" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                      Password (leave blank to keep current)
-                    </label>
-                    <input
-                      type="password"
-                      id="edit-apiPassword"
-                      value={formData.apiPassword}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, apiPassword: e.target.value }))}
-                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 transition-all"
-                      placeholder="Enter new password or leave blank"
                     />
                   </div>
                 </div>
 
-                {/* Is Production Toggle */}
-                <div className="flex items-center justify-between p-4 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-xl border border-emerald-100 dark:border-emerald-800">
-                  <div className="flex items-center space-x-4">
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
-                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
+                {/* Ports 3-column Grid */}
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                        API Port
+                      </label>
+                      <div className="inline-flex items-center p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-[10px] font-semibold">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConnMode('api');
+                            setUseSsl(false);
+                            setFormData((prev) => ({ ...prev, managementPort: 8728 }));
+                          }}
+                          className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${
+                            connMode === 'api'
+                              ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-xs font-bold'
+                              : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                          }`}
+                          title="Standard RouterOS API (Port 8728)"
+                        >
+                          API
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConnMode('ssl');
+                            setUseSsl(true);
+                            setFormData((prev) => ({ ...prev, managementPort: 8729 }));
+                          }}
+                          className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${
+                            connMode === 'ssl'
+                              ? 'bg-emerald-500 text-white shadow-xs font-bold'
+                              : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                          }`}
+                          title="RouterOS API-SSL (Port 8729)"
+                        >
+                          SSL
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConnMode('rest');
+                            setUseSsl(false);
+                            setFormData((prev) => ({ ...prev, managementPort: 50000, webPort: 50000 }));
+                          }}
+                          className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${
+                            connMode === 'rest'
+                              ? 'bg-blue-600 text-white shadow-xs font-bold'
+                              : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+                          }`}
+                          title="RouterOS v7 REST API / WWW (Port 50000 or 80)"
+                        >
+                          REST
+                        </button>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-semibold text-slate-900 dark:text-slate-100">Production Device</h3>
-                      <p className="text-sm text-slate-600 dark:text-slate-400">Mark this device as production-ready</p>
+                    <input
+                      type="number"
+                      min="1"
+                      max="65535"
+                      value={formData.managementPort}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 0;
+                        setFormData((prev) => ({ ...prev, managementPort: val }));
+                        if (val === 8729) { setConnMode('ssl'); setUseSsl(true); }
+                        else if (val === 50000 || val === 80) { setConnMode('rest'); setUseSsl(false); }
+                        else if (val === 8728) { setConnMode('api'); setUseSsl(false); }
+                      }}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100"
+                      placeholder={connMode === 'rest' ? "50000" : (connMode === 'ssl' ? "8729" : "8728")}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Winbox Port
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="65535"
+                      value={formData.winboxPort}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, winboxPort: parseInt(e.target.value) || 8291 }))}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Web Port
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="65535"
+                      value={formData.webPort}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, webPort: parseInt(e.target.value) || 80 }))}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
+                </div>
+
+                {/* Password Change */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    API Password (leave blank to keep current)
+                  </label>
+                  <input
+                    type="password"
+                    value={formData.apiPassword}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, apiPassword: e.target.value }))}
+                    className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100 transition-all"
+                    placeholder="Enter new password or leave blank"
+                  />
+                </div>
+
+                {/* Pre-flight Testing & Verification Section */}
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        Connection Verification:
+                      </span>
                     </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleTestPing(formData)}
+                        disabled={isTestingPing || isTestingLogin || !formData.managementIp}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isTestingPing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Radio className="w-3.5 h-3.5" />}
+                        <span>{isTestingPing ? 'Pinging...' : 'PING Test'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleTestLogin(formData)}
+                        disabled={isTestingPing || isTestingLogin || !formData.managementIp || !formData.apiUsername}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-emerald-200 dark:border-emerald-800 bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isTestingLogin ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Key className="w-3.5 h-3.5" />}
+                        <span>{isTestingLogin ? 'Checking...' : 'Login Test'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {testResult && (
+                    <div className={`mt-2 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between border ${
+                      testResult.success
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                        : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        {testResult.success ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+                        )}
+                        <span>{testResult.message}</span>
+                      </div>
+                      {testResult.latencyMs !== undefined && testResult.latencyMs !== null && (
+                        <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-white/70 dark:bg-slate-900/70">
+                          {testResult.latencyMs} ms
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Inline Production Toggle */}
+                <div className="flex items-center justify-between px-3 py-1.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Mark as Production Server</span>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
@@ -1164,12 +1449,12 @@ export default function MikroTikPage() {
                       onChange={(e) => setFormData((prev) => ({ ...prev, isProduction: e.target.checked }))}
                       className="sr-only peer"
                     />
-                    <div className="w-14 h-7 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-300 dark:peer-focus:ring-emerald-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all dark:border-slate-600 peer-checked:bg-gradient-to-r peer-checked:from-emerald-600 peer-checked:to-teal-600"></div>
+                    <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all dark:border-slate-600 peer-checked:bg-emerald-600"></div>
                   </label>
                 </div>
 
-                {/* Form Actions */}
-                <div className="flex items-center justify-end gap-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+                {/* Form Actions Footer */}
+                <div className="flex items-center justify-end gap-3 pt-2.5 border-t border-slate-100 dark:border-slate-800">
                   <button
                     type="button"
                     onClick={() => {
@@ -1177,14 +1462,14 @@ export default function MikroTikPage() {
                       setEditingDevice(null);
                       resetForm();
                     }}
-                    className="px-6 py-3 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 font-semibold rounded-xl hover:bg-slate-50 dark:hover:bg-slate-600 transition-all shadow-sm hover:shadow-md"
+                    className="px-4 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-all"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-all shadow-sm hover:shadow active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-all shadow-sm hover:shadow active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isSubmitting ? 'Updating...' : 'Update Server'}
                   </button>

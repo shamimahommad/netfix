@@ -131,11 +131,13 @@ export default function ImportPage() {
     ]).then(([devRes, pkgRes, areaRes, resRes]) => {
       if (!isMounted) return;
 
-      if (devRes.status === 'fulfilled' && devRes.value.devices) {
-        setRouters(devRes.value.devices);
-        if (devRes.value.devices.length > 0) {
-          setMtRouterId(String(devRes.value.devices[0].deviceId));
-          setCsvDefaultRouter(String(devRes.value.devices[0].deviceId));
+      if (devRes.status === 'fulfilled') {
+        const deviceList = devRes.value.data || (devRes.value as any).devices || [];
+        setRouters(deviceList);
+        if (deviceList.length > 0) {
+          const firstId = String(deviceList[0].deviceId || deviceList[0].networkDeviceId || (deviceList[0] as any).id);
+          setMtRouterId(firstId);
+          setCsvDefaultRouter(firstId);
         }
       }
 
@@ -308,6 +310,7 @@ export default function ImportPage() {
           profile: u.profile,
           name: u.suggested_name,
           phone: u.suggested_phone,
+          address: u.comment || undefined,
           packageId: u.matched_package_id || mtDefaultPackage || null,
           caller_id: u.caller_id,
           comment: u.comment,
@@ -703,11 +706,14 @@ export default function ImportPage() {
                   {routers.length === 0 ? (
                     <option value="">No routers available</option>
                   ) : (
-                    routers.map((r) => (
-                      <option key={r.deviceId} value={r.deviceId}>
-                        {r.deviceName} ({r.managementIp})
-                      </option>
-                    ))
+                    routers.map((r) => {
+                      const rId = String(r.deviceId || r.networkDeviceId || (r as any).id);
+                      return (
+                        <option key={rId} value={rId}>
+                          {r.deviceName} ({r.managementIp})
+                        </option>
+                      );
+                    })
                   )}
                 </select>
               </div>
@@ -1019,7 +1025,7 @@ export default function ImportPage() {
                       <th className="p-3">Mobile</th>
                       <th className="p-3">MikroTik Profile</th>
                       <th className="p-3">Matched Package</th>
-                      <th className="p-3">Comment</th>
+                      <th className="p-3">Address (Comment)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
@@ -1273,11 +1279,14 @@ export default function ImportPage() {
                     onChange={(e) => setCsvDefaultRouter(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-xs text-slate-900 dark:text-slate-100"
                   >
-                    {routers.map((r) => (
-                      <option key={r.deviceId} value={r.deviceId}>
-                        {r.deviceName}
-                      </option>
-                    ))}
+                    {routers.map((r) => {
+                      const rId = String(r.deviceId || r.networkDeviceId || (r as any).id);
+                      return (
+                        <option key={rId} value={rId}>
+                          {r.deviceName}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
 

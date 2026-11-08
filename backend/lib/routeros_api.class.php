@@ -32,6 +32,11 @@ class RouterosAPI {
             $this->port = (int)$port;
         }
 
+        // Auto-enable SSL when port is 8729 (MikroTik api-ssl standard)
+        if ($this->port === 8729) {
+            $this->ssl = true;
+        }
+
         for ($ATTEMPT = 1; $ATTEMPT <= $this->attempts; $ATTEMPT++) {
             $this->connected = false;
             $proto = $this->ssl ? 'ssl://' : '';

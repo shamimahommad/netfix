@@ -24,6 +24,8 @@ class MikrotikService {
         $user = $router['api_username'] ?? $router['username'] ?? 'admin';
         $pass = $router['api_password'] ?? $router['password'] ?? '';
         $port = (int)($router['management_port'] ?? $router['api_port'] ?? 8728);
+        $this->api->port = $port;
+        $this->api->ssl = ($port === 8729 || !empty($router['use_ssl']));
 
         if (empty($ip)) {
             return false;

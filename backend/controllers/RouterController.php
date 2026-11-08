@@ -31,6 +31,7 @@ class RouterController {
         $start = microtime(true);
         $api = new RouterosAPI();
         $api->port = (int)$router['api_port'];
+        $api->ssl = ($api->port === 8729 || !empty($router['use_ssl']));
 
         $connected = $api->connect($router['ip_address'], $router['username'], $router['password']);
         $latencyMs = round((microtime(true) - $start) * 1000);
@@ -81,6 +82,7 @@ class RouterController {
 
         $api = new RouterosAPI();
         $api->port = (int)$router['api_port'];
+        $api->ssl = ($api->port === 8729 || !empty($router['use_ssl']));
         $api->connect($router['ip_address'], $router['username'], $router['password']);
         $sessions = $api->comm('/ppp/active/print');
         $api->disconnect();

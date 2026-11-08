@@ -89,6 +89,11 @@ export const customersService = {
     return response.data;
   },
 
+  async syncOnlineSessions(routerId?: string): Promise<{ success: boolean; message: string; data?: any }> {
+    const response = await api.post('/customers/sync-online', {}, { params: routerId ? { router_id: routerId } : {} });
+    return response.data;
+  },
+
   async getCustomerDetail(customerId: string): Promise<CustomerDetailResponse> {
     const response = await api.get<CustomerDetailResponse>(`/customers/${customerId}`);
     return response.data;
