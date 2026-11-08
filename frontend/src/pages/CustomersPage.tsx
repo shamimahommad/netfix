@@ -20,6 +20,8 @@ import { openLeftCustomerModal } from '@/lib/leftCustomerModal';
 import { openDeleteCustomerModal } from '@/lib/deleteCustomerModal';
 import { PageHeader } from '@/components/common';
 import { usePermissions } from '@/hooks/usePermissions';
+import { smsService } from '@/services/sms.service';
+import ModernCheckbox from '@/components/common/ModernCheckbox';
 
 const CUSTOMER_TYPES: Record<string, { title: string; description: string; statusFilter?: string }> = {
   all: { title: 'All Customers', description: 'View all customers in your system.' },
@@ -384,6 +386,10 @@ export default function CustomersPage() {
   const [moreMenuPosition, setMoreMenuPosition] = useState<{ top: number; left: number; openUpward: boolean } | null>(null);
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null);
   const [actionMenuPosition, setActionMenuPosition] = useState<{ top: number; left: number; openUpward: boolean } | null>(null);
+  const [passwordModalCustomer, setPasswordModalCustomer] = useState<any | null>(null);
+  const [sendInfoCustomer, setSendInfoCustomer] = useState<any | null>(null);
+  const [sendInfoMessage, setSendInfoMessage] = useState<string>('');
+  const [isSendingInfo, setIsSendingInfo] = useState<boolean>(false);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: SortDirection }>({ key: '', direction: null });
   const [sortedCustomers, setSortedCustomers] = useState<Customer[]>([]);
   const [isBulkRenewModalOpen, setIsBulkRenewModalOpen] = useState(false);
@@ -419,6 +425,39 @@ export default function CustomersPage() {
   ];
   const moreMenuButtonRef = useRef<HTMLButtonElement>(null);
   const actionButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+
+  // Rows per page & Pagination state
+  const [pageSize, setPageSize] = useState<number>(20);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [showPageSizeMenu, setShowPageSizeMenu] = useState<boolean>(false);
+  const pageSizeMenuRef = useRef<HTMLDivElement>(null);
+  const PAGE_SIZE_OPTIONS = [20, 50, 100, 500, 1000, 2000] as const;
+
+  // Close page size menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (pageSizeMenuRef.current && !pageSizeMenuRef.current.contains(e.target as Node)) {
+        setShowPageSizeMenu(false);
+      }
+    };
+    if (showPageSizeMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showPageSizeMenu]);
+
+  const getPaginationItems = (current: number, total: number): (number | string)[] => {
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    if (current <= 4) {
+      return [1, 2, 3, 4, 5, '...', total];
+    }
+    if (current >= total - 3) {
+      return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+    }
+    return [1, '...', current - 1, current, current + 1, '...', total];
+  };
 
   const customerType = CUSTOMER_TYPES[type] || CUSTOMER_TYPES.all;
 
@@ -522,10 +561,15 @@ export default function CustomersPage() {
           aValue = a.download_bytes ?? 0;
           bValue = b.download_bytes ?? 0;
           break;
-        case 'lastOffline':
-          aValue = a.last_logout_at ? new Date(a.last_logout_at).getTime() : 0;
-          bValue = b.last_logout_at ? new Date(b.last_logout_at).getTime() : 0;
+        case 'lastOffline': {
+          const aTime = a.last_logout_at || a.last_offline_at;
+          const bTime = b.last_logout_at || b.last_offline_at;
+          const aParsed = aTime && !aTime.startsWith('0000') ? new Date(aTime).getTime() : 0;
+          const bParsed = bTime && !bTime.startsWith('0000') ? new Date(bTime).getTime() : 0;
+          aValue = isNaN(aParsed) ? 0 : aParsed;
+          bValue = isNaN(bParsed) ? 0 : bParsed;
           break;
+        }
         default:
           return 0;
       }
@@ -581,9 +625,30 @@ export default function CustomersPage() {
     actionButtonRefs.current.set(customerId, buttonElement);
     
     // Calculate dropdown position (action menu is narrower, ~192px)
-    const position = calculateDropdownPosition(buttonElement, 192, 200);
+    const position = calculateDropdownPosition(buttonElement, 192, 245);
     setActionMenuPosition(position);
     setOpenActionMenu(customerId);
+  };
+
+  const handleSendCustomerInfo = async () => {
+    const phone = sendInfoCustomer?.phone || sendInfoCustomer?.mobile;
+    if (!phone) {
+      toast.error('Customer has no phone number');
+      return;
+    }
+    setIsSendingInfo(true);
+    try {
+      await smsService.send({
+        toNumbers: [phone],
+        message: sendInfoMessage,
+      });
+      toast.success('Account info sent successfully via SMS!');
+      setSendInfoCustomer(null);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Failed to send SMS');
+    } finally {
+      setIsSendingInfo(false);
+    }
   };
 
   // Close more menu and action menus when clicking outside or pressing Escape
@@ -679,7 +744,7 @@ export default function CustomersPage() {
     try {
       const filters: any = {
         page: 1,
-        limit: (type === 'online' || type === 'offline') ? 3000 : 1000,
+        limit: 5000,
       };
 
       // For online/offline types, don't use statusFilter (it's not a valid status)
@@ -754,8 +819,9 @@ export default function CustomersPage() {
   };
 
   const formatDateTime = (dateString: string | null): string => {
-    if (!dateString) return '—';
+    if (!dateString || dateString.startsWith('0000')) return '—';
     const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '—';
     return date.toLocaleString('en-US', {
       year: 'numeric',
       month: 'short',
@@ -763,6 +829,37 @@ export default function CustomersPage() {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  // Format Last Logout relative elapsed duration:
+  // < 60m: e.g. "45m"
+  // < 24h: e.g. "23h 59m"
+  // >= 24h: e.g. "1d 23h", "2d 5h", "999d 23h"
+  const formatRelativeLastLogout = (dateString: string | null | undefined): string => {
+    if (!dateString || dateString.startsWith('0000')) return '—';
+    const past = new Date(dateString).getTime();
+    if (isNaN(past) || past <= 0) return '—';
+    const now = Date.now();
+    const diffMs = Math.max(0, now - past);
+    const totalMinutes = Math.floor(diffMs / (1000 * 60));
+
+    // Less than 1 hour (0m - 59m)
+    if (totalMinutes < 60) {
+      return `${totalMinutes}m`;
+    }
+
+    const totalHours = Math.floor(totalMinutes / 60);
+    const remainingMinutes = totalMinutes % 60;
+
+    // Less than 24 hours (1h 0m - 23h 59m)
+    if (totalHours < 24) {
+      return `${totalHours}h ${remainingMinutes}m`;
+    }
+
+    // 1 day or more (1d 0h - 999d 23h)
+    const days = Math.floor(totalHours / 24);
+    const remainingHours = totalHours % 24;
+    return `${days}d ${remainingHours}h`;
   };
 
   const formatCurrency = (amount: number | null): string => {
@@ -808,10 +905,25 @@ export default function CustomersPage() {
     return diffDays > 0 ? diffDays : 0;
   };
 
+  // Pagination calculations
+  const allSortedCustomers = sortConfig.key && sortConfig.direction ? sortedCustomers : customers;
+  const totalEntries = allSortedCustomers.length;
+  const totalPages = Math.max(1, Math.ceil(totalEntries / pageSize));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (validCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalEntries);
+  const paginatedCustomers = allSortedCustomers.slice(startIndex, endIndex);
+
+  const startEntryDisplay = totalEntries === 0 ? 0 : startIndex + 1;
+  const endEntryDisplay = endIndex;
+
+  const totalBill = allSortedCustomers.reduce((sum, c) => sum + (c.bill_amount ?? c.package_price ?? 0), 0);
+  const totalAdvance = allSortedCustomers.filter(c => (c.balance ?? 0) > 0).reduce((sum, c) => sum + (c.balance ?? 0), 0);
+  const totalDue = allSortedCustomers.filter(c => (c.balance ?? 0) < 0).reduce((sum, c) => sum + Math.abs(c.balance ?? 0), 0);
+
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const customersToUse = sortConfig.key && sortConfig.direction ? sortedCustomers : customers;
     if (e.target.checked) {
-      setSelectedCustomers(new Set(customersToUse.map(c => c.customer_id || c.customerId || '')));
+      setSelectedCustomers(new Set(paginatedCustomers.map(c => c.customer_id || c.customerId || '')));
     } else {
       setSelectedCustomers(new Set());
     }
@@ -1352,26 +1464,69 @@ export default function CustomersPage() {
       />
 
       {/* Top Actions & Filter Bar */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm">
-        <div className="flex flex-col gap-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 sm:p-4 shadow-sm">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           {/* Filter/Search Section */}
-          <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-3 flex-1">
-            <div className="flex-1 min-w-0 relative">
+          <form onSubmit={handleSearch} className="flex flex-wrap items-center gap-2.5 flex-1 min-w-0">
+            {/* Rows Per Page Dropdown */}
+            <div className="relative" ref={pageSizeMenuRef}>
+              <button
+                type="button"
+                onClick={() => setShowPageSizeMenu(prev => !prev)}
+                className="px-3 py-1.5 sm:py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-400 font-medium text-xs sm:text-sm rounded-lg border border-blue-200 dark:border-blue-800 transition-colors shadow-2xs flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                title="Select rows per page"
+              >
+                <span>Show {pageSize} rows</span>
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {showPageSizeMenu && (
+                <div className="absolute left-0 mt-1 w-32 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl py-1 z-50 animate-in fade-in zoom-in-95 duration-100">
+                  {PAGE_SIZE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => {
+                        setPageSize(opt);
+                        setCurrentPage(1);
+                        setShowPageSizeMenu(false);
+                      }}
+                      className={`w-full text-left px-3.5 py-1.5 text-xs sm:text-sm transition-colors flex items-center justify-between cursor-pointer ${
+                        pageSize === opt
+                          ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 font-semibold'
+                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60'
+                      }`}
+                    >
+                      <span>{opt}</span>
+                      {pageSize === opt && (
+                        <svg className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="w-full sm:w-64 md:w-72 lg:w-80 relative min-w-0">
               <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by name, phone, or customer code..."
-                className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 transition-all"
+                className="w-full pl-9 pr-3 py-1.5 sm:py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 transition-all"
               />
             </div>
             {!customerType.statusFilter && (
-              <div className="w-full sm:w-44 relative">
+              <div className="w-32 sm:w-36 relative">
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm text-slate-900 dark:text-slate-100 transition-all"
+                  className="w-full px-2.5 py-1.5 sm:py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-xs sm:text-sm text-slate-900 dark:text-slate-100 transition-all"
                 >
                   <option value="">All Status</option>
                   <option value="active">Active</option>
@@ -1384,7 +1539,7 @@ export default function CustomersPage() {
             )}
             <button
               type="submit"
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all shadow-sm active:scale-95 whitespace-nowrap text-sm flex items-center justify-center gap-2"
+              className="px-3.5 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all shadow-sm active:scale-95 whitespace-nowrap text-xs sm:text-sm flex items-center justify-center gap-1.5"
             >
               <SearchIcon className="w-4 h-4" />
               Filter
@@ -1392,11 +1547,11 @@ export default function CustomersPage() {
           </form>
 
           {/* Bulk Actions */}
-          <div className="flex flex-wrap gap-2 items-center pt-3 border-t border-slate-100 dark:border-slate-800">
+          <div className="flex flex-wrap gap-2 items-center shrink-0">
             <button
               onClick={handleBulkRenew}
               disabled={selectedCustomers.size === 0}
-              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-xs flex items-center gap-1.5"
+              className="px-3 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-xs flex items-center gap-1.5"
             >
               <RenewIcon className="w-3.5 h-3.5" />
               Bulk Renew
@@ -1404,7 +1559,7 @@ export default function CustomersPage() {
             <button
               onClick={handleBulkSMS}
               disabled={selectedCustomers.size === 0}
-              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-xs flex items-center gap-1.5"
+              className="px-3 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-xs flex items-center gap-1.5"
             >
               <SMSIcon className="w-3.5 h-3.5" />
               Bulk SMS
@@ -1422,7 +1577,7 @@ export default function CustomersPage() {
                   handleOpenMoreMenu(button);
                 }
               }}
-              className="px-3.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/60 transition-all shadow-sm whitespace-nowrap text-xs flex items-center gap-1.5"
+              className="px-3 py-1.5 sm:py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/60 transition-all shadow-sm whitespace-nowrap text-xs flex items-center gap-1.5"
             >
               More
               <ChevronDownIcon className="w-3.5 h-3.5" />
@@ -1476,27 +1631,21 @@ export default function CustomersPage() {
         )}
 
         {/* Table */}
-        {!isLoading && !error && customers.length > 0 && (() => {
-          const customersToDisplay = sortConfig.key && sortConfig.direction ? sortedCustomers : customers;
-          const totalBill = customersToDisplay.reduce((sum, c) => sum + (c.bill_amount ?? c.package_price ?? 0), 0);
-          const totalAdvance = customersToDisplay.filter(c => (c.balance ?? 0) > 0).reduce((sum, c) => sum + (c.balance ?? 0), 0);
-          const totalDue = customersToDisplay.filter(c => (c.balance ?? 0) < 0).reduce((sum, c) => sum + Math.abs(c.balance ?? 0), 0);
-
-          return (
-            <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-lg rounded-xl md:rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-xl overflow-hidden">
-              {/* Desktop (≥1024px): No horizontal scrollbar */}
-              <div className="hidden lg:block overflow-x-auto overflow-y-visible">
-                <table className="w-full" style={{ tableLayout: 'auto' }}>
-                  <thead className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 dark:from-slate-700/50 dark:via-slate-800/50 dark:to-slate-800/50 border-b-2 border-blue-200 dark:border-slate-700 sticky top-0 z-10">
-                    <tr>
-                      <th className="px-2 py-2 text-left" style={{ width: '48px' }}>
-                        <input
-                          type="checkbox"
-                          checked={customersToDisplay.length > 0 && selectedCustomers.size === customersToDisplay.length}
-                          onChange={handleSelectAll}
-                          className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-                        />
-                      </th>
+        {!isLoading && !error && customers.length > 0 && (
+          <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-lg rounded-xl md:rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-xl overflow-hidden">
+            {/* Desktop (≥1024px): No horizontal scrollbar */}
+            <div className="hidden lg:block overflow-x-auto overflow-y-visible">
+              <table className="w-full" style={{ tableLayout: 'auto' }}>
+                <thead className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 dark:from-slate-700/50 dark:via-slate-800/50 dark:to-slate-800/50 border-b-2 border-blue-200 dark:border-slate-700 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-2 py-2 text-left" style={{ width: '48px' }}>
+                      <ModernCheckbox
+                        checked={paginatedCustomers.length > 0 && paginatedCustomers.every(c => selectedCustomers.has(c.customer_id || c.customerId || ''))}
+                        indeterminate={paginatedCustomers.some(c => selectedCustomers.has(c.customer_id || c.customerId || '')) && !paginatedCustomers.every(c => selectedCustomers.has(c.customer_id || c.customerId || ''))}
+                        onChange={handleSelectAll}
+                        title="Select all on this page"
+                      />
+                    </th>
                       {type === 'online' || type === 'offline' ? (
                         // Online/Offline Customers columns
                         <>
@@ -1676,7 +1825,7 @@ export default function CustomersPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
-                  {customersToDisplay.map((customer) => {
+                  {paginatedCustomers.map((customer) => {
                     const customerId = customer.customer_id || customer.customerId || '';
                     const customerCode = customer.customer_code || customer.customerCode || '';
                     const displayId = formatCustomerIdDisplay(customerCode);
@@ -1695,12 +1844,11 @@ export default function CustomersPage() {
                         }`}
                       >
                         <td className="px-2 py-2">
-                          <input
-                            type="checkbox"
+                          <ModernCheckbox
                             checked={isSelected}
                             onChange={() => handleSelectCustomer(customerId)}
                             onClick={(e) => e.stopPropagation()}
-                            className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                            title="Select customer"
                           />
                         </td>
                         {type === 'online' || type === 'offline' ? (
@@ -1772,9 +1920,20 @@ export default function CustomersPage() {
                               {formatTraffic(customer.download_bytes)}
                             </td>
                             <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                              <div className="flex items-center gap-1.5" title={customer.last_disconnect_reason ? `Reason: ${customer.last_disconnect_reason}` : undefined}>
+                              <div
+                                className="flex items-center gap-1.5"
+                                title={(() => {
+                                  const parts: string[] = [];
+                                  const exact = formatDateTime(customer.last_logout_at || customer.last_offline_at || null);
+                                  if (exact !== '—') parts.push(`Exact Time: ${exact}`);
+                                  if (customer.last_disconnect_reason) parts.push(`Reason: ${customer.last_disconnect_reason}`);
+                                  return parts.length > 0 ? parts.join(' | ') : undefined;
+                                })()}
+                              >
                                 <CalendarIcon className="w-3.5 h-3.5 text-gray-500" />
-                                <span>{formatDateTime(customer.last_logout_at || customer.last_offline_at || null)}</span>
+                                <span className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-300">
+                                  {formatRelativeLastLogout(customer.last_logout_at || customer.last_offline_at || null)}
+                                </span>
                               </div>
                             </td>
                           </>
@@ -1820,57 +1979,93 @@ export default function CustomersPage() {
                             </td>
                             <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
                               <div className="flex items-center gap-1.5">
-                                <PackageIcon className="w-3.5 h-3.5 text-purple-500" />
-                                <span className="truncate max-w-[120px]" title={customer.package_name || undefined}>
-                          {customer.package_name || '—'}
+                                <PackageIcon className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                                <span className="font-medium text-slate-800 dark:text-slate-200 truncate max-w-[120px]" title={customer.package_name || customer.packageName || undefined}>
+                                  {customer.package_name || customer.packageName || '—'}
                                 </span>
                               </div>
-                        </td>
-                            <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 uppercase whitespace-nowrap">
+                            </td>
+                            <td className="px-2 py-2 text-sm whitespace-nowrap">
                               {customer.protocol ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs font-medium border border-indigo-200 dark:border-indigo-800">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 text-xs font-semibold border border-indigo-200 dark:border-indigo-800 uppercase tracking-wide">
                                   {customer.protocol}
                                 </span>
                               ) : (
-                                '—'
+                                <span className="text-slate-400 dark:text-slate-500">—</span>
                               )}
-                        </td>
-                            <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 font-bold whitespace-nowrap">
+                            </td>
+                            <td className="px-2 py-2 text-sm text-slate-800 dark:text-slate-200 font-bold whitespace-nowrap">
                               <div className="flex items-center gap-1">
                                 <MoneyIcon className="w-3.5 h-3.5 text-emerald-500" />
-                                {formatCurrency(customer.bill_amount || customer.package_price)}
+                                {formatCurrency(customer.bill_amount ?? customer.billAmount ?? customer.package_price ?? customer.packagePrice ?? 0)}
                               </div>
                             </td>
                             <td className="px-2 py-2 text-sm font-bold whitespace-nowrap">
-                              <div className={`flex items-center gap-1 ${(customer.balance ?? 0) < 0 ? 'text-red-600 dark:text-red-400' : 'text-slate-600 dark:text-slate-400'}`}>
+                              <div className={`flex items-center gap-1 ${(customer.balance ?? 0) < 0 ? 'text-red-600 dark:text-red-400 font-bold' : (customer.balance ?? 0) > 0 ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-slate-600 dark:text-slate-400'}`}>
                                 <MoneyIcon className="w-3.5 h-3.5 text-blue-500" />
-                                {formatCurrency(customer.balance)}
+                                {formatCurrency(customer.balance ?? 0)}
                               </div>
                             </td>
-                            <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                            <td className={`px-2 py-2 text-sm font-medium whitespace-nowrap ${customer.billing_status === 'Left' ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-slate-600 dark:text-slate-400'}`}>
                               <div className="flex items-center gap-1.5">
                                 <CalendarIcon className="w-3.5 h-3.5 text-orange-500" />
-                                {formatExpiryDisplay(customer.expiry_date)}
+                                <span>{formatExpiryDisplay(customer.expiry_date || customer.expiryDate)}</span>
                               </div>
                             </td>
-                            <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                              <div className="flex items-center gap-1.5">
-                                <CalendarIcon className="w-3.5 h-3.5 text-teal-500" />
-                                {formatDate(customer.last_payment_date)}
-                              </div>
+                            <td className="px-2 py-2 text-sm whitespace-nowrap">
+                              {customer.last_payment_date || customer.lastPaymentDate ? (
+                                <div
+                                  className="inline-flex items-center gap-1.5 cursor-help"
+                                  title={customer.last_payment_by || customer.lastPaymentBy || 'Payment recorded'}
+                                >
+                                  <CalendarIcon className="w-3.5 h-3.5 text-teal-500 shrink-0" />
+                                  <span className="font-medium text-slate-700 dark:text-slate-300 border-b border-dotted border-teal-500/70 pb-0.5 hover:text-teal-600 dark:hover:text-teal-400">
+                                    {formatDate(customer.last_payment_date || customer.lastPaymentDate)}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 dark:text-slate-500">—</span>
+                              )}
                             </td>
                             <td className="px-2 py-2 whitespace-nowrap">
-                          {customer.billing_status ? (
-                            <span
-                                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${getBillingStatusBadgeClass(customer.billing_status)}`}
-                            >
-                              {getBillingStatusIcon(customer.billing_status)}
-                              {getBillingStatusLabel(customer.billing_status)}
-                            </span>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
+                              {(() => {
+                                const bStatus = customer.billing_status || customer.billingStatus;
+                                const isExp = bStatus === 'Expired';
+                                if (isExp) {
+                                  return (
+                                    <div className="flex items-center gap-1.5 flex-nowrap">
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 border border-red-300 dark:border-red-800 shadow-2xs">
+                                        Exp
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          navigate(`/dashboard/customers/view/${customerId}`, { state: { openRenew: true } });
+                                        }}
+                                        className="px-2 py-0.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-md shadow-2xs transition-all hover:scale-105 active:scale-95 flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                        title="Renew subscription"
+                                      >
+                                        <RenewIcon className="w-3 h-3" />
+                                        Renew
+                                      </button>
+                                    </div>
+                                  );
+                                }
+                                if (bStatus) {
+                                  const isPaid = String(bStatus).toUpperCase() === 'PAID';
+                                  return (
+                                    <span
+                                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${getBillingStatusBadgeClass(bStatus)}`}
+                                    >
+                                      {getBillingStatusIcon(bStatus)}
+                                      {isPaid ? 'PAID' : getBillingStatusLabel(bStatus)}
+                                    </span>
+                                  );
+                                }
+                                return <span className="text-slate-400 dark:text-slate-500">—</span>;
+                              })()}
+                            </td>
                           </>
                         )}
                         <td 
@@ -1911,7 +2106,7 @@ export default function CustomersPage() {
                 <tfoot className="bg-gradient-to-r from-slate-50 to-blue-50/50 dark:from-slate-700/50 dark:to-blue-900/20 border-t-2 border-blue-200 dark:border-slate-700 sticky bottom-0 z-10">
                   <tr>
                     <td colSpan={type === 'online' || type === 'offline' ? 2 : 2} className="px-3 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-300">
-                      {type === 'online' ? 'Online Users' : type === 'offline' ? 'Offline Users' : 'Total Users'}: <span className="text-blue-600 dark:text-blue-400">{customersToDisplay.length}</span>
+                      {type === 'online' ? 'Online Users' : type === 'offline' ? 'Offline Users' : 'Total Users'}: <span className="text-blue-600 dark:text-blue-400">{totalEntries}</span>
                       {type !== 'online' && type !== 'offline' && selectedCustomers.size > 0 && (
                         <span className="text-slate-500 dark:text-slate-400 font-normal"> ({selectedCustomers.size} selected)</span>
                       )}
@@ -1963,11 +2158,11 @@ export default function CustomersPage() {
                     <thead className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 dark:from-slate-700/50 dark:via-slate-800/50 dark:to-slate-800/50 border-b-2 border-blue-200 dark:border-slate-700 sticky top-0 z-10">
                       <tr>
                         <th className="px-2 py-2 text-left" style={{ width: '48px' }}>
-                          <input
-                            type="checkbox"
-                            checked={customersToDisplay.length > 0 && selectedCustomers.size === customersToDisplay.length}
+                          <ModernCheckbox
+                            checked={paginatedCustomers.length > 0 && paginatedCustomers.every(c => selectedCustomers.has(c.customer_id || c.customerId || ''))}
+                            indeterminate={paginatedCustomers.some(c => selectedCustomers.has(c.customer_id || c.customerId || '')) && !paginatedCustomers.every(c => selectedCustomers.has(c.customer_id || c.customerId || ''))}
                             onChange={handleSelectAll}
-                            className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                            title="Select all on this page"
                           />
                         </th>
                         {type === 'online' || type === 'offline' ? (
@@ -2149,7 +2344,7 @@ export default function CustomersPage() {
                       </tr>
                     </thead>
                     <tbody className="bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
-                      {customersToDisplay.map((customer) => {
+                      {paginatedCustomers.map((customer) => {
                         const customerId = customer.customer_id || customer.customerId || '';
                         const customerCode = customer.customer_code || customer.customerCode || '';
                         const displayId = formatCustomerIdDisplay(customerCode);
@@ -2167,12 +2362,11 @@ export default function CustomersPage() {
                             }`}
                           >
                             <td className="px-2 py-2">
-                              <input
-                                type="checkbox"
+                              <ModernCheckbox
                                 checked={isSelected}
                                 onChange={() => handleSelectCustomer(customerId)}
                                 onClick={(e) => e.stopPropagation()}
-                                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                                title="Select customer"
                               />
                             </td>
                             {type === 'online' || type === 'offline' ? (
@@ -2244,9 +2438,20 @@ export default function CustomersPage() {
                                   {formatTraffic(customer.download_bytes)}
                                 </td>
                                 <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                  <div className="flex items-center gap-1.5" title={customer.last_disconnect_reason ? `Reason: ${customer.last_disconnect_reason}` : undefined}>
+                                  <div
+                                    className="flex items-center gap-1.5"
+                                    title={(() => {
+                                      const parts: string[] = [];
+                                      const exact = formatDateTime(customer.last_logout_at || customer.last_offline_at || null);
+                                      if (exact !== '—') parts.push(`Exact Time: ${exact}`);
+                                      if (customer.last_disconnect_reason) parts.push(`Reason: ${customer.last_disconnect_reason}`);
+                                      return parts.length > 0 ? parts.join(' | ') : undefined;
+                                    })()}
+                                  >
                                     <CalendarIcon className="w-3.5 h-3.5 text-gray-500" />
-                                    <span>{formatDateTime(customer.last_logout_at || customer.last_offline_at || null)}</span>
+                                    <span className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-300">
+                                      {formatRelativeLastLogout(customer.last_logout_at || customer.last_offline_at || null)}
+                                    </span>
                                   </div>
                                 </td>
                               </>
@@ -2291,57 +2496,93 @@ export default function CustomersPage() {
                                   </span>
                                 </td>
                                 <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                            <div className="flex items-center gap-1.5">
-                                    <PackageIcon className="w-3.5 h-3.5 text-purple-500" />
-                                    <span className="truncate max-w-[120px]" title={customer.package_name || undefined}>
-                                      {customer.package_name || '—'}
+                                  <div className="flex items-center gap-1.5">
+                                    <PackageIcon className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                                    <span className="font-medium text-slate-800 dark:text-slate-200 truncate max-w-[120px]" title={customer.package_name || customer.packageName || undefined}>
+                                      {customer.package_name || customer.packageName || '—'}
                                     </span>
-                            </div>
+                                  </div>
                                 </td>
-                                <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 uppercase whitespace-nowrap">
+                                <td className="px-2 py-2 text-sm whitespace-nowrap">
                                   {customer.protocol ? (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs font-medium border border-indigo-200 dark:border-indigo-800">
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 text-xs font-semibold border border-indigo-200 dark:border-indigo-800 uppercase tracking-wide">
                                       {customer.protocol}
                                     </span>
                                   ) : (
-                                    '—'
-                          )}
-                        </td>
-                                <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 font-bold whitespace-nowrap">
+                                    <span className="text-slate-400 dark:text-slate-500">—</span>
+                                  )}
+                                </td>
+                                <td className="px-2 py-2 text-sm text-slate-800 dark:text-slate-200 font-bold whitespace-nowrap">
                                   <div className="flex items-center gap-1">
                                     <MoneyIcon className="w-3.5 h-3.5 text-emerald-500" />
-                                    {formatCurrency(customer.bill_amount || customer.package_price)}
+                                    {formatCurrency(customer.bill_amount ?? customer.billAmount ?? customer.package_price ?? customer.packagePrice ?? 0)}
                                   </div>
-                        </td>
+                                </td>
                                 <td className="px-2 py-2 text-sm font-bold whitespace-nowrap">
-                                  <div className={`flex items-center gap-1 ${(customer.balance ?? 0) < 0 ? 'text-red-600 dark:text-red-400' : 'text-slate-600 dark:text-slate-400'}`}>
+                                  <div className={`flex items-center gap-1 ${(customer.balance ?? 0) < 0 ? 'text-red-600 dark:text-red-400 font-bold' : (customer.balance ?? 0) > 0 ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-slate-600 dark:text-slate-400'}`}>
                                     <MoneyIcon className="w-3.5 h-3.5 text-blue-500" />
-                                    {formatCurrency(customer.balance)}
+                                    {formatCurrency(customer.balance ?? 0)}
                                   </div>
-                        </td>
-                                <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                                </td>
+                                <td className={`px-2 py-2 text-sm font-medium whitespace-nowrap ${customer.billing_status === 'Left' ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-slate-600 dark:text-slate-400'}`}>
                                   <div className="flex items-center gap-1.5">
                                     <CalendarIcon className="w-3.5 h-3.5 text-orange-500" />
-                                    {formatExpiryDisplay(customer.expiry_date)}
+                                    <span>{formatExpiryDisplay(customer.expiry_date || customer.expiryDate)}</span>
                                   </div>
                                 </td>
-                                <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                  <div className="flex items-center gap-1.5">
-                                    <CalendarIcon className="w-3.5 h-3.5 text-teal-500" />
-                                    {formatDate(customer.last_payment_date)}
-                                  </div>
+                                <td className="px-2 py-2 text-sm whitespace-nowrap">
+                                  {customer.last_payment_date || customer.lastPaymentDate ? (
+                                    <div
+                                      className="inline-flex items-center gap-1.5 cursor-help"
+                                      title={customer.last_payment_by || customer.lastPaymentBy || 'Payment recorded'}
+                                    >
+                                      <CalendarIcon className="w-3.5 h-3.5 text-teal-500 shrink-0" />
+                                      <span className="font-medium text-slate-700 dark:text-slate-300 border-b border-dotted border-teal-500/70 pb-0.5 hover:text-teal-600 dark:hover:text-teal-400">
+                                        {formatDate(customer.last_payment_date || customer.lastPaymentDate)}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-400 dark:text-slate-500">—</span>
+                                  )}
                                 </td>
                                 <td className="px-2 py-2 whitespace-nowrap">
-                                  {customer.billing_status ? (
-                                    <span
-                                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${getBillingStatusBadgeClass(customer.billing_status)}`}
-                                    >
-                                      {getBillingStatusIcon(customer.billing_status)}
-                                      {getBillingStatusLabel(customer.billing_status)}
-                                    </span>
-                                  ) : (
-                                    '—'
-                                  )}
+                                  {(() => {
+                                    const bStatus = customer.billing_status || customer.billingStatus;
+                                    const isExp = bStatus === 'Expired';
+                                    if (isExp) {
+                                      return (
+                                        <div className="flex items-center gap-1.5 flex-nowrap">
+                                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 border border-red-300 dark:border-red-800 shadow-2xs">
+                                            Exp
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              navigate(`/dashboard/customers/view/${customerId}`, { state: { openRenew: true } });
+                                            }}
+                                            className="px-2 py-0.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-md shadow-2xs transition-all hover:scale-105 active:scale-95 flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                            title="Renew subscription"
+                                          >
+                                            <RenewIcon className="w-3 h-3" />
+                                            Renew
+                                          </button>
+                                        </div>
+                                      );
+                                    }
+                                    if (bStatus) {
+                                      const isPaid = String(bStatus).toUpperCase() === 'PAID';
+                                      return (
+                                        <span
+                                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${getBillingStatusBadgeClass(bStatus)}`}
+                                        >
+                                          {getBillingStatusIcon(bStatus)}
+                                          {isPaid ? 'PAID' : getBillingStatusLabel(bStatus)}
+                                        </span>
+                                      );
+                                    }
+                                    return <span className="text-slate-400 dark:text-slate-500">—</span>;
+                                  })()}
                                 </td>
                               </>
                             )}
@@ -2383,7 +2624,7 @@ export default function CustomersPage() {
                     <tfoot className="bg-gradient-to-r from-slate-50 to-blue-50/50 dark:from-slate-700/50 dark:to-blue-900/20 border-t-2 border-blue-200 dark:border-slate-700 sticky bottom-0 z-10">
                       <tr>
                         <td colSpan={type === 'online' || type === 'offline' ? 2 : 2} className="px-3 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-300">
-                          {type === 'online' ? 'Online Users' : type === 'offline' ? 'Offline Users' : 'Total Users'}: <span className="text-blue-600 dark:text-blue-400">{customersToDisplay.length}</span>
+                          {type === 'online' ? 'Online Users' : type === 'offline' ? 'Offline Users' : 'Total Users'}: <span className="text-blue-600 dark:text-blue-400">{totalEntries}</span>
                           {type !== 'online' && type !== 'offline' && selectedCustomers.size > 0 && (
                             <span className="text-slate-500 dark:text-slate-400 font-normal"> ({selectedCustomers.size} selected)</span>
                           )}
@@ -2429,9 +2670,62 @@ export default function CustomersPage() {
               </table>
             </div>
           </div>
+
+          {/* Pagination Controls */}
+          <div className="bg-white dark:bg-slate-900 px-4 sm:px-6 py-3 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-normal">
+              Showing <span className="font-semibold text-slate-700 dark:text-slate-300">{startEntryDisplay}</span> to{' '}
+              <span className="font-semibold text-slate-700 dark:text-slate-300">{endEntryDisplay}</span> of{' '}
+              <span className="font-semibold text-slate-700 dark:text-slate-300">{totalEntries}</span> entries
             </div>
-          );
-        })()}
+            <div className="flex items-center gap-1 select-none">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={validCurrentPage <= 1}
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs sm:text-sm transition-colors disabled:text-slate-300 dark:disabled:text-slate-600 disabled:cursor-not-allowed text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                title="Previous page"
+              >
+                ‹
+              </button>
+              {getPaginationItems(validCurrentPage, totalPages).map((item, idx) => {
+                if (item === '...') {
+                  return (
+                    <span key={`ellipsis-${idx}`} className="w-6 text-center text-slate-400 dark:text-slate-500 text-xs sm:text-sm">
+                      …
+                    </span>
+                  );
+                }
+                const pageNum = Number(item);
+                const isActive = pageNum === validCurrentPage;
+                return (
+                  <button
+                    key={`page-${pageNum}`}
+                    type="button"
+                    onClick={() => setCurrentPage(pageNum)}
+                    className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs sm:text-sm font-semibold transition-all ${
+                      isActive
+                        ? 'bg-blue-600 text-white shadow-xs cursor-default'
+                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white cursor-pointer'
+                    }`}
+                  >
+                    {pageNum}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={validCurrentPage >= totalPages}
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs sm:text-sm transition-colors disabled:text-slate-300 dark:disabled:text-slate-600 disabled:cursor-not-allowed text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                title="Next page"
+              >
+                ›
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
         {/* Portal-based More Menu Dropdown */}
         {showMoreMenu && moreMenuPosition && (
@@ -2514,85 +2808,276 @@ export default function CustomersPage() {
         )}
 
         {/* Portal-based Action Menu Dropdown */}
-        {openActionMenu && actionMenuPosition && (
-          createPortal(
+        {openActionMenu && actionMenuPosition && (() => {
+          const currentCustomer = customers.find((c: any) => String(c.customerId || c.customer_id) === String(openActionMenu));
+          const customerId = openActionMenu;
+          return createPortal(
             <div
               data-action-dropdown
-              className="fixed bg-gradient-to-br from-white to-slate-50 dark:from-slate-800 dark:to-slate-900 border-2 border-blue-200 dark:border-blue-800 rounded-xl shadow-2xl z-[9999] min-w-[192px] max-h-[320px] overflow-y-auto transition-all duration-200 ease-out"
+              className="fixed bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl z-[9999] w-[190px] divide-y divide-slate-100 dark:divide-slate-700/60 overflow-hidden text-left"
               style={{
                 top: `${actionMenuPosition.top}px`,
                 left: `${actionMenuPosition.left}px`,
-                opacity: 1,
-                transform: actionMenuPosition.openUpward ? 'translateY(0)' : 'translateY(0)',
-                animation: 'fadeInScale 0.15s ease-out',
               }}
             >
-              <style>{`
-                @keyframes fadeInScale {
-                  from {
-                    opacity: 0;
-                    transform: ${actionMenuPosition.openUpward ? 'translateY(4px) scale(0.95)' : 'translateY(-4px) scale(0.95)'};
+              {/* 1. Recharge Balance */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpenActionMenu(null);
+                  setActionMenuPosition(null);
+                  navigate(`/dashboard/customers/view/${customerId}`, { state: { openRecharge: true } });
+                }}
+                className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+              >
+                <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="7" width="20" height="14" rx="2" />
+                  <path d="M16 14h.01" />
+                  <path d="M6 3v4M4 5h4" />
+                </svg>
+                <span className="font-normal">Recharge Balance</span>
+              </button>
+
+              {/* 2. Renew */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpenActionMenu(null);
+                  setActionMenuPosition(null);
+                  navigate(`/dashboard/customers/view/${customerId}`, { state: { openRenew: true } });
+                }}
+                className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+              >
+                <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4m-4 4a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" />
+                </svg>
+                <span className="font-normal">Renew</span>
+              </button>
+
+              {/* 3. Show Password */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (currentCustomer) setPasswordModalCustomer(currentCustomer);
+                  setOpenActionMenu(null);
+                  setActionMenuPosition(null);
+                }}
+                className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+              >
+                <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clipRule="evenodd" />
+                </svg>
+                <span className="font-normal">Show Password</span>
+              </button>
+
+              {/* 4. Send Info */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (currentCustomer) {
+                    const cust: any = currentCustomer;
+                    const user = cust.username || cust.customerCode || cust.customer_code || cust.customerId || '';
+                    const pwd = cust.password || cust.network?.password || 'pass123';
+                    const pkg = cust.packageName || cust.package_name || cust.package?.name || '';
+                    const exp = cust.expiryDate || cust.expiry_date || '';
+                    const name = cust.fullName || cust.full_name || cust.name || 'Customer';
+                    const msg = `Dear ${name},\nYour Internet Info:\nUser: ${user}\nPassword: ${pwd}${pkg ? `\nPackage: ${pkg}` : ''}${exp ? `\nExpire: ${exp}` : ''}\nThank you!`;
+                    setSendInfoCustomer(cust);
+                    setSendInfoMessage(msg);
                   }
-                  to {
-                    opacity: 1;
-                    transform: translateY(0) scale(1);
-                  }
-                }
-              `}</style>
-              <div className="py-1">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleView(openActionMenu);
-                    setOpenActionMenu(null);
-                    setActionMenuPosition(null);
-                  }}
-                  className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 dark:hover:from-blue-900/20 dark:hover:to-indigo-900/20 transition-colors flex items-center gap-3 group"
-                >
-                  <svg className="w-4 h-4 text-blue-500 group-hover:text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
-                  <span>View Details</span>
-                </button>
-                {permissions.canRecharge && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const button = actionButtonRefs.current.get(openActionMenu);
-                      if (button) {
-                        handleQuickRenew(openActionMenu, e as any);
-                      }
-                      setOpenActionMenu(null);
-                      setActionMenuPosition(null);
-                    }}
-                    className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-gradient-to-r hover:from-green-50 hover:to-emerald-50 dark:hover:from-green-900/20 dark:hover:to-emerald-900/20 transition-colors flex items-center gap-3 group"
-                  >
-                    <RenewIcon className="w-4 h-4 text-green-500 group-hover:text-green-600" />
-                    <span>Renew</span>
-                  </button>
-                )}
-                {permissions.canEditCustomer && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const customerId = openActionMenu;
-                      setOpenActionMenu(null);
-                      setActionMenuPosition(null);
-                      if (customerId) navigate(`/dashboard/customers/edit/${customerId}`);
-                    }}
-                    className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-gradient-to-r hover:from-purple-50 hover:to-pink-50 dark:hover:from-purple-900/20 dark:hover:to-pink-900/20 transition-colors flex items-center gap-3 group"
-                  >
-                    <svg className="w-4 h-4 text-purple-500 group-hover:text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
-                    <span>Edit</span>
-                  </button>
-                )}
-      </div>
+                  setOpenActionMenu(null);
+                  setActionMenuPosition(null);
+                }}
+                className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+              >
+                <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                </svg>
+                <span className="font-normal">Send Info</span>
+              </button>
+
+              {/* 5. Edit */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpenActionMenu(null);
+                  setActionMenuPosition(null);
+                  navigate(`/dashboard/customers/edit/${customerId}`);
+                }}
+                className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+              >
+                <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                </svg>
+                <span className="font-normal">Edit</span>
+              </button>
+
+              {/* 6. Copy Payment Link */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const cust: any = currentCustomer;
+                  const code = cust?.customerCode || cust?.customer_code || customerId;
+                  const payUrl = `${window.location.origin}/customer/pay-bill?code=${encodeURIComponent(code)}`;
+                  navigator.clipboard.writeText(payUrl);
+                  toast.success('Payment link copied to clipboard!');
+                  setOpenActionMenu(null);
+                  setActionMenuPosition(null);
+                }}
+                className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+              >
+                <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
+                  <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
+                </svg>
+                <span className="font-normal">Copy Payment Link</span>
+              </button>
             </div>,
             document.body
-          )
+          );
+        })()}
+
+        {/* Show Password Modal */}
+        {passwordModalCustomer && createPortal(
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-xs" onClick={() => setPasswordModalCustomer(null)} />
+            <div className="relative w-full max-w-sm rounded-2xl bg-white dark:bg-slate-800 shadow-2xl border border-slate-200 dark:border-slate-700 p-6">
+              <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100 dark:border-slate-700">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Customer Password</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{passwordModalCustomer.fullName || passwordModalCustomer.full_name || 'Customer'}</p>
+                  </div>
+                </div>
+                <button onClick={() => setPasswordModalCustomer(null)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">User ID / Username</label>
+                  <div className="px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-lg text-sm font-mono text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
+                    {passwordModalCustomer.username || passwordModalCustomer.customerCode || '—'}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Password</label>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-lg text-sm font-mono font-semibold text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700">
+                      {passwordModalCustomer.password || passwordModalCustomer.network?.password || 'pass123'}
+                    </div>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(passwordModalCustomer.password || passwordModalCustomer.network?.password || 'pass123');
+                        toast.success('Password copied to clipboard!');
+                      }}
+                      className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
+                        <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
+                      </svg>
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 flex justify-end">
+                <button
+                  onClick={() => setPasswordModalCustomer(null)}
+                  className="w-full px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+        {/* Send Info Modal */}
+        {sendInfoCustomer && createPortal(
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-xs" onClick={() => !isSendingInfo && setSendInfoCustomer(null)} />
+            <div className="relative w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 shadow-2xl border border-slate-200 dark:border-slate-700 p-6">
+              <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100 dark:border-slate-700">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Send Account Info</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Send login details to customer via SMS</p>
+                  </div>
+                </div>
+                <button disabled={isSendingInfo} onClick={() => setSendInfoCustomer(null)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Customer Phone</label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={sendInfoCustomer.phone || sendInfoCustomer.mobile || 'No phone number'}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-lg text-sm text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">SMS Message</label>
+                  <textarea
+                    rows={4}
+                    value={sendInfoMessage}
+                    onChange={(e) => setSendInfoMessage(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-lg text-sm text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-blue-500 resize-none font-sans"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-5 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={isSendingInfo}
+                  onClick={() => setSendInfoCustomer(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isSendingInfo || !(sendInfoCustomer.phone || sendInfoCustomer.mobile)}
+                  onClick={handleSendCustomerInfo}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
+                >
+                  {isSendingInfo ? (
+                    <>
+                      <svg className="animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
+                      Send SMS
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
         )}
 
       {/* Bulk Renew Modal */}

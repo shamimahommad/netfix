@@ -19,7 +19,9 @@ import { openChangeExpiryDateModal } from '@/lib/changeExpiryDateModal';
 import { openLeftCustomerModal } from '@/lib/leftCustomerModal';
 import { openDeleteCustomerModal } from '@/lib/deleteCustomerModal';
 import { customersService } from '@/services/customers.service';
-import { PageHeader, MetricCard } from '@/components/common';
+import { smsService } from '@/services/sms.service';
+import ModernCheckbox from '@/components/common/ModernCheckbox';
+// page header and metrics integrated directly
 import { Users, Receipt, CreditCard, AlertCircle } from 'lucide-react';
 
 const BILLING_TYPES = {
@@ -83,17 +85,29 @@ const getBillingStatusIcon = (status: string | null): JSX.Element | null => {
 
 const getProtocolIcon = (protocol: string | null | undefined): JSX.Element | null => {
   if (!protocol) return null;
-  const protocolLower = protocol.toLowerCase();
-  if (protocolLower === 'pppoe') {
+  const p = protocol.toLowerCase();
+  if (p === 'pppoe') {
     return (
-      <svg className="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg className="w-3.5 h-3.5 text-indigo-500 inline shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
       </svg>
     );
-  } else if (protocolLower === 'hotspot' || protocolLower === 'ppp') {
+  } else if (p === 'hotspot' || p === 'ppp') {
     return (
-      <svg className="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+      <svg className="w-3.5 h-3.5 text-amber-500 inline shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+      </svg>
+    );
+  } else if (p === 'pptp' || p === 'l2tp' || p === 'ovpn') {
+    return (
+      <svg className="w-3.5 h-3.5 text-purple-500 inline shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+      </svg>
+    );
+  } else if (p === 'static') {
+    return (
+      <svg className="w-3.5 h-3.5 text-blue-500 inline shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
       </svg>
     );
   }
@@ -203,6 +217,11 @@ export default function BillingPage() {
   const [showExportSubmenu, setShowExportSubmenu] = useState(false);
   const [moreMenuPosition, setMoreMenuPosition] = useState<{ top: number; left: number; openUpward: boolean } | null>(null);
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null);
+  const [actionMenuPosition, setActionMenuPosition] = useState<{ top: number; left: number; openUpward: boolean; customer: any } | null>(null);
+  const [passwordModalCustomer, setPasswordModalCustomer] = useState<any | null>(null);
+  const [sendInfoCustomer, setSendInfoCustomer] = useState<any | null>(null);
+  const [sendInfoMessage, setSendInfoMessage] = useState<string>('');
+  const [isSendingInfo, setIsSendingInfo] = useState<boolean>(false);
   const moreMenuButtonRef = useRef<HTMLButtonElement>(null);
   
   // Date range state for New Customers
@@ -212,6 +231,26 @@ export default function BillingPage() {
 
   const [isBulkRenewModalOpen, setIsBulkRenewModalOpen] = useState(false);
   const [bulkRenewDuration, setBulkRenewDuration] = useState<string>('full_month');
+
+  // Rows per page & Pagination state
+  const [pageSize, setPageSize] = useState<number>(20);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [showPageSizeMenu, setShowPageSizeMenu] = useState<boolean>(false);
+  const pageSizeMenuRef = useRef<HTMLDivElement>(null);
+  const PAGE_SIZE_OPTIONS = [20, 50, 100, 500, 1000, 2000] as const;
+
+  // Close page size menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (pageSizeMenuRef.current && !pageSizeMenuRef.current.contains(e.target as Node)) {
+        setShowPageSizeMenu(false);
+      }
+    };
+    if (showPageSizeMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showPageSizeMenu]);
 
   const billingType = BILLING_TYPES[type as keyof typeof BILLING_TYPES] || BILLING_TYPES.all;
 
@@ -542,6 +581,43 @@ export default function BillingPage() {
     setMoreMenuPosition({ top: Math.max(8, top), left, openUpward });
   };
 
+  const handleOpenActionMenu = (customer: any, buttonElement: HTMLButtonElement) => {
+    const rect = buttonElement.getBoundingClientRect();
+    const menuWidth = 195;
+    const menuHeight = 245;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const openUpward = spaceBelow < menuHeight + 12 && spaceAbove > spaceBelow;
+    let left = rect.right - menuWidth;
+    if (left < 8) left = 8;
+    if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - menuWidth - 8;
+    const top = openUpward ? rect.top - menuHeight - 4 : rect.bottom + 4;
+
+    setActionMenuPosition({ top: Math.max(8, top), left, openUpward, customer });
+    setOpenActionMenu(customer.customerId || customer.customer_id);
+  };
+
+  const handleSendCustomerInfo = async () => {
+    const phone = sendInfoCustomer?.phone || sendInfoCustomer?.mobile;
+    if (!phone) {
+      toast.error('Customer has no phone number');
+      return;
+    }
+    setIsSendingInfo(true);
+    try {
+      await smsService.send({
+        toNumbers: [phone],
+        message: sendInfoMessage,
+      });
+      toast.success('Account info sent successfully via SMS!');
+      setSendInfoCustomer(null);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Failed to send SMS');
+    } finally {
+      setIsSendingInfo(false);
+    }
+  };
+
   // Close menus when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -562,14 +638,42 @@ export default function BillingPage() {
 
       if (openActionMenu && !clickedInsideAction) {
         setOpenActionMenu(null);
+        setActionMenuPosition(null);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowMoreMenu(false);
+        setShowExportSubmenu(false);
+        setMoreMenuPosition(null);
+        setOpenActionMenu(null);
+        setActionMenuPosition(null);
       }
     };
 
     if (showMoreMenu || openActionMenu) {
       document.addEventListener('mousedown', handleClickOutside);
+      window.addEventListener('keydown', handleKeyDown);
     }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, [showMoreMenu, openActionMenu]);
+
+  const getPaginationItems = (current: number, total: number): (number | string)[] => {
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    if (current <= 4) {
+      return [1, 2, 3, 4, 5, '...', total];
+    }
+    if (current >= total - 3) {
+      return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+    }
+    return [1, '...', current - 1, current, current + 1, '...', total];
+  };
 
   const loadCustomers = async () => {
     setIsLoading(true);
@@ -578,7 +682,7 @@ export default function BillingPage() {
       const filterType = billingType.filter as any;
       
       const filters: any = {
-        limit: 1000,
+        limit: 5000,
         search: search || undefined,
       };
 
@@ -638,7 +742,7 @@ export default function BillingPage() {
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
-      setSelectedCustomers(new Set(customers.map(c => c.customer_id || c.customerId || '')));
+      setSelectedCustomers(new Set(paginatedCustomers.map(c => c.customer_id || c.customerId || '')));
     } else {
       setSelectedCustomers(new Set());
     }
@@ -805,64 +909,174 @@ export default function BillingPage() {
   const totalAdvance = customers.filter((c: any) => (c.balance ?? 0) > 0).reduce((sum, c: any) => sum + (c.balance ?? 0), 0);
   const totalDue = customers.filter((c: any) => (c.balance ?? 0) < 0).reduce((sum, c: any) => sum + Math.abs(c.balance ?? 0), 0);
 
+  const totalEntries = customers.length;
+  const totalPages = Math.max(1, Math.ceil(totalEntries / pageSize));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (validCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalEntries);
+  const paginatedCustomers = customers.slice(startIndex, endIndex);
+
+  const startEntryDisplay = totalEntries === 0 ? 0 : startIndex + 1;
+  const endEntryDisplay = endIndex;
+
   return (
     <div className="w-full min-w-0 space-y-4 md:space-y-6">
-        {/* Page Header */}
-        <PageHeader
-          icon={
-            type === 'left' ? (
-              <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-            ) : (
-              <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            )
-          }
-          title={billingType.title}
-          subtitle={`Manage subscription statuses, renewals, invoices, and payment cycles`}
-          badge={`${totalCount} ${totalCount === 1 ? 'Account' : 'Accounts'}`}
-        />
+        {/* Page Header with Integrated Metric Cards */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm transition-all">
+          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+            {/* Left: Icon + Title & Subtitle */}
+            <div className="flex items-center gap-3 sm:gap-4 min-w-0 shrink-0">
+              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/50 flex items-center justify-center shrink-0 shadow-sm">
+                <span className="w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center [&>svg]:w-full [&>svg]:h-full">
+                  {type === 'left' ? (
+                    <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  )}
+                </span>
+              </div>
 
-        {/* Metric Cards Row */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <MetricCard
-            title="Subscribers"
-            value={totalSubscribers}
-            subtext="In this category"
-            variant="blue"
-            icon={<Users className="w-5 h-5" />}
-          />
-          <MetricCard
-            title="Total Bill"
-            value={formatCurrency(totalBilled)}
-            subtext="Monthly package revenue"
-            variant="indigo"
-            icon={<Receipt className="w-5 h-5" />}
-          />
-          <MetricCard
-            title="Advance Balance"
-            value={formatCurrency(totalAdvance)}
-            subtext="Prepaid customer credits"
-            variant="emerald"
-            icon={<CreditCard className="w-5 h-5" />}
-          />
-          <MetricCard
-            title="Total Due"
-            value={formatCurrency(totalDue)}
-            subtext="Outstanding receivables"
-            variant="rose"
-            icon={<AlertCircle className="w-5 h-5" />}
-          />
+              <div className="min-w-0">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white truncate">
+                    {billingType.title}
+                  </h1>
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                    {totalCount} {totalCount === 1 ? 'Account' : 'Accounts'}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs sm:text-sm font-normal text-slate-500 dark:text-slate-400 flex items-center gap-2 truncate">
+                  Manage subscription statuses, renewals, invoices, and payment cycles
+                </p>
+              </div>
+            </div>
+
+            {/* Right: Integrated Metric Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5 flex-1 xl:max-w-4xl 2xl:max-w-5xl xl:justify-end">
+              <div className="bg-slate-50/70 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 rounded-xl p-2 sm:p-2.5 xl:p-3 flex items-center justify-between gap-1.5 xl:gap-2 min-w-0 transition-all hover:border-slate-300 dark:hover:border-slate-600">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] xl:text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-tight truncate">
+                    Subscribers
+                  </p>
+                  <p className="text-base sm:text-lg xl:text-xl font-bold tracking-tight text-slate-900 dark:text-white mt-0.5 truncate">
+                    {totalSubscribers}
+                  </p>
+                  <p className="text-[10px] xl:text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 truncate" title="In this category">
+                    In this category
+                  </p>
+                </div>
+                <div className="w-7 h-7 sm:w-8 sm:h-8 xl:w-9 xl:h-9 rounded-lg flex items-center justify-center border shrink-0 bg-blue-50 dark:bg-blue-950/50 border-blue-100 dark:border-blue-900/40 text-blue-600 dark:text-blue-400">
+                  <Users className="w-3.5 h-3.5 xl:w-4 xl:h-4" />
+                </div>
+              </div>
+
+              <div className="bg-slate-50/70 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 rounded-xl p-2 sm:p-2.5 xl:p-3 flex items-center justify-between gap-1.5 xl:gap-2 min-w-0 transition-all hover:border-slate-300 dark:hover:border-slate-600">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] xl:text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-tight truncate">
+                    Total Bill
+                  </p>
+                  <p className="text-base sm:text-lg xl:text-xl font-bold tracking-tight text-slate-900 dark:text-white mt-0.5 truncate">
+                    {formatCurrency(totalBilled)}
+                  </p>
+                  <p className="text-[10px] xl:text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 truncate" title="Monthly package revenue">
+                    Monthly package revenue
+                  </p>
+                </div>
+                <div className="w-7 h-7 sm:w-8 sm:h-8 xl:w-9 xl:h-9 rounded-lg flex items-center justify-center border shrink-0 bg-indigo-50 dark:bg-indigo-950/50 border-indigo-100 dark:border-indigo-900/40 text-indigo-600 dark:text-indigo-400">
+                  <Receipt className="w-3.5 h-3.5 xl:w-4 xl:h-4" />
+                </div>
+              </div>
+
+              <div className="bg-slate-50/70 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 rounded-xl p-2 sm:p-2.5 xl:p-3 flex items-center justify-between gap-1.5 xl:gap-2 min-w-0 transition-all hover:border-slate-300 dark:hover:border-slate-600">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] xl:text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-tight truncate">
+                    Advance Balance
+                  </p>
+                  <p className="text-base sm:text-lg xl:text-xl font-bold tracking-tight text-slate-900 dark:text-white mt-0.5 truncate">
+                    {formatCurrency(totalAdvance)}
+                  </p>
+                  <p className="text-[10px] xl:text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 truncate" title="Prepaid customer credits">
+                    Prepaid customer credits
+                  </p>
+                </div>
+                <div className="w-7 h-7 sm:w-8 sm:h-8 xl:w-9 xl:h-9 rounded-lg flex items-center justify-center border shrink-0 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-100 dark:border-emerald-900/40 text-emerald-600 dark:text-emerald-400">
+                  <CreditCard className="w-3.5 h-3.5 xl:w-4 xl:h-4" />
+                </div>
+              </div>
+
+              <div className="bg-slate-50/70 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 rounded-xl p-2 sm:p-2.5 xl:p-3 flex items-center justify-between gap-1.5 xl:gap-2 min-w-0 transition-all hover:border-slate-300 dark:hover:border-slate-600">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] xl:text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-tight truncate">
+                    Total Due
+                  </p>
+                  <p className="text-base sm:text-lg xl:text-xl font-bold tracking-tight text-slate-900 dark:text-white mt-0.5 truncate">
+                    {formatCurrency(totalDue)}
+                  </p>
+                  <p className="text-[10px] xl:text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 truncate" title="Outstanding receivables">
+                    Outstanding receivables
+                  </p>
+                </div>
+                <div className="w-7 h-7 sm:w-8 sm:h-8 xl:w-9 xl:h-9 rounded-lg flex items-center justify-center border shrink-0 bg-rose-50 dark:bg-rose-950/50 border-rose-100 dark:border-rose-900/40 text-rose-600 dark:text-rose-400">
+                  <AlertCircle className="w-3.5 h-3.5 xl:w-4 xl:h-4" />
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Top Actions & Filter Bar */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm">
-          <div className="flex flex-col gap-4">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 sm:p-4 shadow-sm">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
             {/* Search + Filter */}
-            <form onSubmit={(e) => { e.preventDefault(); loadCustomers(); }} className="flex flex-col sm:flex-row gap-3 flex-1">
-              <div className="flex-1 min-w-0 relative">
+            <form onSubmit={(e) => { e.preventDefault(); loadCustomers(); }} className="flex flex-wrap items-center gap-2.5 flex-1 min-w-0">
+              {/* Rows Per Page Dropdown */}
+              <div className="relative" ref={pageSizeMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowPageSizeMenu(prev => !prev)}
+                  className="px-3 py-1.5 sm:py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-400 font-medium text-xs sm:text-sm rounded-lg border border-blue-200 dark:border-blue-800 transition-colors shadow-2xs flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                  title="Select rows per page"
+                >
+                  <span>Show {pageSize} rows</span>
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {showPageSizeMenu && (
+                  <div className="absolute left-0 mt-1 w-32 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl py-1 z-50 animate-in fade-in zoom-in-95 duration-100">
+                    {PAGE_SIZE_OPTIONS.map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => {
+                          setPageSize(opt);
+                          setCurrentPage(1);
+                          setShowPageSizeMenu(false);
+                        }}
+                        className={`w-full text-left px-3.5 py-1.5 text-xs sm:text-sm transition-colors flex items-center justify-between cursor-pointer ${
+                          pageSize === opt
+                            ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 font-semibold'
+                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60'
+                        }`}
+                      >
+                        <span>{opt}</span>
+                        {pageSize === opt && (
+                          <svg className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="w-full sm:w-64 md:w-72 lg:w-80 relative min-w-0">
                 <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
@@ -871,32 +1085,75 @@ export default function BillingPage() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search by name, phone, or customer code..."
-                  className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 transition-all"
+                  className="w-full pl-9 pr-3 py-1.5 sm:py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 transition-all"
                 />
               </div>
-              <div className="w-full sm:w-44 relative">
-                <select className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm text-slate-900 dark:text-slate-100 transition-all">
+              <div className="w-32 sm:w-36 relative">
+                <select className="w-full px-2.5 py-1.5 sm:py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-xs sm:text-sm text-slate-900 dark:text-slate-100 transition-all">
                   <option>All Status</option>
                 </select>
               </div>
               <button
                 type="submit"
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all shadow-sm active:scale-95 whitespace-nowrap text-sm flex items-center justify-center gap-2"
+                className="px-3.5 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all shadow-sm active:scale-95 whitespace-nowrap text-xs sm:text-sm flex items-center justify-center gap-1.5"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
                 Filter
               </button>
+
+              {/* Date Range Picker for New Customers */}
+              {type === 'new-customers' && (
+                <div className="flex flex-wrap gap-2 items-center">
+                  <div className="w-36 sm:w-44">
+                    <select
+                      value={dateRange}
+                      onChange={(e) => {
+                        setDateRange(e.target.value as any);
+                        if (e.target.value !== 'custom') {
+                          setStartDate('');
+                          setEndDate('');
+                        }
+                      }}
+                      className="w-full px-2.5 py-1.5 sm:py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-xs sm:text-sm text-slate-900 dark:text-slate-100 transition-all"
+                    >
+                      <option value="today">Today</option>
+                      <option value="yesterday">Yesterday</option>
+                      <option value="last_7_days">Last 7 Days</option>
+                      <option value="last_30_days">Last 30 Days</option>
+                      <option value="custom">Custom Range</option>
+                    </select>
+                  </div>
+
+                  {dateRange === 'custom' && (
+                    <div className="flex gap-1.5 items-center">
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="px-2.5 py-1.5 sm:py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs sm:text-sm text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      />
+                      <span className="text-slate-400 text-xs">to</span>
+                      <input
+                        type="date"
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="px-2.5 py-1.5 sm:py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs sm:text-sm text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </form>
 
             {/* Bulk Actions */}
-            <div className="flex flex-wrap gap-2 items-center pt-3 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex flex-wrap gap-2 items-center shrink-0">
               <button
                 type="button"
                 onClick={() => selectedCustomers.size > 0 && setIsBulkRenewModalOpen(true)}
                 disabled={selectedCustomers.size === 0}
-                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-xs flex items-center gap-1.5"
+                className="px-3 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-xs flex items-center gap-1.5"
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -907,7 +1164,7 @@ export default function BillingPage() {
                 type="button"
                 onClick={() => toast.info('Bulk SMS (not implemented)')}
                 disabled={selectedCustomers.size === 0}
-                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-xs flex items-center gap-1.5"
+                className="px-3 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-xs flex items-center gap-1.5"
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -927,7 +1184,7 @@ export default function BillingPage() {
                     setShowMoreMenu(true);
                   }
                 }}
-                className="px-3.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/60 transition-all shadow-sm whitespace-nowrap text-xs flex items-center gap-1.5"
+                className="px-3 py-1.5 sm:py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/60 transition-all shadow-sm whitespace-nowrap text-xs flex items-center gap-1.5"
               >
                 More
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -935,56 +1192,6 @@ export default function BillingPage() {
                 </svg>
               </button>
             </div>
-
-            {/* Date Range Picker for New Customers */}
-            {type === 'new-customers' && (
-              <div className="flex gap-4 items-center w-full lg:w-auto">
-                <div className="w-48">
-                  <select
-                    value={dateRange}
-                    onChange={(e) => {
-                      setDateRange(e.target.value as any);
-                      if (e.target.value !== 'custom') {
-                        setStartDate('');
-                        setEndDate('');
-                      }
-                    }}
-                    className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-sm text-slate-900 dark:text-slate-100 transition-all"
-                  >
-                    <option value="today">Today</option>
-                    <option value="yesterday">Yesterday</option>
-                    <option value="last_7_days">Last 7 Days</option>
-                    <option value="last_30_days">Last 30 Days</option>
-                    <option value="custom">Custom Range</option>
-                  </select>
-                </div>
-
-                {dateRange === 'custom' && (
-                  <div className="flex gap-2 items-center">
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      className="px-4 py-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-sm text-slate-900 dark:text-slate-100"
-                    />
-                    <span className="text-slate-600 dark:text-slate-400">to</span>
-                    <input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      className="px-4 py-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 outline-none text-sm text-slate-900 dark:text-slate-100"
-                    />
-                  </div>
-                )}
-
-                <button
-                  onClick={loadCustomers}
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-all shadow-sm hover:shadow active:scale-95 whitespace-nowrap"
-                >
-                  Filter
-                </button>
-              </div>
-            )}
           </div>
         </div>
 
@@ -1040,11 +1247,11 @@ export default function BillingPage() {
                 <thead className="bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 uppercase tracking-wider sticky top-0 z-10">
                   <tr>
                     <th className="px-3 py-3 text-left" style={{ width: '48px' }}>
-                      <input
-                        type="checkbox"
-                        checked={selectedCustomers.size === customers.length && customers.length > 0}
+                      <ModernCheckbox
+                        checked={paginatedCustomers.length > 0 && paginatedCustomers.every((c: any) => selectedCustomers.has(String(c.customer_id ?? c.customerId ?? '')))}
+                        indeterminate={paginatedCustomers.some((c: any) => selectedCustomers.has(String(c.customer_id ?? c.customerId ?? ''))) && !paginatedCustomers.every((c: any) => selectedCustomers.has(String(c.customer_id ?? c.customerId ?? '')))}
                         onChange={handleSelectAll}
-                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                        title="Select all on this page"
                       />
                     </th>
                     <th className="px-3 py-3 text-left text-xs font-semibold text-slate-700 dark:text-slate-200 uppercase tracking-wider whitespace-nowrap">ID</th>
@@ -1104,7 +1311,7 @@ export default function BillingPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800">
-                  {customers.map((customer: any) => {
+                  {paginatedCustomers.map((customer: any) => {
                     const customerId = String(customer.customer_id || customer.customerId || '');
                     const customerCode = customer.customer_code || customer.customerCode || '';
                     const fullName = customer.full_name || customer.fullName || '—';
@@ -1121,12 +1328,11 @@ export default function BillingPage() {
                         }`}
                       >
                         <td className="px-2 py-2">
-                          <input
-                            type="checkbox"
+                          <ModernCheckbox
                             checked={isSelected}
                             onChange={() => handleSelectCustomer(customerId)}
                             onClick={(e) => e.stopPropagation()}
-                            className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                            title={`Select ${customer.fullName || customer.full_name || customerId}`}
                           />
                         </td>
                         <td className="px-2 py-2 text-sm font-medium text-slate-900 dark:text-slate-100">
@@ -1163,51 +1369,102 @@ export default function BillingPage() {
                         <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400">
                           {phone}
                         </td>
-                        <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400">
-                          {customer.package_name ? (
-                            <span className="inline-flex items-center">
-                              <svg className="w-4 h-4 mr-1.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                          {(customer.package_name || customer.packageName) ? (
+                            <span className="inline-flex items-center gap-1.5 font-medium text-slate-800 dark:text-slate-200">
+                              <svg className="w-3.5 h-3.5 text-purple-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
                               </svg>
-                              {customer.package_name}
+                              <span>{customer.package_name || customer.packageName}</span>
                             </span>
                           ) : (
-                            '—'
+                            <span className="text-slate-400 dark:text-slate-500">—</span>
                           )}
                         </td>
-                        <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 uppercase">
+                        <td className="px-2 py-2 text-sm whitespace-nowrap">
                           {customer.protocol ? (
-                            <span className="inline-flex items-center">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 text-xs font-semibold border border-indigo-200 dark:border-indigo-800 uppercase tracking-wide">
                               {getProtocolIcon(customer.protocol)}
                               {customer.protocol}
                             </span>
                           ) : (
-                            '—'
+                            <span className="text-slate-400 dark:text-slate-500">—</span>
                           )}
                         </td>
-                        <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400 font-bold">
-                          {formatCurrency(customer.bill_amount || customer.package_price)}
+                        <td className="px-2 py-2 text-sm text-slate-800 dark:text-slate-200 font-bold whitespace-nowrap">
+                          {formatCurrency(customer.bill_amount ?? customer.billAmount ?? customer.package_price ?? customer.packagePrice ?? 0)}
                         </td>
-                        <td className={`px-4 py-3 text-sm font-bold ${(customer.balance ?? 0) < 0 ? 'text-red-600 dark:text-red-400' : 'text-slate-600 dark:text-slate-400'}`}>
-                          {formatCurrency(customer.balance)}
+                        <td className="px-2 py-2 text-sm font-bold whitespace-nowrap">
+                          <span className={(customer.balance ?? 0) < 0 ? 'text-red-600 dark:text-red-400 font-bold' : (customer.balance ?? 0) > 0 ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-slate-600 dark:text-slate-400'}>
+                            {formatCurrency(customer.balance ?? 0)}
+                          </span>
                         </td>
-                        <td className={`px-4 py-3 text-sm font-medium ${customer.billing_status === 'Left' ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-slate-600 dark:text-slate-400'}`}>
-                          {formatExpiryDisplay(customer.expiry_date)}
+                        <td className={`px-2 py-2 text-sm font-medium whitespace-nowrap ${customer.billing_status === 'Left' ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-slate-600 dark:text-slate-400'}`}>
+                          <div className="flex items-center gap-1.5">
+                            <svg className="w-3.5 h-3.5 text-orange-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            <span>{formatExpiryDisplay(customer.expiry_date || customer.expiryDate)}</span>
+                          </div>
                         </td>
-                        <td className="px-2 py-2 text-sm text-slate-600 dark:text-slate-400">
-                          {formatDate(customer.last_payment_date)}
-                        </td>
-                        <td className="px-2 py-2">
-                          {customer.billing_status ? (
-                            <span
-                              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${getBillingStatusBadgeClass(customer.billing_status)}`}
+                        <td className="px-2 py-2 text-sm whitespace-nowrap">
+                          {customer.last_payment_date || customer.lastPaymentDate ? (
+                            <div
+                              className="inline-flex items-center gap-1.5 cursor-help"
+                              title={customer.last_payment_by || customer.lastPaymentBy || 'Payment recorded'}
                             >
-                              {getBillingStatusIcon(customer.billing_status)}
-                              {customer.billing_status}
-                            </span>
+                              <svg className="w-3.5 h-3.5 text-teal-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                              <span className="font-medium text-slate-700 dark:text-slate-300 border-b border-dotted border-teal-500/70 pb-0.5 hover:text-teal-600 dark:hover:text-teal-400">
+                                {formatDate(customer.last_payment_date || customer.lastPaymentDate)}
+                              </span>
+                            </div>
                           ) : (
-                            '—'
+                            <span className="text-slate-400 dark:text-slate-500">—</span>
                           )}
+                        </td>
+                        <td className="px-2 py-2 whitespace-nowrap">
+                          {(() => {
+                            const bStatus = customer.billing_status || customer.billingStatus;
+                            const isExp = bStatus === 'Expired' || isExpired;
+                            if (isExp) {
+                              return (
+                                <div className="flex items-center gap-1.5 flex-nowrap">
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 border border-red-300 dark:border-red-800 shadow-2xs">
+                                    Exp
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenActionMenu(null);
+                                      navigate(`/dashboard/customers/view/${customerId}`, { state: { openRenew: true } });
+                                    }}
+                                    className="px-2 py-0.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-md shadow-2xs transition-all hover:scale-105 active:scale-95 flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                                    title="Renew subscription"
+                                  >
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                    Renew
+                                  </button>
+                                </div>
+                              );
+                            }
+                            if (bStatus) {
+                              const isPaid = String(bStatus).toUpperCase() === 'PAID';
+                              return (
+                                <span
+                                  className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${getBillingStatusBadgeClass(bStatus)}`}
+                                >
+                                  {getBillingStatusIcon(bStatus)}
+                                  {isPaid ? 'PAID' : bStatus}
+                                </span>
+                              );
+                            }
+                            return <span className="text-slate-400 dark:text-slate-500">—</span>;
+                          })()}
                         </td>
                         <td className="px-2 py-2 whitespace-nowrap text-right text-sm font-medium">
                           <div className="flex items-center justify-end gap-2">
@@ -1228,7 +1485,12 @@ export default function BillingPage() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setOpenActionMenu(openActionMenu === customerId ? null : customerId);
+                                  if (openActionMenu === customerId) {
+                                    setOpenActionMenu(null);
+                                    setActionMenuPosition(null);
+                                  } else {
+                                    handleOpenActionMenu(customer, e.currentTarget);
+                                  }
                                 }}
                                 className="p-1 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
                                 title="Actions"
@@ -1237,42 +1499,6 @@ export default function BillingPage() {
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
                                 </svg>
                               </button>
-                              {openActionMenu === customerId && (
-                                <div className="absolute right-0 mt-1 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl z-50">
-                                  <div className="py-1">
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleView(customerId);
-                                        setOpenActionMenu(null);
-                                      }}
-                                      className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                                    >
-                                      View Details
-                                    </button>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setOpenActionMenu(null);
-                                        navigate(`/dashboard/customers/view/${customerId}`, { state: { openRenew: true } });
-                                      }}
-                                      className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                                    >
-                                      Renew
-                                    </button>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setOpenActionMenu(null);
-                                        navigate(`/dashboard/customers/edit/${customerId}`);
-                                      }}
-                                      className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                                    >
-                                      Edit
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
                             </div>
                           </div>
                         </td>
@@ -1281,6 +1507,60 @@ export default function BillingPage() {
                   })}
                 </tbody>
               </table>
+            </div>
+
+            {/* Pagination Controls */}
+            <div className="bg-white dark:bg-slate-900 px-4 sm:px-6 py-3 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-normal">
+                Showing <span className="font-semibold text-slate-700 dark:text-slate-300">{startEntryDisplay}</span> to{' '}
+                <span className="font-semibold text-slate-700 dark:text-slate-300">{endEntryDisplay}</span> of{' '}
+                <span className="font-semibold text-slate-700 dark:text-slate-300">{totalEntries}</span> entries
+              </div>
+              <div className="flex items-center gap-1 select-none">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={validCurrentPage <= 1}
+                  className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs sm:text-sm transition-colors disabled:text-slate-300 dark:disabled:text-slate-600 disabled:cursor-not-allowed text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  title="Previous page"
+                >
+                  ‹
+                </button>
+                {getPaginationItems(validCurrentPage, totalPages).map((item, idx) => {
+                  if (item === '...') {
+                    return (
+                      <span key={`ellipsis-${idx}`} className="w-6 text-center text-slate-400 dark:text-slate-500 text-xs sm:text-sm">
+                        …
+                      </span>
+                    );
+                  }
+                  const pageNum = Number(item);
+                  const isActive = pageNum === validCurrentPage;
+                  return (
+                    <button
+                      key={`page-${pageNum}`}
+                      type="button"
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs sm:text-sm font-semibold transition-all ${
+                        isActive
+                          ? 'bg-blue-600 text-white shadow-xs cursor-default'
+                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white cursor-pointer'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={validCurrentPage >= totalPages}
+                  className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs sm:text-sm transition-colors disabled:text-slate-300 dark:disabled:text-slate-600 disabled:cursor-not-allowed text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  title="Next page"
+                >
+                  ›
+                </button>
+              </div>
             </div>
 
             {/* Footer Summary */}
@@ -1449,6 +1729,280 @@ export default function BillingPage() {
                 className="flex-1 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold"
               >
                 Confirm
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* 3-Dot Action Menu Portal */}
+      {openActionMenu && actionMenuPosition && createPortal(
+        <div
+          data-action-dropdown
+          className="fixed bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl z-[9999] w-[190px] divide-y divide-slate-100 dark:divide-slate-700/60 overflow-hidden text-left"
+          style={{
+            top: `${actionMenuPosition.top}px`,
+            left: `${actionMenuPosition.left}px`,
+          }}
+        >
+          {/* 1. Recharge Balance */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              const cust = actionMenuPosition.customer;
+              const id = cust.customerId || cust.customer_id;
+              setOpenActionMenu(null);
+              setActionMenuPosition(null);
+              navigate(`/dashboard/customers/view/${id}`, { state: { openRecharge: true } });
+            }}
+            className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+          >
+            <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="7" width="20" height="14" rx="2" />
+              <path d="M16 14h.01" />
+              <path d="M6 3v4M4 5h4" />
+            </svg>
+            <span className="font-normal">Recharge Balance</span>
+          </button>
+
+          {/* 2. Renew */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              const cust = actionMenuPosition.customer;
+              const id = cust.customerId || cust.customer_id;
+              setOpenActionMenu(null);
+              setActionMenuPosition(null);
+              navigate(`/dashboard/customers/view/${id}`, { state: { openRenew: true } });
+            }}
+            className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+          >
+            <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4m-4 4a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" />
+            </svg>
+            <span className="font-normal">Renew</span>
+          </button>
+
+          {/* 3. Show Password */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              const cust = actionMenuPosition.customer;
+              setPasswordModalCustomer(cust);
+              setOpenActionMenu(null);
+              setActionMenuPosition(null);
+            }}
+            className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+          >
+            <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clipRule="evenodd" />
+            </svg>
+            <span className="font-normal">Show Password</span>
+          </button>
+
+          {/* 4. Send Info */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              const cust = actionMenuPosition.customer;
+              const user = cust.username || cust.customerCode || cust.customer_code || cust.customerId || '';
+              const pwd = cust.password || cust.network?.password || 'pass123';
+              const pkg = cust.packageName || cust.package_name || cust.package?.name || '';
+              const exp = cust.expiryDate || cust.expiry_date || '';
+              const name = cust.fullName || cust.full_name || cust.name || 'Customer';
+              const msg = `Dear ${name},\nYour Internet Info:\nUser: ${user}\nPassword: ${pwd}${pkg ? `\nPackage: ${pkg}` : ''}${exp ? `\nExpire: ${exp}` : ''}\nThank you!`;
+              setSendInfoCustomer(cust);
+              setSendInfoMessage(msg);
+              setOpenActionMenu(null);
+              setActionMenuPosition(null);
+            }}
+            className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+          >
+            <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+            </svg>
+            <span className="font-normal">Send Info</span>
+          </button>
+
+          {/* 5. Edit */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              const cust = actionMenuPosition.customer;
+              const id = cust.customerId || cust.customer_id;
+              setOpenActionMenu(null);
+              setActionMenuPosition(null);
+              navigate(`/dashboard/customers/edit/${id}`);
+            }}
+            className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+          >
+            <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+            </svg>
+            <span className="font-normal">Edit</span>
+          </button>
+
+          {/* 6. Copy Payment Link */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              const cust = actionMenuPosition.customer;
+              const code = cust.customerCode || cust.customer_code || cust.customerId || cust.customer_id || '';
+              const payUrl = `${window.location.origin}/customer/pay-bill?code=${encodeURIComponent(code)}`;
+              navigator.clipboard.writeText(payUrl);
+              toast.success('Payment link copied to clipboard!');
+              setOpenActionMenu(null);
+              setActionMenuPosition(null);
+            }}
+            className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+          >
+            <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
+              <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
+            </svg>
+            <span className="font-normal">Copy Payment Link</span>
+          </button>
+        </div>,
+        document.body
+      )}
+
+      {/* Show Password Modal */}
+      {passwordModalCustomer && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-xs" onClick={() => setPasswordModalCustomer(null)} />
+          <div className="relative w-full max-w-sm rounded-2xl bg-white dark:bg-slate-800 shadow-2xl border border-slate-200 dark:border-slate-700 p-6">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100 dark:border-slate-700">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Customer Password</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{passwordModalCustomer.fullName || passwordModalCustomer.full_name || 'Customer'}</p>
+                </div>
+              </div>
+              <button onClick={() => setPasswordModalCustomer(null)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">User ID / Username</label>
+                <div className="px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-lg text-sm font-mono text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
+                  {passwordModalCustomer.username || passwordModalCustomer.customerCode || '—'}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Password</label>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-lg text-sm font-mono font-semibold text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700">
+                    {passwordModalCustomer.password || passwordModalCustomer.network?.password || 'pass123'}
+                  </div>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(passwordModalCustomer.password || passwordModalCustomer.network?.password || 'pass123');
+                      toast.success('Password copied to clipboard!');
+                    }}
+                    className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
+                      <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
+                    </svg>
+                    Copy
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end">
+              <button
+                onClick={() => setPasswordModalCustomer(null)}
+                className="w-full px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Send Info Modal */}
+      {sendInfoCustomer && createPortal(
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 dark:bg-black/60 backdrop-blur-xs" onClick={() => !isSendingInfo && setSendInfoCustomer(null)} />
+          <div className="relative w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 shadow-2xl border border-slate-200 dark:border-slate-700 p-6">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100 dark:border-slate-700">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Send Account Info</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Send login details to customer via SMS</p>
+                </div>
+              </div>
+              <button disabled={isSendingInfo} onClick={() => setSendInfoCustomer(null)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Customer Phone</label>
+                <input
+                  type="text"
+                  readOnly
+                  value={sendInfoCustomer.phone || sendInfoCustomer.mobile || 'No phone number'}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-lg text-sm text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">SMS Message</label>
+                <textarea
+                  rows={4}
+                  value={sendInfoMessage}
+                  onChange={(e) => setSendInfoMessage(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-lg text-sm text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-blue-500 resize-none font-sans"
+                />
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={isSendingInfo}
+                onClick={() => setSendInfoCustomer(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSendingInfo || !(sendInfoCustomer.phone || sendInfoCustomer.mobile)}
+                onClick={handleSendCustomerInfo}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
+              >
+                {isSendingInfo ? (
+                  <>
+                    <svg className="animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
+                    Send SMS
+                  </>
+                )}
               </button>
             </div>
           </div>

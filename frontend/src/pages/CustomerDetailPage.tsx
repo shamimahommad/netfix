@@ -416,11 +416,14 @@ export default function CustomerDetailPage() {
     }
   }, [id, customerData]);
 
-  // Open renew modal when navigated from customer list with state.openRenew
+  // Open renew or recharge modal when navigated from customer list with state.openRenew / state.openRecharge
   useEffect(() => {
-    const openRenew = (location.state as { openRenew?: boolean })?.openRenew;
-    if (customerData && openRenew) {
+    const navState = location.state as { openRenew?: boolean; openRecharge?: boolean } | null;
+    if (customerData && navState?.openRenew) {
       setIsRenewModalOpen(true);
+      navigate(location.pathname, { replace: true, state: {} });
+    } else if (customerData && navState?.openRecharge) {
+      setIsCashReceivedModalOpen(true);
       navigate(location.pathname, { replace: true, state: {} });
     }
   }, [customerData, location.state, location.pathname, navigate]);

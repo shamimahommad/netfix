@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Package, Search, Users } from 'lucide-react';
 import { resellerService } from '@/services/reseller.service';
 import { useToastContext } from '@/contexts/ToastContext';
-import { PageHeader, MetricCard, StatusBadge } from '@/components/common';
+import { StatusBadge } from '@/components/common';
 
 const ROW_OPTIONS = [10, 25, 50] as const;
 
@@ -23,7 +23,7 @@ type PackageRow = {
 };
 
 const COLUMNS: { key: keyof PackageRow; label: string; align?: 'left' | 'right'; colorClass?: string }[] = [
-  { key: 'server', label: 'Server', align: 'left' },
+  { key: 'server', label: 'Server Name', align: 'left' },
   { key: 'protocol', label: 'Protocol', align: 'left' },
   { key: 'name', label: 'Name', align: 'left' },
   { key: 'mikrotik_profile', label: 'MikroTik Profile', align: 'left' },
@@ -95,30 +95,69 @@ export default function MyPackagesPage() {
 
   return (
     <div className="w-full min-w-0 space-y-6">
-      {/* Page Header */}
-      <PageHeader
-        icon={<Package className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
-        title="My Packages"
-        subtitle="Bandwidth plans authorized for your reseller account with custom buy/sell pricing"
-        badge={`${totalPackages} Plans`}
-      />
+      {/* Page Header with Integrated Metric Cards */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm transition-all">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          {/* Left: Icon + Title & Subtitle */}
+          <div className="flex items-center gap-3 sm:gap-4 min-w-0 shrink-0">
+            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/50 flex items-center justify-center shrink-0 shadow-sm">
+              <span className="w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center [&>svg]:w-full [&>svg]:h-full">
+                <Package className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              </span>
+            </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <MetricCard
-          title="Assigned Plans"
-          value={totalPackages.toLocaleString()}
-          subtext="Available packages in your portfolio"
-          variant="blue"
-          icon={<Package className="w-5 h-5" />}
-        />
-        <MetricCard
-          title="Subscribers (This Page)"
-          value={totalSubscribers.toLocaleString()}
-          subtext="Total active customers across listed plans"
-          variant="emerald"
-          icon={<Users className="w-5 h-5" />}
-        />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white truncate">
+                  My Packages
+                </h1>
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                  {totalPackages} Plans
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs sm:text-sm font-normal text-slate-500 dark:text-slate-400 flex items-center gap-2 truncate">
+                Bandwidth plans authorized for your reseller account with custom buy/sell pricing
+              </p>
+            </div>
+          </div>
+
+          {/* Right: Transferred Metric Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3 flex-1 lg:max-w-xl xl:max-w-2xl lg:justify-end">
+            <div className="bg-slate-50/70 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 rounded-xl p-2.5 sm:p-3 flex items-center justify-between gap-2 min-w-0 transition-all hover:border-slate-300 dark:hover:border-slate-600">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] xl:text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-tight truncate">
+                  Assigned Plans
+                </p>
+                <p className="text-base sm:text-lg xl:text-xl font-bold tracking-tight text-slate-900 dark:text-white mt-0.5 truncate">
+                  {totalPackages.toLocaleString()}
+                </p>
+                <p className="text-[10px] xl:text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 truncate" title="Available packages in your portfolio">
+                  Available packages in your portfolio
+                </p>
+              </div>
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center border shrink-0 bg-blue-50 dark:bg-blue-950/50 border-blue-100 dark:border-blue-900/40 text-blue-600 dark:text-blue-400">
+                <Package className="w-4 h-4" />
+              </div>
+            </div>
+
+            <div className="bg-slate-50/70 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 rounded-xl p-2.5 sm:p-3 flex items-center justify-between gap-2 min-w-0 transition-all hover:border-slate-300 dark:hover:border-slate-600">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] xl:text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-tight truncate">
+                  Subscribers (This Page)
+                </p>
+                <p className="text-base sm:text-lg xl:text-xl font-bold tracking-tight text-slate-900 dark:text-white mt-0.5 truncate">
+                  {totalSubscribers.toLocaleString()}
+                </p>
+                <p className="text-[10px] xl:text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 truncate" title="Total active customers across listed plans">
+                  Total active customers across listed plans
+                </p>
+              </div>
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center border shrink-0 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-100 dark:border-emerald-900/40 text-emerald-600 dark:text-emerald-400">
+                <Users className="w-4 h-4" />
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Main Table Card */}

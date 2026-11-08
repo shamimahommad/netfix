@@ -15,7 +15,7 @@ class BillingController {
         $db = Database::getConnection();
 
         $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
-        $limit = isset($_GET['limit']) ? max(1, min(100, (int)$_GET['limit'])) : 20;
+        $limit = isset($_GET['limit']) ? max(1, min(5000, (int)$_GET['limit'])) : 20;
         $offset = ($page - 1) * $limit;
 
         $where = ["c.tenant_id = :tid"];
@@ -71,41 +71,135 @@ class BillingController {
             c.full_name,
             c.phone,
             c.status,
-            c.billing_status,
+            c.billing_status as raw_billing_status,
             na.username,
-            ap.profile_name as package_name,
-            ap.price as package_price,
+            na.password,
+            COALESCE(cs.protocol, na.protocol, ap.protocol, 'pppoe') as protocol,
+            COALESCE(ap.profile_name, '30Mbps') as package_name,
+            COALESCE(ap.price, 500.00) as package_price,
             cs.expires_at as expiry_date,
             cs.billing_cycle,
-            inv.balance_due
+            COALESCE(inv.total_balance_due, 0) as balance_due,
+            COALESCE(last_pay.last_payment_date, last_tx.tx_date) as last_payment_date,
+            COALESCE(last_pay.collector_username, last_tx.tx_username) as last_collector_username,
+            COALESCE(last_pay.collector_first_name, last_tx.tx_first_name) as last_collector_first_name,
+            COALESCE(last_pay.collector_last_name, last_tx.tx_last_name) as last_collector_last_name,
+            COALESCE(last_pay.collector_role, last_tx.tx_role) as last_collector_role,
+            last_tx.tx_method
             FROM customers c
             LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status = 'active'
             LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
-            LEFT JOIN invoices inv ON inv.customer_id = c.customer_id AND inv.status = 'pending'
+            LEFT JOIN (
+                SELECT customer_id, SUM(balance_due) as total_balance_due 
+                FROM invoices 
+                WHERE status = 'pending' 
+                GROUP BY customer_id
+            ) inv ON inv.customer_id = c.customer_id
+            LEFT JOIN (
+                SELECT 
+                    i1.customer_id,
+                    COALESCE(i1.paid_at, i1.invoice_date, i1.created_at) as last_payment_date,
+                    u.username as collector_username,
+                    u.first_name as collector_first_name,
+                    u.last_name as collector_last_name,
+                    u.role as collector_role
+                FROM invoices i1
+                INNER JOIN (
+                    SELECT customer_id, MAX(invoice_id) as max_inv_id 
+                    FROM invoices 
+                    WHERE status = 'paid' 
+                    GROUP BY customer_id
+                ) latest_inv ON i1.invoice_id = latest_inv.max_inv_id
+                LEFT JOIN users u ON u.user_id = COALESCE(i1.collected_by, i1.created_by, i1.creator_id)
+            ) last_pay ON last_pay.customer_id = c.customer_id
+            LEFT JOIN (
+                SELECT 
+                    t1.customer_id,
+                    t1.created_at as tx_date,
+                    t1.method as tx_method,
+                    utx.username as tx_username,
+                    utx.first_name as tx_first_name,
+                    utx.last_name as tx_last_name,
+                    utx.role as tx_role
+                FROM transactions t1
+                INNER JOIN (
+                    SELECT customer_id, MAX(transaction_id) as max_tx_id 
+                    FROM transactions 
+                    WHERE amount > 0 
+                    GROUP BY customer_id
+                ) latest_tx ON t1.transaction_id = latest_tx.max_tx_id
+                LEFT JOIN users utx ON utx.user_id = COALESCE(t1.collector_user_id, t1.initiator_user_id)
+            ) last_tx ON last_tx.customer_id = c.customer_id
             WHERE {$whereSql}
             ORDER BY c.customer_id DESC
             LIMIT {$limit} OFFSET {$offset}";
 
         $stmt = $db->prepare($query);
         $stmt->execute($params);
-        $rows = $stmt->fetchAll();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $data = array_map(function($r) {
+        $now = time();
+        $data = array_map(function($r) use ($now) {
+            $expiresAtTs = !empty($r['expiry_date']) ? strtotime($r['expiry_date']) : null;
+            $dueAmount = (float)($r['balance_due'] ?? 0);
+
+            if ($r['status'] === 'suspended') {
+                $billingStatus = 'Suspended';
+            } elseif ($r['status'] === 'cancelled') {
+                $billingStatus = 'Left';
+            } elseif (($expiresAtTs !== null && $expiresAtTs < $now) || strcasecmp($r['raw_billing_status'] ?? '', 'expired') === 0) {
+                $billingStatus = 'Expired';
+            } elseif ($dueAmount > 0) {
+                $billingStatus = 'Pending';
+            } else {
+                $billingStatus = 'Paid';
+            }
+
+            $collectorName = trim(($r['last_collector_first_name'] ?? '') . ' ' . ($r['last_collector_last_name'] ?? ''));
+            $rechargedBy = null;
+            if ($collectorName || !empty($r['last_collector_username'])) {
+                $label = $collectorName ?: $r['last_collector_username'];
+                $role = !empty($r['last_collector_role']) ? " ({$r['last_collector_role']})" : '';
+                $rechargedBy = "Recharged by: {$label}{$role}";
+            } elseif (!empty($r['tx_method'])) {
+                $rechargedBy = "Paid via " . ucfirst($r['tx_method']);
+            }
+
+            $balance = $dueAmount > 0 ? -$dueAmount : 0.0;
+
             return [
                 'customerId' => (string)$r['customer_id'],
+                'customer_id' => (string)$r['customer_id'],
                 'customerCode' => $r['customer_code'],
+                'customer_code' => $r['customer_code'],
                 'fullName' => $r['full_name'],
+                'full_name' => $r['full_name'],
                 'phone' => $r['phone'],
+                'mobile' => $r['phone'],
                 'username' => $r['username'],
+                'password' => $r['password'] ?? '',
                 'packageName' => $r['package_name'],
-                'packagePrice' => (float)($r['package_price'] ?? 0),
-                'billAmount' => (float)($r['package_price'] ?? 0),
+                'package_name' => $r['package_name'],
+                'protocol' => strtoupper($r['protocol'] ?: 'PPPoE'),
+                'packagePrice' => (float)$r['package_price'],
+                'package_price' => (float)$r['package_price'],
+                'billAmount' => (float)$r['package_price'],
+                'bill_amount' => (float)$r['package_price'],
+                'balance' => $balance,
+                'balanceDue' => $dueAmount,
+                'balance_due' => $dueAmount,
                 'expiryDate' => $r['expiry_date'],
+                'expiry_date' => $r['expiry_date'],
                 'billingCycle' => $r['billing_cycle'] ?: 'monthly',
+                'billing_cycle' => $r['billing_cycle'] ?: 'monthly',
                 'status' => $r['status'],
-                'billingStatus' => $r['billing_status'] ?: 'Paid',
-                'balanceDue' => (float)($r['balance_due'] ?? 0),
+                'billingStatus' => $billingStatus,
+                'billing_status' => $billingStatus,
+                'lastPaymentDate' => $r['last_payment_date'],
+                'last_payment_date' => $r['last_payment_date'],
+                'lastPaymentBy' => $rechargedBy,
+                'last_payment_by' => $rechargedBy,
             ];
         }, $rows);
 
@@ -264,7 +358,7 @@ class BillingController {
         $db = Database::getConnection();
 
         $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
-        $limit = isset($_GET['limit']) ? max(1, min(100, (int)$_GET['limit'])) : 20;
+        $limit = isset($_GET['limit']) ? max(1, min(5000, (int)$_GET['limit'])) : 20;
         $offset = ($page - 1) * $limit;
 
         $where = ["i.tenant_id = :tid"];

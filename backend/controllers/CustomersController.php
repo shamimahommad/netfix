@@ -106,11 +106,13 @@ class CustomersController {
             c.phone,
             c.email,
             c.status,
-            c.billing_status,
+            c.billing_status as raw_billing_status,
             c.installation_address,
             c.connection_date,
             c.created_at,
             na.username,
+            na.password,
+            COALESCE(cs.protocol, na.protocol, ap.protocol, 'pppoe') as protocol,
             na.is_online as online_status,
             na.current_ip as ip_address,
             na.mac_address,
@@ -119,10 +121,17 @@ class CustomersController {
             na.download_bytes,
             na.last_offline_at,
             na.last_disconnect_reason,
-            ap.profile_name as package_name,
-            ap.price as package_price,
+            COALESCE(ap.profile_name, '30Mbps') as package_name,
+            COALESCE(ap.price, 500.00) as package_price,
             cs.expires_at as expiry_date,
             cs.billing_cycle,
+            COALESCE(inv.total_balance_due, 0) as balance_due,
+            COALESCE(last_pay.last_payment_date, last_tx.tx_date) as last_payment_date,
+            COALESCE(last_pay.collector_username, last_tx.tx_username) as last_collector_username,
+            COALESCE(last_pay.collector_first_name, last_tx.tx_first_name) as last_collector_first_name,
+            COALESCE(last_pay.collector_last_name, last_tx.tx_last_name) as last_collector_last_name,
+            COALESCE(last_pay.collector_role, last_tx.tx_role) as last_collector_role,
+            last_tx.tx_method,
             nd.device_name as server_name,
             sa.name as area_name,
             sub.name as sub_area_name,
@@ -136,6 +145,47 @@ class CustomersController {
             LEFT JOIN service_areas sa ON sa.service_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) AS UNSIGNED)
             LEFT JOIN sub_areas sub ON sub.sub_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.sub_area_id')) AS UNSIGNED)
             LEFT JOIN users u ON u.user_id = c.owner_id
+            LEFT JOIN (
+                SELECT customer_id, SUM(balance_due) as total_balance_due 
+                FROM invoices 
+                WHERE status = 'pending' 
+                GROUP BY customer_id
+            ) inv ON inv.customer_id = c.customer_id
+            LEFT JOIN (
+                SELECT 
+                    i1.customer_id,
+                    COALESCE(i1.paid_at, i1.invoice_date, i1.created_at) as last_payment_date,
+                    u.username as collector_username,
+                    u.first_name as collector_first_name,
+                    u.last_name as collector_last_name,
+                    u.role as collector_role
+                FROM invoices i1
+                INNER JOIN (
+                    SELECT customer_id, MAX(invoice_id) as max_inv_id 
+                    FROM invoices 
+                    WHERE status = 'paid' 
+                    GROUP BY customer_id
+                ) latest_inv ON i1.invoice_id = latest_inv.max_inv_id
+                LEFT JOIN users u ON u.user_id = COALESCE(i1.collected_by, i1.created_by, i1.creator_id)
+            ) last_pay ON last_pay.customer_id = c.customer_id
+            LEFT JOIN (
+                SELECT 
+                    t1.customer_id,
+                    t1.created_at as tx_date,
+                    t1.method as tx_method,
+                    utx.username as tx_username,
+                    utx.first_name as tx_first_name,
+                    utx.last_name as tx_last_name,
+                    utx.role as tx_role
+                FROM transactions t1
+                INNER JOIN (
+                    SELECT customer_id, MAX(transaction_id) as max_tx_id 
+                    FROM transactions 
+                    WHERE amount > 0 
+                    GROUP BY customer_id
+                ) latest_tx ON t1.transaction_id = latest_tx.max_tx_id
+                LEFT JOIN users utx ON utx.user_id = COALESCE(t1.collector_user_id, t1.initiator_user_id)
+            ) last_tx ON last_tx.customer_id = c.customer_id
             WHERE {$whereSql}
             ORDER BY c.customer_id DESC
             LIMIT {$limit} OFFSET {$offset}";
@@ -144,7 +194,35 @@ class CustomersController {
         $stmt->execute($params);
         $rows = $stmt->fetchAll();
 
-        $formatted = array_map(function($row) {
+        $now = time();
+        $formatted = array_map(function($row) use ($now) {
+            $expiresAtTs = !empty($row['expiry_date']) ? strtotime($row['expiry_date']) : null;
+            $dueAmount = (float)($row['balance_due'] ?? 0);
+
+            if ($row['status'] === 'suspended') {
+                $billingStatus = 'Suspended';
+            } elseif ($row['status'] === 'cancelled') {
+                $billingStatus = 'Left';
+            } elseif (($expiresAtTs !== null && $expiresAtTs < $now) || strcasecmp($row['raw_billing_status'] ?? '', 'expired') === 0) {
+                $billingStatus = 'Expired';
+            } elseif ($dueAmount > 0) {
+                $billingStatus = 'Pending';
+            } else {
+                $billingStatus = 'Paid';
+            }
+
+            $collectorName = trim(($row['last_collector_first_name'] ?? '') . ' ' . ($row['last_collector_last_name'] ?? ''));
+            $rechargedBy = null;
+            if ($collectorName || !empty($row['last_collector_username'])) {
+                $label = $collectorName ?: $row['last_collector_username'];
+                $role = !empty($row['last_collector_role']) ? " ({$row['last_collector_role']})" : '';
+                $rechargedBy = "Recharged by: {$label}{$role}";
+            } elseif (!empty($row['tx_method'])) {
+                $rechargedBy = "Paid via " . ucfirst($row['tx_method']);
+            }
+
+            $balance = $dueAmount > 0 ? -$dueAmount : 0.0;
+
             return [
                 'customer_id' => (string)$row['customer_id'],
                 'customer_code' => $row['customer_code'],
@@ -156,8 +234,10 @@ class CustomersController {
                 'mobile' => $row['phone'],
                 'email' => $row['email'],
                 'username' => $row['username'],
+                'password' => $row['password'] ?? '',
                 'status' => $row['status'],
-                'billing_status' => $row['billing_status'] ?: 'Paid',
+                'billing_status' => $billingStatus,
+                'billingStatus' => $billingStatus,
                 'account_status' => $row['status'],
                 'connection_date' => $row['connection_date'],
                 'connectionDate' => $row['connection_date'],
@@ -170,11 +250,24 @@ class CustomersController {
                 'last_offline_at' => $row['last_offline_at'],
                 'last_logout_at' => $row['last_offline_at'],
                 'last_disconnect_reason' => $row['last_disconnect_reason'],
+                'protocol' => strtoupper($row['protocol'] ?: 'PPPoE'),
                 'package_name' => $row['package_name'],
-                'package_price' => (float)($row['package_price'] ?? 0),
-                'bill_amount' => (float)($row['package_price'] ?? 0),
+                'packageName' => $row['package_name'],
+                'package_price' => (float)$row['package_price'],
+                'packagePrice' => (float)$row['package_price'],
+                'bill_amount' => (float)$row['package_price'],
+                'billAmount' => (float)$row['package_price'],
+                'balance' => $balance,
+                'balance_due' => $dueAmount,
+                'balanceDue' => $dueAmount,
                 'expiry_date' => $row['expiry_date'],
+                'expiryDate' => $row['expiry_date'],
                 'billing_cycle' => $row['billing_cycle'] ?: 'monthly',
+                'billingCycle' => $row['billing_cycle'] ?: 'monthly',
+                'last_payment_date' => $row['last_payment_date'],
+                'lastPaymentDate' => $row['last_payment_date'],
+                'last_payment_by' => $rechargedBy,
+                'lastPaymentBy' => $rechargedBy,
                 'server_name' => $row['server_name'],
                 'area_name' => $row['area_name'],
                 'sub_area_name' => $row['sub_area_name'],
@@ -1066,19 +1159,34 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
 
         $stmt = $db->prepare("SELECT 
             COALESCE(sa.name, 'Unassigned Area') as areaName,
-            COUNT(c.customer_id) as total,
-            SUM(CASE WHEN c.status = 'active' THEN 1 ELSE 0 END) as active,
-            SUM(CASE WHEN c.billing_status = 'Expired' THEN 1 ELSE 0 END) as expired,
-            SUM(CASE WHEN c.status = 'cancelled' THEN 1 ELSE 0 END) as `left`,
-            SUM(CASE WHEN c.status = 'pending_activation' THEN 1 ELSE 0 END) as pending,
-            COUNT(c.customer_id) as pppoe,
-            0 as hotspot,
-            0 as free,
-            0 as vip
+            COUNT(DISTINCT c.customer_id) as total,
+            COUNT(DISTINCT CASE WHEN c.status = 'active' AND COALESCE(c.billing_status, '') NOT IN ('Expired', 'Left') THEN c.customer_id END) as active,
+            COUNT(DISTINCT CASE WHEN c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW() AND c.status = 'active') THEN c.customer_id END) as expired,
+            COUNT(DISTINCT CASE WHEN c.status IN ('cancelled', 'terminated', 'left') OR c.billing_status = 'Left' THEN c.customer_id END) as `left`,
+            COUNT(DISTINCT CASE WHEN c.status = 'pending_activation' OR c.billing_status = 'Pending' THEN c.customer_id END) as pending,
+            COUNT(DISTINCT CASE WHEN COALESCE(na.protocol, cs.protocol, 'pppoe') = 'pppoe' AND c.customer_id IS NOT NULL THEN c.customer_id END) as pppoe,
+            COUNT(DISTINCT CASE WHEN COALESCE(na.protocol, cs.protocol) = 'hotspot' THEN c.customer_id END) as hotspot,
+            COUNT(DISTINCT CASE WHEN c.customer_type = 'free' 
+                    OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.is_free'))) = 'true' 
+                    OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.customer_type'))) = 'free' 
+                    OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.type'))) = 'free' 
+                THEN c.customer_id END) as free,
+            COUNT(DISTINCT CASE WHEN c.customer_type = 'vip' 
+                    OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.is_vip'))) = 'true' 
+                    OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.customer_type'))) = 'vip' 
+                    OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.type'))) = 'vip' 
+                THEN c.customer_id END) as vip
             FROM customers c
-            LEFT JOIN service_areas sa ON sa.service_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) AS UNSIGNED)
+            LEFT JOIN service_areas sa ON sa.tenant_id = c.tenant_id AND (
+                sa.service_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) AS UNSIGNED)
+                OR sa.name = JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id'))
+                OR sa.name = JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.area_name'))
+                OR sa.name = JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.area'))
+            )
+            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status = 'active'
+            LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
             WHERE c.tenant_id = :tid
-            GROUP BY sa.name");
+            GROUP BY COALESCE(sa.name, 'Unassigned Area')");
         $stmt->execute(['tid' => $tenantId]);
         $rows = $stmt->fetchAll();
 

@@ -68,7 +68,25 @@ class AccessProfilesController {
 
         $stmt = $db->prepare("SELECT 
             ap.*,
-            nd.device_name as server_name,
+            COALESCE(
+                nd.device_name,
+                (
+                    SELECT nd2.device_name 
+                    FROM customer_services cs2 
+                    JOIN customer_network_accounts na2 ON na2.customer_id = cs2.customer_id 
+                    JOIN network_devices nd2 ON nd2.network_device_id = na2.network_device_id 
+                    WHERE cs2.access_profile_id = ap.access_profile_id AND nd2.device_name IS NOT NULL 
+                    LIMIT 1
+                ),
+                (
+                    SELECT nd3.device_name 
+                    FROM network_devices nd3 
+                    WHERE nd3.tenant_id = ap.tenant_id AND nd3.device_type = 'router' 
+                    ORDER BY nd3.network_device_id DESC 
+                    LIMIT 1
+                ),
+                'PPPoE Server'
+            ) as server_name,
             COUNT(cs.customer_id) as active_subscribers
             FROM access_profiles ap
             LEFT JOIN network_devices nd ON nd.network_device_id = ap.network_device_id
@@ -102,7 +120,7 @@ class AccessProfilesController {
                 'id' => (string)$r['access_profile_id'],
                 'packageId' => (string)$r['access_profile_id'],
                 'serverId' => (string)$r['network_device_id'],
-                'serverName' => $r['server_name'] ?? 'Main Gateway',
+                'serverName' => !empty($r['server_name']) ? $r['server_name'] : 'PPPoE Server',
                 'name' => $profileName,
                 'profileName' => $profileName,
                 'code' => $r['profile_code'],

@@ -18,6 +18,7 @@ import { openChangePlanModal } from '@/lib/changePlanModal';
 import { openChangeExpiryDateModal } from '@/lib/changeExpiryDateModal';
 import { openLeftCustomerModal } from '@/lib/leftCustomerModal';
 import { openDeleteCustomerModal } from '@/lib/deleteCustomerModal';
+import ModernCheckbox from '@/components/common/ModernCheckbox';
 
 const statusOptions = [
   { value: '', label: 'All Status' },
@@ -855,11 +856,11 @@ export default function CustomersListPage() {
                 <thead className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-700/50 dark:to-slate-800/50 border-b border-slate-200 dark:border-slate-700 sticky top-0">
                   <tr>
                     <th className="px-4 py-3 text-left" style={{ width: '40px' }}>
-                      <input
-                        type="checkbox"
+                      <ModernCheckbox
                         checked={selectedCustomers.size === customers.length && customers.length > 0}
+                        indeterminate={selectedCustomers.size > 0 && selectedCustomers.size < customers.length}
                         onChange={handleSelectAll}
-                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                        title="Select all customers"
                       />
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Customer ID</th>
@@ -894,12 +895,11 @@ export default function CustomersListPage() {
                         }`}
                       >
                         <td className="px-4 py-3">
-                          <input
-                            type="checkbox"
+                          <ModernCheckbox
                             checked={isSelected}
                             onChange={() => handleSelectCustomer(customerId)}
                             onClick={(e) => e.stopPropagation()}
-                            className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                            title="Select customer"
                           />
                         </td>
                         <td className="px-4 py-3 text-sm font-medium text-slate-900 dark:text-slate-100">
