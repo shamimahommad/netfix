@@ -3,7 +3,7 @@ export interface NetworkDevice {
   deviceCode: string;
   deviceName: string;
   deviceType: 'router' | 'switch' | 'olt' | 'access_point' | 'firewall' | 'other';
-  vendor: 'mikrotik' | 'olt' | 'vsol' | 'bdcom' | 'huawei' | 'zte' | 'cdata' | 'cisco' | 'ubiquiti' | 'other' | string;
+  vendor: 'mikrotik' | 'olt' | 'vsol' | 'bdcom' | 'btpon' | 'focuscom' | 'atop' | 'huawei' | 'zte' | 'cdata' | 'cisco' | 'ubiquiti' | 'other' | string;
   status: 'active' | 'inactive' | 'maintenance' | 'offline' | 'decommissioned';
   managementIp: string | null;
   dnsName: string | null;

@@ -513,6 +513,7 @@ class VsolOltClient {
                 'distanceM' => $stat['distanceM'] ?? $diag['distanceM'] ?? null,
                 'description' => !empty($stat['description']) ? $stat['description'] : ($diag['description'] ?? ''),
                 'aliveTime' => $stat['aliveTime'] ?? null,
+                'uptime' => $stat['aliveTime'] ?? null,
                 'lastRegisterTime' => $stat['lastRegisterTime'] ?? null,
                 'lastDeregisterTime' => $stat['lastDeregisterTime'] ?? null,
                 'deregisterReason' => $stat['deregisterReason'] ?? null,

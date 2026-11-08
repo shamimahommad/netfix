@@ -8,6 +8,7 @@ require_once __DIR__ . '/VsolOltClient.php';
 require_once __DIR__ . '/FocuscomOltClient.php';
 require_once __DIR__ . '/BtponOltClient.php';
 require_once __DIR__ . '/BdcomOltClient.php';
+require_once __DIR__ . '/AtopOltClient.php';
 
 class OltSyncService {
     public const DEFAULT_SYNC_INTERVAL_SECONDS = 7200; // 2 Hours
@@ -39,17 +40,18 @@ class OltSyncService {
         $isBdcom = ($vendor === 'bdcom');
         $isBtpon = in_array($vendor, ['btpon', 'tbs', 'ip-com', 'ipcom']);
         $isFocuscom = ($vendor === 'focuscom');
+        $isAtop = ($vendor === 'atop');
 
         if ($isBdcom) {
             // BDCOM communicates strictly via Telnet CLI socket.
             // Priority: management_port (e.g. 1081 or 23) -> web_port -> default 23
             $port = (int)($oltDev['management_port'] ?: ($oltDev['web_port'] ?: 23));
         } else {
-            $defaultPort = $isBtpon ? 16148 : ($isFocuscom ? 2322 : 1010);
+            $defaultPort = $isBtpon ? 16148 : ($isFocuscom ? 2322 : ($isAtop ? 2000 : 1010));
             $port = (int)($oltDev['web_port'] ?: ($oltDev['management_port'] ?: $defaultPort));
         }
-        $user = $oltDev['api_username'] ?: (($isBdcom || $isFocuscom || $isBtpon) ? 'admin' : 'star');
-        $pass = $oltDev['api_password'] ?: (($isBdcom || $isFocuscom || $isBtpon) ? 'admin' : 'star321');
+        $user = $oltDev['api_username'] ?: ($isAtop ? 'root' : (($isBdcom || $isFocuscom || $isBtpon) ? 'admin' : 'star'));
+        $pass = $oltDev['api_password'] ?: (($isBdcom || $isFocuscom || $isBtpon || $isAtop) ? 'admin' : 'star321');
         $proto = ($port == 443) ? 'https' : 'http';
         if ($vendor === 'vsol' && $port != 80) {
             $proto = 'https';
@@ -68,6 +70,8 @@ class OltSyncService {
             $client = new BtponOltClient($ip, $port, $user, $pass, $proto, $timeout);
         } elseif ($isFocuscom) {
             $client = new FocuscomOltClient($ip, $port, $user, $pass, $proto, $timeout);
+        } elseif ($isAtop) {
+            $client = new AtopOltClient($ip, $port, $user, $pass, $proto, $timeout);
         } else {
             $client = new VsolOltClient($ip, $port, $user, $pass, $proto, $timeout);
         }
@@ -78,7 +82,7 @@ class OltSyncService {
         // Option 2: Live MAC Address Table from OLT (includes Router MAC, VLAN ID, Port ID)
         $macTable = [];
         try {
-            if ($isBdcom || $isBtpon || $isFocuscom) {
+            if ($isBdcom || $isBtpon || $isFocuscom || $isAtop) {
                 $macTable = $client->getMacTable(null, $onus);
             } else {
                 $macTable = $client->getMacTable();
@@ -103,6 +107,8 @@ class OltSyncService {
             $defaultModel = 'BTPON PTF-EP8X4G8';
         } elseif ($isFocuscom) {
             $defaultModel = 'Focuscom EP5800-04';
+        } elseif ($isAtop) {
+            $defaultModel = 'ATOP PPSL-10E08';
         } else {
             $defaultModel = ($totalPonPorts > 4) 
                 ? "VSOL " . strtoupper($ponType) . " {$totalPonPorts}-Port OLT" 
@@ -158,8 +164,8 @@ class OltSyncService {
             } catch (\Throwable $e) {}
 
             try {
-                $sql = "INSERT INTO olt_onus (tenant_id, network_device_id, pon_port, pon_port_name, onu_id, mac_address, router_mac, vlan_id, pppoe_username, rx_power_dbm, status, last_sync_at) 
-                        VALUES (:tid, :did, :pon, :pname, :onuid, :mac, :rmac, :vlan, :pppoe, :rx, :status, NOW())
+                $sql = "INSERT INTO olt_onus (tenant_id, network_device_id, pon_port, pon_port_name, onu_id, mac_address, router_mac, vlan_id, pppoe_username, rx_power_dbm, status, uptime, last_sync_at) 
+                        VALUES (:tid, :did, :pon, :pname, :onuid, :mac, :rmac, :vlan, :pppoe, :rx, :status, :uptime, NOW())
                         ON DUPLICATE KEY UPDATE 
                             pon_port = VALUES(pon_port),
                             pon_port_name = VALUES(pon_port_name),
@@ -169,6 +175,7 @@ class OltSyncService {
                             pppoe_username = COALESCE(VALUES(pppoe_username), pppoe_username),
                             rx_power_dbm = VALUES(rx_power_dbm),
                             status = VALUES(status),
+                            uptime = VALUES(uptime),
                             last_sync_at = NOW()";
                 $insStmt = $db->prepare($sql);
 
@@ -197,6 +204,7 @@ class OltSyncService {
                         'pppoe' => $pppoeUser,
                         'rx' => $onu['rxPowerDbm'],
                         'status' => $onu['status'] ?? 'online',
+                        'uptime' => !empty($onu['aliveTime']) ? $onu['aliveTime'] : (!empty($onu['uptime']) ? $onu['uptime'] : null),
                     ]);
                 }
                 $db->commit();
@@ -206,14 +214,15 @@ class OltSyncService {
 
                 // Fallback: insert with basic columns guaranteed in standard schema
                 try {
-                    $basicSql = "INSERT INTO olt_onus (tenant_id, network_device_id, pon_port, pon_port_name, onu_id, mac_address, rx_power_dbm, status, last_sync_at) 
-                                 VALUES (:tid, :did, :pon, :pname, :onuid, :mac, :rx, :status, NOW())
+                    $basicSql = "INSERT INTO olt_onus (tenant_id, network_device_id, pon_port, pon_port_name, onu_id, mac_address, rx_power_dbm, status, uptime, last_sync_at) 
+                                 VALUES (:tid, :did, :pon, :pname, :onuid, :mac, :rx, :status, :uptime, NOW())
                                  ON DUPLICATE KEY UPDATE 
                                      pon_port = VALUES(pon_port),
                                      pon_port_name = VALUES(pon_port_name),
                                      onu_id = VALUES(onu_id),
                                      rx_power_dbm = VALUES(rx_power_dbm),
                                      status = VALUES(status),
+                                     uptime = VALUES(uptime),
                                      last_sync_at = NOW()";
                     $basicStmt = $db->prepare($basicSql);
 
@@ -228,6 +237,7 @@ class OltSyncService {
                             'mac' => $onu['macAddress'],
                             'rx' => $onu['rxPowerDbm'],
                             'status' => $onu['status'] ?? 'online',
+                            'uptime' => !empty($onu['aliveTime']) ? $onu['aliveTime'] : (!empty($onu['uptime']) ? $onu['uptime'] : null),
                         ]);
                     }
                     $db->commit();
@@ -326,9 +336,11 @@ class OltSyncService {
             unset($pp);
         }
 
-        $defaultModel = ($totalPonPorts > 4) 
-            ? "VSOL " . strtoupper($ponType) . " {$totalPonPorts}-Port OLT" 
-            : 'V1601E04-DP';
+        $defaultModel = ($oltDev['vendor'] === 'atop')
+            ? "ATOP " . strtoupper($ponType) . " {$totalPonPorts}-Port OLT"
+            : (($totalPonPorts > 4) 
+                ? "VSOL " . strtoupper($ponType) . " {$totalPonPorts}-Port OLT" 
+                : 'V1601E04-DP');
 
         $isSynced = !empty($telemetry['system']) || !empty($lastSync);
         $system = $telemetry['system'] ?? [
@@ -389,6 +401,9 @@ class OltSyncService {
             }
             if (!in_array('pppoe_username', $existingCols)) {
                 $db->exec("ALTER TABLE olt_onus ADD COLUMN pppoe_username VARCHAR(100) NULL AFTER vlan_id");
+            }
+            if (!in_array('uptime', $existingCols)) {
+                $db->exec("ALTER TABLE olt_onus ADD COLUMN uptime VARCHAR(60) NULL AFTER status");
             }
             $checked = true;
         } catch (\Throwable $e) {

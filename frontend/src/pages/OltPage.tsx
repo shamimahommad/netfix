@@ -614,10 +614,20 @@ export default function OltPage() {
                     </label>
                     <select
                       value={formData.vendor || 'vsol'}
-                      onChange={(e) => setFormData((p) => ({ ...p, vendor: e.target.value }))}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setFormData((p) => ({
+                          ...p,
+                          vendor: v,
+                          webPort: v === 'atop' ? 2000 : (v === 'btpon' ? 16148 : (v === 'focuscom' ? 2322 : p.webPort)),
+                          apiUsername: v === 'atop' && !p.apiUsername ? 'root' : p.apiUsername,
+                          apiPassword: v === 'atop' && !p.apiPassword ? 'admin' : p.apiPassword,
+                        }));
+                      }}
                       className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100 font-medium"
                     >
                       <option value="vsol">VSOL (V1600 Series EPON/GPON)</option>
+                      <option value="atop">ATOP (PPSL Series EPON/GPON)</option>
                       <option value="bdcom">BDCOM (P3310, GP3600 Series)</option>
                       <option value="btpon">BTPON / TBS (PTF Series)</option>
                       <option value="focuscom">Focuscom (EP5800 Series)</option>
@@ -898,6 +908,7 @@ export default function OltPage() {
                       className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
                     >
                       <option value="vsol">VSOL</option>
+                      <option value="atop">ATOP</option>
                       <option value="bdcom">BDCOM</option>
                       <option value="btpon">BTPON / TBS</option>
                       <option value="focuscom">Focuscom</option>

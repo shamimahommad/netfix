@@ -38,6 +38,7 @@ class MacVendorService {
         'E4:8D:8C' => 'MikroTik',
         '2C:C8:1B' => 'MikroTik',
         '4C:46:D1' => 'VSOL Electronics',
+        '98:C7:A4' => 'ATOP Technologies',
         'D4:0D:AB' => 'D-Link Corporation',
         '74:4D:28' => 'Mercusys Technologies',
         '98:25:4A' => 'Xiaomi Communications',

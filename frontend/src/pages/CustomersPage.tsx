@@ -1,5 +1,5 @@
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import { customersService } from '@/services/customers.service';
@@ -391,7 +391,6 @@ export default function CustomersPage() {
   const [sendInfoMessage, setSendInfoMessage] = useState<string>('');
   const [isSendingInfo, setIsSendingInfo] = useState<boolean>(false);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: SortDirection }>({ key: '', direction: null });
-  const [sortedCustomers, setSortedCustomers] = useState<Customer[]>([]);
   const [isBulkRenewModalOpen, setIsBulkRenewModalOpen] = useState(false);
   const [bulkRenewDuration, setBulkRenewDuration] = useState<string>('full_month');
   const [isSyncingSessions, setIsSyncingSessions] = useState(false);
@@ -466,126 +465,30 @@ export default function CustomersPage() {
     if (urlStatusFromUrl) setStatusFilter(urlStatusFromUrl);
   }, [urlStatusFromUrl]);
 
+  // Sync search when URL search param changes
+  useEffect(() => {
+    const urlSearch = searchParams.get('search');
+    if (urlSearch !== null && urlSearch !== search) {
+      setSearch(urlSearch);
+      setCurrentPage(1);
+    }
+  }, [searchParams]);
+
   useEffect(() => {
     if (type === 'add') return;
     loadCustomers();
   }, [type, statusFilter, urlOwnerId]);
 
-  // Apply sorting when customers or sortConfig changes
+  // Fallback debounced server search if total records exceed in-memory limit
   useEffect(() => {
-    if (!sortConfig.key || !sortConfig.direction) {
-      setSortedCustomers(customers);
-      return;
-    }
+    if (total <= 5000) return;
 
-    const sorted = [...customers].sort((a, b) => {
-      let aValue: any;
-      let bValue: any;
+    const timer = setTimeout(() => {
+      loadCustomers(search);
+    }, 400);
 
-      switch (sortConfig.key) {
-        case 'id':
-          const aCode = a.customer_code || a.customerCode || '';
-          const bCode = b.customer_code || b.customerCode || '';
-          aValue = parseInt(formatCustomerIdDisplay(aCode), 10) || 0;
-          bValue = parseInt(formatCustomerIdDisplay(bCode), 10) || 0;
-          break;
-        case 'userId':
-          aValue = (a.username || '').toLowerCase();
-          bValue = (b.username || '').toLowerCase();
-          break;
-        case 'name':
-          aValue = (a.full_name || a.fullName || '').toLowerCase();
-          bValue = (b.full_name || b.fullName || '').toLowerCase();
-          break;
-        case 'mobile':
-          aValue = (a.phone || a.mobile || '').toLowerCase();
-          bValue = (b.phone || b.mobile || '').toLowerCase();
-          break;
-        case 'package':
-          aValue = (a.package_name || '').toLowerCase();
-          bValue = (b.package_name || '').toLowerCase();
-          break;
-        case 'protocol':
-          aValue = (a.protocol || '').toLowerCase();
-          bValue = (b.protocol || '').toLowerCase();
-          break;
-        case 'bill':
-          aValue = a.bill_amount ?? a.package_price ?? 0;
-          bValue = b.bill_amount ?? b.package_price ?? 0;
-          break;
-        case 'balance':
-          aValue = a.balance ?? 0;
-          bValue = b.balance ?? 0;
-          break;
-        case 'expDate':
-          aValue = a.expiry_date ? new Date(a.expiry_date).getTime() : 0;
-          bValue = b.expiry_date ? new Date(b.expiry_date).getTime() : 0;
-          break;
-        case 'lastPayDate':
-          aValue = a.last_payment_date ? new Date(a.last_payment_date).getTime() : 0;
-          bValue = b.last_payment_date ? new Date(b.last_payment_date).getTime() : 0;
-          break;
-        case 'billingStatus':
-          const statusOrder: Record<string, number> = {
-            Pending: 0,
-            Paid: 1,
-            Due: 2,
-            Expired: 3,
-            Suspended: 4,
-            Left: 5,
-          };
-          aValue = statusOrder[a.billing_status || ''] ?? 6;
-          bValue = statusOrder[b.billing_status || ''] ?? 6;
-          break;
-        case 'remainingDays':
-          aValue = calculateRemainingDays(a.expiry_date) ?? 0;
-          bValue = calculateRemainingDays(b.expiry_date) ?? 0;
-          break;
-        case 'uptime':
-          aValue = a.uptime_seconds ?? 0;
-          bValue = b.uptime_seconds ?? 0;
-          break;
-        case 'ip':
-          aValue = (a.ip_address || '').toLowerCase();
-          bValue = (b.ip_address || '').toLowerCase();
-          break;
-        case 'mac':
-          aValue = (a.mac_address || '').toLowerCase();
-          bValue = (b.mac_address || '').toLowerCase();
-          break;
-        case 'upload':
-          aValue = a.upload_bytes ?? 0;
-          bValue = b.upload_bytes ?? 0;
-          break;
-        case 'download':
-          aValue = a.download_bytes ?? 0;
-          bValue = b.download_bytes ?? 0;
-          break;
-        case 'lastOffline': {
-          const aTime = a.last_logout_at || a.last_offline_at;
-          const bTime = b.last_logout_at || b.last_offline_at;
-          const aParsed = aTime && !aTime.startsWith('0000') ? new Date(aTime).getTime() : 0;
-          const bParsed = bTime && !bTime.startsWith('0000') ? new Date(bTime).getTime() : 0;
-          aValue = isNaN(aParsed) ? 0 : aParsed;
-          bValue = isNaN(bParsed) ? 0 : bParsed;
-          break;
-        }
-        default:
-          return 0;
-      }
-
-      // Handle null/undefined values
-      if (aValue === null || aValue === undefined) aValue = '';
-      if (bValue === null || bValue === undefined) bValue = '';
-
-      // Compare values
-      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
-      return 0;
-    });
-
-    setSortedCustomers(sorted);
-  }, [customers, sortConfig]);
+    return () => clearTimeout(timer);
+  }, [search, total]);
 
   // Calculate dropdown position
   const calculateDropdownPosition = (buttonElement: HTMLButtonElement, dropdownWidth: number = 224, maxHeight: number = 320) => {
@@ -737,7 +640,7 @@ export default function CustomersPage() {
     };
   }, [showMoreMenu, openActionMenu, actionMenuPosition, moreMenuPosition]);
 
-  const loadCustomers = async () => {
+  const loadCustomers = async (serverSearch?: string) => {
     setIsLoading(true);
     setError(null);
 
@@ -760,8 +663,10 @@ export default function CustomersPage() {
         filters.status = statusFilter;
       }
 
-      if (search) {
-        filters.search = search;
+      // If explicit server search requested or dataset exceeds in-memory limit
+      const activeSearch = serverSearch !== undefined ? serverSearch : (total > 5000 ? search : '');
+      if (activeSearch) {
+        filters.search = activeSearch;
       }
 
       if (urlOwnerId) {
@@ -776,21 +681,21 @@ export default function CustomersPage() {
         ...filters,
         type: type, // Pass type to trigger realtime sync on backend
       });
-      let filteredCustomers = response.data || [];
+      let fetchedCustomers = response.data || [];
 
       // Client-side filtering for online/offline
       if (type === 'online') {
-        filteredCustomers = filteredCustomers.filter(c => c.online_status === true);
+        fetchedCustomers = fetchedCustomers.filter(c => c.online_status === true);
       } else if (type === 'offline') {
-        filteredCustomers = filteredCustomers.filter(c => c.online_status === false);
+        fetchedCustomers = fetchedCustomers.filter(c => c.online_status === false);
       }
 
       if (type === 'expiring-soon') {
-        filteredCustomers = filteredCustomers.filter(c => c.status === 'active');
+        fetchedCustomers = fetchedCustomers.filter(c => c.status === 'active');
       }
 
-      setCustomers(filteredCustomers);
-      setTotal(response.meta?.total ?? filteredCustomers.length);
+      setCustomers(fetchedCustomers);
+      setTotal(response.meta?.total ?? fetchedCustomers.length);
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to load customers. Please try again.';
       setError(errorMessage);
@@ -802,7 +707,8 @@ export default function CustomersPage() {
 
   const handleSearch = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    loadCustomers();
+    setCurrentPage(1);
+    loadCustomers(total > 5000 ? search : undefined);
   };
 
   const handleView = (customerId: string) => {
@@ -905,8 +811,161 @@ export default function CustomersPage() {
     return diffDays > 0 ? diffDays : 0;
   };
 
+  // Live client-side search filtering across multiple fields:
+  // Name, phone/mobile, customer code, formatted ID, username, IP, MAC, area, sub-area, server, package, email, billing status
+  const filteredCustomers = useMemo(() => {
+    if (!search.trim()) return customers;
+    const q = search.trim().toLowerCase();
+    return customers.filter((c) => {
+      const fullName = (c.full_name || c.fullName || '').toLowerCase();
+      const phone = (c.phone || c.mobile || '').toLowerCase();
+      const customerCode = (c.customer_code || c.customerCode || '').toLowerCase();
+      const formattedCode = formatCustomerIdDisplay(c.customer_code || c.customerCode || '').toLowerCase();
+      const username = (c.username || '').toLowerCase();
+      const ip = (c.ip_address || '').toLowerCase();
+      const mac = (c.mac_address || '').toLowerCase();
+      const area = (c.area_name || '').toLowerCase();
+      const subArea = (c.sub_area_name || '').toLowerCase();
+      const server = (c.server_name || '').toLowerCase();
+      const pkg = (c.package_name || '').toLowerCase();
+      const email = (c.email || '').toLowerCase();
+      const billingStatus = (c.billing_status || '').toLowerCase();
+
+      return (
+        fullName.includes(q) ||
+        phone.includes(q) ||
+        customerCode.includes(q) ||
+        formattedCode.includes(q) ||
+        username.includes(q) ||
+        ip.includes(q) ||
+        mac.includes(q) ||
+        area.includes(q) ||
+        subArea.includes(q) ||
+        server.includes(q) ||
+        pkg.includes(q) ||
+        email.includes(q) ||
+        billingStatus.includes(q)
+      );
+    });
+  }, [customers, search]);
+
+  // Apply sorting to filtered customers
+  const sortedCustomers = useMemo(() => {
+    if (!sortConfig.key || !sortConfig.direction) {
+      return filteredCustomers;
+    }
+
+    const sorted = [...filteredCustomers].sort((a, b) => {
+      let aValue: any;
+      let bValue: any;
+
+      switch (sortConfig.key) {
+        case 'id':
+          const aCode = a.customer_code || a.customerCode || '';
+          const bCode = b.customer_code || b.customerCode || '';
+          aValue = parseInt(formatCustomerIdDisplay(aCode), 10) || 0;
+          bValue = parseInt(formatCustomerIdDisplay(bCode), 10) || 0;
+          break;
+        case 'userId':
+          aValue = (a.username || '').toLowerCase();
+          bValue = (b.username || '').toLowerCase();
+          break;
+        case 'name':
+          aValue = (a.full_name || a.fullName || '').toLowerCase();
+          bValue = (b.full_name || b.fullName || '').toLowerCase();
+          break;
+        case 'mobile':
+          aValue = (a.phone || a.mobile || '').toLowerCase();
+          bValue = (b.phone || b.mobile || '').toLowerCase();
+          break;
+        case 'package':
+          aValue = (a.package_name || '').toLowerCase();
+          bValue = (b.package_name || '').toLowerCase();
+          break;
+        case 'protocol':
+          aValue = (a.protocol || '').toLowerCase();
+          bValue = (b.protocol || '').toLowerCase();
+          break;
+        case 'bill':
+          aValue = a.bill_amount ?? a.package_price ?? 0;
+          bValue = b.bill_amount ?? b.package_price ?? 0;
+          break;
+        case 'balance':
+          aValue = a.balance ?? 0;
+          bValue = b.balance ?? 0;
+          break;
+        case 'expDate':
+          aValue = a.expiry_date ? new Date(a.expiry_date).getTime() : 0;
+          bValue = b.expiry_date ? new Date(b.expiry_date).getTime() : 0;
+          break;
+        case 'lastPayDate':
+          aValue = a.last_payment_date ? new Date(a.last_payment_date).getTime() : 0;
+          bValue = b.last_payment_date ? new Date(b.last_payment_date).getTime() : 0;
+          break;
+        case 'billingStatus':
+          const statusOrder: Record<string, number> = {
+            Pending: 0,
+            Paid: 1,
+            Due: 2,
+            Expired: 3,
+            Suspended: 4,
+            Left: 5,
+          };
+          aValue = statusOrder[a.billing_status || ''] ?? 6;
+          bValue = statusOrder[b.billing_status || ''] ?? 6;
+          break;
+        case 'remainingDays':
+          aValue = calculateRemainingDays(a.expiry_date) ?? 0;
+          bValue = calculateRemainingDays(b.expiry_date) ?? 0;
+          break;
+        case 'uptime':
+          aValue = a.uptime_seconds ?? 0;
+          bValue = b.uptime_seconds ?? 0;
+          break;
+        case 'ip':
+          aValue = (a.ip_address || '').toLowerCase();
+          bValue = (b.ip_address || '').toLowerCase();
+          break;
+        case 'mac':
+          aValue = (a.mac_address || '').toLowerCase();
+          bValue = (b.mac_address || '').toLowerCase();
+          break;
+        case 'upload':
+          aValue = a.upload_bytes ?? 0;
+          bValue = b.upload_bytes ?? 0;
+          break;
+        case 'download':
+          aValue = a.download_bytes ?? 0;
+          bValue = b.download_bytes ?? 0;
+          break;
+        case 'lastOffline': {
+          const aTime = a.last_logout_at || a.last_offline_at;
+          const bTime = b.last_logout_at || b.last_offline_at;
+          const aParsed = aTime && !aTime.startsWith('0000') ? new Date(aTime).getTime() : 0;
+          const bParsed = bTime && !bTime.startsWith('0000') ? new Date(bTime).getTime() : 0;
+          aValue = isNaN(aParsed) ? 0 : aParsed;
+          bValue = isNaN(bParsed) ? 0 : bParsed;
+          break;
+        }
+        default:
+          return 0;
+      }
+
+      // Handle null/undefined values
+      if (aValue === null || aValue === undefined) aValue = '';
+      if (bValue === null || bValue === undefined) bValue = '';
+
+      // Compare values
+      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return sorted;
+  }, [filteredCustomers, sortConfig]);
+
   // Pagination calculations
-  const allSortedCustomers = sortConfig.key && sortConfig.direction ? sortedCustomers : customers;
+  const allSortedCustomers = sortedCustomers;
   const totalEntries = allSortedCustomers.length;
   const totalPages = Math.max(1, Math.ceil(totalEntries / pageSize));
   const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
@@ -1432,7 +1491,11 @@ export default function CustomersPage() {
         icon={<CustomersIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
         title={customerType.title}
         subtitle={customerType.description}
-        badge={`${total} ${type === 'online' ? (total === 1 ? 'Online' : 'Online') : type === 'offline' ? (total === 1 ? 'Offline' : 'Offline') : (total === 1 ? 'Customer' : 'Customers')}`}
+        badge={
+          search.trim()
+            ? `${totalEntries} of ${total} ${type === 'online' ? 'Online' : type === 'offline' ? 'Offline' : (total === 1 ? 'Customer' : 'Customers')}`
+            : `${total} ${type === 'online' ? (total === 1 ? 'Online' : 'Online') : type === 'offline' ? (total === 1 ? 'Offline' : 'Offline') : (total === 1 ? 'Customer' : 'Customers')}`
+        }
         actions={
           <div className="flex items-center gap-2">
             {type === 'online' && (
@@ -1512,20 +1575,41 @@ export default function CustomersPage() {
             </div>
 
             <div className="w-full sm:w-64 md:w-72 lg:w-80 relative min-w-0">
-              <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
               <input
                 type="text"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setCurrentPage(1);
+                }}
                 placeholder="Search by name, phone, or customer code..."
-                className="w-full pl-9 pr-3 py-1.5 sm:py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 transition-all"
+                className="w-full pl-9 pr-8 py-1.5 sm:py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 transition-all"
               />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch('');
+                    setCurrentPage(1);
+                  }}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded-full hover:bg-slate-200/60 dark:hover:bg-slate-700/60 transition-colors cursor-pointer"
+                  title="Clear search"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
             </div>
             {!customerType.statusFilter && (
               <div className="w-32 sm:w-36 relative">
                 <select
                   value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
+                  onChange={(e) => {
+                    setStatusFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
                   className="w-full px-2.5 py-1.5 sm:py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-xs sm:text-sm text-slate-900 dark:text-slate-100 transition-all"
                 >
                   <option value="">All Status</option>
@@ -1539,7 +1623,7 @@ export default function CustomersPage() {
             )}
             <button
               type="submit"
-              className="px-3.5 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all shadow-sm active:scale-95 whitespace-nowrap text-xs sm:text-sm flex items-center justify-center gap-1.5"
+              className="px-3.5 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all shadow-sm active:scale-95 whitespace-nowrap text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <SearchIcon className="w-4 h-4" />
               Filter
@@ -1825,7 +1909,36 @@ export default function CustomersPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
-                  {paginatedCustomers.map((customer) => {
+                  {paginatedCustomers.length === 0 ? (
+                    <tr>
+                      <td colSpan={14} className="px-6 py-12 text-center">
+                        <div className="flex flex-col items-center justify-center max-w-sm mx-auto">
+                          <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center text-slate-400 mb-3">
+                            <SearchIcon className="w-6 h-6" />
+                          </div>
+                          <p className="text-base font-semibold text-slate-800 dark:text-slate-200">
+                            {search ? `No customers found matching "${search}"` : 'No customers found'}
+                          </p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 mb-4">
+                            {search ? 'Try checking for typos or searching by phone number or customer code.' : 'No customer records available.'}
+                          </p>
+                          {search && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSearch('');
+                                setCurrentPage(1);
+                              }}
+                              className="px-3.5 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                            >
+                              Clear Search
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedCustomers.map((customer) => {
                     const customerId = customer.customer_id || customer.customerId || '';
                     const customerCode = customer.customer_code || customer.customerCode || '';
                     const displayId = formatCustomerIdDisplay(customerCode);
@@ -2100,8 +2213,9 @@ export default function CustomersPage() {
                         </td>
                       </tr>
                     );
-                  })}
-                </tbody>
+                  })
+                )}
+              </tbody>
                 {/* Footer Summary Row */}
                 <tfoot className="bg-gradient-to-r from-slate-50 to-blue-50/50 dark:from-slate-700/50 dark:to-blue-900/20 border-t-2 border-blue-200 dark:border-slate-700 sticky bottom-0 z-10">
                   <tr>
@@ -2344,7 +2458,36 @@ export default function CustomersPage() {
                       </tr>
                     </thead>
                     <tbody className="bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
-                      {paginatedCustomers.map((customer) => {
+                      {paginatedCustomers.length === 0 ? (
+                        <tr>
+                          <td colSpan={10} className="px-6 py-12 text-center">
+                            <div className="flex flex-col items-center justify-center max-w-sm mx-auto">
+                              <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center text-slate-400 mb-3">
+                                <SearchIcon className="w-6 h-6" />
+                              </div>
+                              <p className="text-base font-semibold text-slate-800 dark:text-slate-200">
+                                {search ? `No customers found matching "${search}"` : 'No customers found'}
+                              </p>
+                              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 mb-4">
+                                {search ? 'Try checking for typos or searching by phone number or customer code.' : 'No customer records available.'}
+                              </p>
+                              {search && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSearch('');
+                                    setCurrentPage(1);
+                                  }}
+                                  className="px-3.5 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                                >
+                                  Clear Search
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        paginatedCustomers.map((customer) => {
                         const customerId = customer.customer_id || customer.customerId || '';
                         const customerCode = customer.customer_code || customer.customerCode || '';
                         const displayId = formatCustomerIdDisplay(customerCode);
@@ -2618,8 +2761,9 @@ export default function CustomersPage() {
                         </td>
                       </tr>
                     );
-                  })}
-                </tbody>
+                  })
+                )}
+              </tbody>
                     {/* Footer Summary Row - Mobile */}
                     <tfoot className="bg-gradient-to-r from-slate-50 to-blue-50/50 dark:from-slate-700/50 dark:to-blue-900/20 border-t-2 border-blue-200 dark:border-slate-700 sticky bottom-0 z-10">
                       <tr>

@@ -116,7 +116,7 @@ CREATE TABLE `customer_id_reservations` (
   KEY `idx_reserved_code_status` (`reserved_code`,`status`),
   KEY `idx_tenant_status_expires` (`tenant_id`,`status`,`expires_at`),
   KEY `idx_session_token` (`session_token`)
-) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -379,7 +379,7 @@ CREATE TABLE `network_devices` (
   UNIQUE KEY `uq_device_code` (`device_code`),
   KEY `idx_devices_tenant` (`tenant_id`),
   KEY `idx_devices_status` (`status`)
-) ENGINE=InnoDB AUTO_INCREMENT=1000004 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=1000006 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -402,6 +402,7 @@ CREATE TABLE `olt_onus` (
   `pppoe_username` varchar(100) DEFAULT NULL,
   `rx_power_dbm` decimal(5,2) DEFAULT NULL,
   `status` varchar(30) NOT NULL DEFAULT 'online',
+  `uptime` varchar(60) DEFAULT NULL,
   `last_sync_at` datetime NOT NULL DEFAULT current_timestamp(),
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
@@ -409,7 +410,7 @@ CREATE TABLE `olt_onus` (
   UNIQUE KEY `uq_olt_onu` (`tenant_id`,`network_device_id`,`mac_address`),
   KEY `idx_olt_mac` (`mac_address`),
   KEY `idx_olt_device` (`network_device_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=7145 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=8152 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -959,4 +960,4 @@ CREATE TABLE `wallets` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-11-08 22:35:22
+-- Dump completed on 2026-11-09  1:54:07

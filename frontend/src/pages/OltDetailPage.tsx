@@ -35,6 +35,7 @@ interface OnuRecord {
   pppoe?: string | null;
   rxPowerDbm?: number | null;
   status: string;
+  uptime?: string | null;
   lastSyncAt: string;
   customer?: {
     customerId: string;
@@ -42,6 +43,82 @@ interface OnuRecord {
     customerName: string;
     username: string;
   } | null;
+}
+
+function formatOnuUptime(uptime: string | null | undefined, status?: string): JSX.Element {
+  if (!uptime || uptime === '—' || uptime === '-' || uptime === '00:00:00' || uptime === '--' || status === 'offline' || uptime.toLowerCase().includes('not register')) {
+    return <span className="text-slate-400 dark:text-slate-500 font-mono">—</span>;
+  }
+
+  const raw = uptime.trim();
+
+  // Match ATOP / compact format "0d7h18m5s" or "2d 4h 10m"
+  const compactMatch = raw.match(/^(\d+)d\s*(\d+)h\s*(\d+)m(?:\s*(\d+)s)?$/i);
+  if (compactMatch) {
+    const days = parseInt(compactMatch[1], 10);
+    const hours = parseInt(compactMatch[2], 10);
+    const mins = parseInt(compactMatch[3], 10);
+    const secs = compactMatch[4] ? parseInt(compactMatch[4], 10) : 0;
+    const formatted = days > 0
+      ? `${days}d ${hours}h ${mins}m`
+      : (hours > 0 ? `${hours}h ${mins}m` : `${mins}m ${secs}s`);
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 font-semibold text-emerald-600 dark:text-emerald-400 font-mono"
+        title={`Alive Time: ${raw}`}
+      >
+        <Clock className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+        <span>{formatted}</span>
+      </span>
+    );
+  }
+
+  // Match "D HH:MM:SS" or "DD HH:MM:SS" (e.g. "11 11:43:17", "2 04:53:34")
+  const dayMatch = raw.match(/^(\d+)\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (dayMatch) {
+    const days = parseInt(dayMatch[1], 10);
+    const hours = parseInt(dayMatch[2], 10);
+    const mins = parseInt(dayMatch[3], 10);
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 font-semibold text-emerald-600 dark:text-emerald-400 font-mono"
+        title={`Alive Time: ${raw}`}
+      >
+        <Clock className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+        <span>{days}d {hours}h {mins}m</span>
+      </span>
+    );
+  }
+
+  // Match "HH:MM:SS" (e.g. "07:15:44")
+  const timeMatch = raw.match(/^(\d{1,2}):(\d{2}):(\d{2})$/);
+  if (timeMatch) {
+    const hours = parseInt(timeMatch[1], 10);
+    const mins = parseInt(timeMatch[2], 10);
+    const secs = parseInt(timeMatch[3], 10);
+    const formatted = hours > 0
+      ? `${hours}h ${mins}m`
+      : (mins > 0 ? `${mins}m ${secs}s` : `${secs}s`);
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 font-semibold text-emerald-600 dark:text-emerald-400 font-mono"
+        title={`Alive Time: ${raw}`}
+      >
+        <Clock className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+        <span>{formatted}</span>
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 font-medium text-emerald-600 dark:text-emerald-400 font-mono"
+      title={`Alive Time: ${raw}`}
+    >
+      <Clock className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+      <span>{raw}</span>
+    </span>
+  );
 }
 
 export default function OltDetailPage() {
@@ -269,8 +346,9 @@ export default function OltDetailPage() {
       const custNameMatches = onu.customer?.customerName.toLowerCase().includes(q);
       const custUserMatches = onu.customer?.username.toLowerCase().includes(q);
       const custCodeMatches = onu.customer?.customerCode.toLowerCase().includes(q);
+      const uptimeMatches = onu.uptime ? onu.uptime.toLowerCase().includes(q) : false;
 
-      return macMatches || routerMacMatches || vlanMatches || pppoeMatches || onuIdMatches || custNameMatches || custUserMatches || custCodeMatches;
+      return macMatches || routerMacMatches || vlanMatches || pppoeMatches || onuIdMatches || custNameMatches || custUserMatches || custCodeMatches || uptimeMatches;
     });
   }, [onus, selectedPon, signalFilter, searchQuery]);
 
@@ -810,7 +888,7 @@ export default function OltDetailPage() {
                   PPPoE
                 </th>
                 <th className="px-4 py-3.5 font-bold" style={{ width: '12%' }}>
-                  Last Synced
+                  Uptime
                 </th>
               </tr>
             </thead>
@@ -964,9 +1042,9 @@ export default function OltDetailPage() {
                         )}
                       </td>
 
-                      {/* Last Updated */}
-                      <td className="px-4 py-3 text-slate-500 dark:text-slate-400 font-mono text-xs truncate">
-                        {onu.lastSyncAt ? onu.lastSyncAt.split(' ')[1] || onu.lastSyncAt : '—'}
+                      {/* Uptime */}
+                      <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">
+                        {formatOnuUptime(onu.uptime, onu.status)}
                       </td>
                     </tr>
                   );

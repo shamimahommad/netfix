@@ -43,7 +43,7 @@ class NetworkController {
             if ($type === 'mikrotik') {
                 $where[] = "(vendor = 'mikrotik' OR device_type = 'router')";
             } elseif ($type === 'olt') {
-                $where[] = "(device_type = 'olt' OR vendor = 'olt' OR vendor IN ('vsol', 'bdcom', 'huawei', 'zte', 'cdata', 'syrotech', 'focuscom', 'btpon', 'tbs', 'ip-com'))";
+                $where[] = "(device_type = 'olt' OR vendor = 'olt' OR vendor IN ('vsol', 'bdcom', 'huawei', 'zte', 'cdata', 'syrotech', 'focuscom', 'btpon', 'tbs', 'ip-com', 'atop'))";
             }
         }
 
@@ -166,7 +166,7 @@ class NetworkController {
         if ($type === 'router' || $type === 'mikrotik') {
             $where[] = "(device_type = 'router' OR vendor = 'mikrotik') AND device_type != 'olt'";
         } elseif ($type === 'olt') {
-            $where[] = "(device_type = 'olt' OR vendor IN ('olt', 'vsol', 'bdcom', 'huawei', 'zte', 'cdata', 'syrotech', 'focuscom', 'btpon', 'tbs', 'ip-com'))";
+            $where[] = "(device_type = 'olt' OR vendor IN ('olt', 'vsol', 'bdcom', 'huawei', 'zte', 'cdata', 'syrotech', 'focuscom', 'btpon', 'tbs', 'ip-com', 'atop'))";
         } elseif ($type !== 'all') {
             $where[] = "device_type = :dtype";
             $params['dtype'] = $type;
@@ -805,6 +805,29 @@ class NetworkController {
                             ]);
                             return;
                         }
+                    } elseif ($vendor === 'atop') {
+                        require_once __DIR__ . '/../lib/AtopOltClient.php';
+                        $port = $webPort ?: ($managementPort ?: 2000);
+                        $client = new AtopOltClient($ip, $port, $username, $password, 'http', 6);
+                        $ok = @$client->login();
+                        if ($ok) {
+                            $sys = $client->getSystemInfo(8);
+                            $model = $sys['model'] ?? 'ATOP PPSL-10E08';
+                            Response::json([
+                                'success' => true,
+                                'status' => 'authenticated',
+                                'message' => "Login Successful! Connected to {$model} Web API.",
+                                'data' => ['model' => $model],
+                            ]);
+                            return;
+                        } else {
+                            Response::json([
+                                'success' => false,
+                                'status' => 'auth_failed',
+                                'message' => "Login Failed! Could not authenticate with ATOP OLT on port {$port}. Verify credentials and Web port.",
+                            ]);
+                            return;
+                        }
                     } else {
                         // Default VSOL or others
                         require_once __DIR__ . '/../lib/VsolOltClient.php';
@@ -1320,6 +1343,7 @@ class NetworkController {
                 'pppoe' => $pppoeUsername,
                 'rxPowerDbm' => (float)$r['rx_power_dbm'],
                 'status' => $r['status'],
+                'uptime' => $r['uptime'] ?? null,
                 'lastSyncAt' => $r['last_sync_at'],
                 'customer' => $matchedCustomer,
             ];

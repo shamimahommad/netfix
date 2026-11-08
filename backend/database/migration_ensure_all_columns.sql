@@ -53,3 +53,11 @@ CREATE TABLE IF NOT EXISTS `customer_id_reservations` (
     KEY `idx_tenant_status_expires` (`tenant_id`, `status`, `expires_at`),
     KEY `idx_session_token` (`session_token`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 5. Ensure columns in olt_onus
+ALTER TABLE `olt_onus` 
+    ADD COLUMN IF NOT EXISTS `uptime` VARCHAR(60) DEFAULT NULL AFTER `status`,
+    ADD COLUMN IF NOT EXISTS `router_mac` VARCHAR(30) DEFAULT NULL AFTER `mac_address`,
+    ADD COLUMN IF NOT EXISTS `vlan_id` INT(11) DEFAULT NULL AFTER `router_mac`,
+    ADD COLUMN IF NOT EXISTS `pppoe_username` VARCHAR(100) DEFAULT NULL AFTER `vlan_id`;
+
