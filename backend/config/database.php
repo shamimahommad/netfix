@@ -60,6 +60,18 @@ class Database {
         }
     }
 
+    public static function ensureColumn(PDO $pdo, string $table, string $column, string $definition): void {
+        try {
+            $stmt = $pdo->prepare("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tbl AND COLUMN_NAME = :col LIMIT 1");
+            $stmt->execute(['tbl' => $table, 'col' => $column]);
+            if (!$stmt->fetchColumn()) {
+                $pdo->exec("ALTER TABLE `{$table}` ADD `{$column}` {$definition}");
+            }
+        } catch (Throwable $e) {
+            // Silently ignore if already exists or permission restricted
+        }
+    }
+
     public static function ensureTables(PDO $pdo): void {
         static $checked = false;
         if ($checked) return;
@@ -81,6 +93,37 @@ class Database {
                 KEY `idx_tenant_status_expires` (`tenant_id`, `status`, `expires_at`),
                 KEY `idx_session_token` (`session_token`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+            // Ensure critical columns in customer_network_accounts
+            self::ensureColumn($pdo, 'customer_network_accounts', 'last_disconnect_reason', 'VARCHAR(100) DEFAULT NULL');
+            self::ensureColumn($pdo, 'customer_network_accounts', 'last_offline_at', 'DATETIME DEFAULT NULL');
+            self::ensureColumn($pdo, 'customer_network_accounts', 'last_online_at', 'DATETIME DEFAULT NULL');
+            self::ensureColumn($pdo, 'customer_network_accounts', 'device_vendor', 'VARCHAR(255) DEFAULT NULL');
+            self::ensureColumn($pdo, 'customer_network_accounts', 'vendor_source', 'VARCHAR(50) DEFAULT NULL');
+            self::ensureColumn($pdo, 'customer_network_accounts', 'uptime_seconds', 'INT(11) DEFAULT 0');
+
+            // Ensure critical columns in customers
+            self::ensureColumn($pdo, 'customers', 'customer_type', "ENUM('individual', 'business') DEFAULT 'individual'");
+            self::ensureColumn($pdo, 'customers', 'billing_status', "ENUM('Paid','Due','Expired','Left','Suspended','Pending') DEFAULT 'Paid'");
+            self::ensureColumn($pdo, 'customers', 'connection_date', 'DATE DEFAULT NULL');
+            self::ensureColumn($pdo, 'customers', 'credit_limit', 'DECIMAL(15,2) DEFAULT 0.00');
+            self::ensureColumn($pdo, 'customers', 'metadata', 'LONGTEXT DEFAULT NULL');
+            self::ensureColumn($pdo, 'customers', 'internal_notes', 'TEXT DEFAULT NULL');
+            self::ensureColumn($pdo, 'customers', 'owner_id', 'BIGINT(20) UNSIGNED DEFAULT NULL');
+            self::ensureColumn($pdo, 'customers', 'owner_role', 'VARCHAR(50) DEFAULT NULL');
+            self::ensureColumn($pdo, 'customers', 'owner_role_level', 'INT(11) DEFAULT NULL');
+            self::ensureColumn($pdo, 'customers', 'owner_path', 'VARCHAR(255) DEFAULT NULL');
+
+            // Ensure critical columns in access_profiles
+            self::ensureColumn($pdo, 'access_profiles', 'color_hex', "VARCHAR(20) NOT NULL DEFAULT '#2563EB'");
+            self::ensureColumn($pdo, 'access_profiles', 'download_speed_kbps', 'INT(10) UNSIGNED NOT NULL DEFAULT 10240');
+            self::ensureColumn($pdo, 'access_profiles', 'upload_speed_kbps', 'INT(10) UNSIGNED NOT NULL DEFAULT 10240');
+            self::ensureColumn($pdo, 'access_profiles', 'validity_days', 'INT(10) UNSIGNED NOT NULL DEFAULT 30');
+            self::ensureColumn($pdo, 'access_profiles', 'validity_hours', 'INT(10) UNSIGNED NOT NULL DEFAULT 0');
+            self::ensureColumn($pdo, 'access_profiles', 'data_volume_type', "ENUM('unlimited','gb') NOT NULL DEFAULT 'unlimited'");
+            self::ensureColumn($pdo, 'access_profiles', 'data_volume_gb', 'INT(10) UNSIGNED DEFAULT NULL');
+            self::ensureColumn($pdo, 'access_profiles', 'mikrotik_profile_id', 'VARCHAR(200) DEFAULT NULL');
+            self::ensureColumn($pdo, 'access_profiles', 'mikrotik_profile_name', 'VARCHAR(200) DEFAULT NULL');
 
             // Check if users table exists in the current database
             $stmt = $pdo->query("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'users' LIMIT 1");

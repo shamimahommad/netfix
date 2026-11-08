@@ -190,9 +190,24 @@ class CustomersController {
             ORDER BY c.customer_id DESC
             LIMIT {$limit} OFFSET {$offset}";
 
-        $stmt = $db->prepare($query);
-        $stmt->execute($params);
-        $rows = $stmt->fetchAll();
+        try {
+            $stmt = $db->prepare($query);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll();
+        } catch (\PDOException $pe) {
+            // Defensive recovery if column na.last_disconnect_reason is missing on remote database
+            if (str_contains($pe->getMessage(), 'last_disconnect_reason')) {
+                try {
+                    $db->exec("ALTER TABLE `customer_network_accounts` ADD COLUMN IF NOT EXISTS `last_disconnect_reason` VARCHAR(100) DEFAULT NULL");
+                } catch (\Throwable $ignored) {}
+                $fallbackQuery = str_replace('na.last_disconnect_reason,', 'NULL as last_disconnect_reason,', $query);
+                $stmt = $db->prepare($fallbackQuery);
+                $stmt->execute($params);
+                $rows = $stmt->fetchAll();
+            } else {
+                throw $pe;
+            }
+        }
 
         $now = time();
         $formatted = array_map(function($row) use ($now) {
