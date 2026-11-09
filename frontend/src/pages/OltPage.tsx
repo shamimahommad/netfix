@@ -349,7 +349,7 @@ export default function OltPage() {
       managementIp: device.managementIp || '',
       dnsName: device.dnsName || '',
       managementPort: device.managementPort ?? 23,
-      webPort: device.webPort ?? (device.vendor === 'bdcom' ? 2321 : 80),
+      webPort: device.webPort ?? (device.vendor === 'bdcom' ? 2321 : (device.vendor === 'cdata' ? 1014 : 80)),
       snmpCommunity: device.snmpCommunity || 'public',
       snmpPort: device.snmpPort ?? 161,
       apiUsername: device.apiUsername || '',
@@ -630,22 +630,23 @@ export default function OltPage() {
                         setFormData((p) => ({
                           ...p,
                           vendor: v,
-                          webPort: v === 'atop' ? 2000 : (v === 'btpon' ? 16148 : (v === 'focuscom' ? 2322 : (v === 'bdcom' ? (bdcomMode === 'web' ? 2321 : 0) : p.webPort))),
+                          webPort: v === 'atop' ? 2000 : (v === 'btpon' ? 16148 : (v === 'focuscom' ? 2322 : (v === 'cdata' ? 1014 : (v === 'bdcom' ? (bdcomMode === 'web' ? 2321 : 0) : 80)))),
                           managementPort: v === 'bdcom' ? (bdcomMode === 'telnet' ? 23 : 0) : p.managementPort,
-                          apiUsername: v === 'atop' && !p.apiUsername ? 'root' : p.apiUsername,
-                          apiPassword: v === 'atop' && !p.apiPassword ? 'admin' : p.apiPassword,
+                          totalPonPorts: (v === 'cdata' || v === 'focuscom') ? 4 : (v === 'bdcom' ? 4 : p.totalPonPorts),
+                          apiUsername: (v === 'atop' || v === 'cdata') && !p.apiUsername ? (v === 'atop' ? 'root' : 'admin') : p.apiUsername,
+                          apiPassword: (v === 'atop' || v === 'cdata') && !p.apiPassword ? 'admin' : p.apiPassword,
                         }));
                       }}
                       className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100 font-medium"
                     >
                       <option value="vsol">VSOL (V1600 Series EPON/GPON)</option>
+                      <option value="cdata">C-Data / IT-Link / ITCOM (FD1104, FD1204, FD1208)</option>
                       <option value="atop">ATOP (PPSL Series EPON/GPON)</option>
                       <option value="bdcom">BDCOM (P3310, GP3600 Series)</option>
                       <option value="btpon">BTPON / TBS (PTF Series)</option>
                       <option value="focuscom">Focuscom (EP5800 Series)</option>
                       <option value="huawei">Huawei (MA5608T / MA5800)</option>
                       <option value="zte">ZTE (C300 / C320)</option>
-                      <option value="cdata">CDATA (FD1104, FD1208)</option>
                       <option value="syrotech">Syrotech</option>
                       <option value="other">Generic / Other OLT</option>
                     </select>
@@ -815,10 +816,10 @@ export default function OltPage() {
                           type="number"
                           min={1}
                           max={65535}
-                          value={formData.webPort ?? 80}
-                          onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || 80 }))}
+                          value={formData.webPort ?? (formData.vendor === 'cdata' ? 1014 : 80)}
+                          onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || (formData.vendor === 'cdata' ? 1014 : 80) }))}
                           className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
-                          placeholder="80 (or 1010/2322)"
+                          placeholder={formData.vendor === 'cdata' ? "1014 (Web Management)" : "80 (or 1010/2322)"}
                         />
                       </div>
 
@@ -1097,20 +1098,20 @@ export default function OltPage() {
                         setFormData((p) => ({
                           ...p,
                           vendor: v,
-                          webPort: v === 'bdcom' ? (bdcomMode === 'web' ? 2321 : 0) : p.webPort,
+                          webPort: v === 'cdata' ? 1014 : (v === 'bdcom' ? (bdcomMode === 'web' ? 2321 : 0) : p.webPort),
                           managementPort: v === 'bdcom' ? (bdcomMode === 'telnet' ? 23 : 0) : p.managementPort,
                         }));
                       }}
                       className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
                     >
                       <option value="vsol">VSOL</option>
+                      <option value="cdata">C-Data / IT-Link / ITCOM</option>
                       <option value="atop">ATOP</option>
                       <option value="bdcom">BDCOM (Web & Telnet)</option>
                       <option value="btpon">BTPON / TBS</option>
                       <option value="focuscom">Focuscom</option>
                       <option value="huawei">Huawei</option>
                       <option value="zte">ZTE</option>
-                      <option value="cdata">CDATA</option>
                       <option value="syrotech">Syrotech</option>
                       <option value="other">Other</option>
                     </select>
@@ -1325,7 +1326,7 @@ export default function OltPage() {
                 </thead>
                 <tbody className="bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
                   {devices.map((device) => {
-                    const vendorLabel = (device.vendor || 'olt').toUpperCase();
+                    const vendorLabel = device.vendor === 'cdata' ? 'C-DATA / IT-LINK' : (device.vendor || 'olt').toUpperCase();
                     const ponInfo = `${(device.ponType || 'gpon').toUpperCase()} (${device.totalPonPorts || 8} Ports)`;
 
                     return (

@@ -43,7 +43,7 @@ class NetworkController {
             if ($type === 'mikrotik') {
                 $where[] = "(vendor = 'mikrotik' OR device_type = 'router')";
             } elseif ($type === 'olt') {
-                $where[] = "(device_type = 'olt' OR vendor = 'olt' OR vendor IN ('vsol', 'bdcom', 'huawei', 'zte', 'cdata', 'syrotech', 'focuscom', 'btpon', 'tbs', 'ip-com', 'atop'))";
+                $where[] = "(device_type = 'olt' OR vendor = 'olt' OR vendor IN ('vsol', 'bdcom', 'huawei', 'zte', 'cdata', 'itlink', 'it-link', 'itcom', 'syrotech', 'focuscom', 'btpon', 'tbs', 'ip-com', 'atop'))";
             }
         }
 
@@ -166,7 +166,7 @@ class NetworkController {
         if ($type === 'router' || $type === 'mikrotik') {
             $where[] = "(device_type = 'router' OR vendor = 'mikrotik') AND device_type != 'olt'";
         } elseif ($type === 'olt') {
-            $where[] = "(device_type = 'olt' OR vendor IN ('olt', 'vsol', 'bdcom', 'huawei', 'zte', 'cdata', 'syrotech', 'focuscom', 'btpon', 'tbs', 'ip-com', 'atop'))";
+            $where[] = "(device_type = 'olt' OR vendor IN ('olt', 'vsol', 'bdcom', 'huawei', 'zte', 'cdata', 'itlink', 'it-link', 'itcom', 'syrotech', 'focuscom', 'btpon', 'tbs', 'ip-com', 'atop'))";
         } elseif ($type !== 'all') {
             $where[] = "device_type = :dtype";
             $params['dtype'] = $type;
@@ -556,11 +556,15 @@ class NetworkController {
                     if ($webPort) $ports[] = $webPort;
                     if ($managementPort) $ports[] = $managementPort;
                     if (empty($ports)) $ports = [2321, 23, 1081, 80];
+                } elseif (in_array($vendor, ['cdata', 'itlink', 'it-link', 'itcom', 'cortina'])) {
+                    if ($webPort) $ports[] = $webPort;
+                    if ($managementPort) $ports[] = $managementPort;
+                    if (empty($ports)) $ports = [1014, 80, 8080, 23];
                 } else {
                     if ($webPort) $ports[] = $webPort;
                     if ($managementPort) $ports[] = $managementPort;
                     if (empty($ports)) {
-                        $def = ($vendor === 'btpon') ? 16148 : (($vendor === 'focuscom') ? 2322 : 80);
+                        $def = ($vendor === 'btpon') ? 16148 : (($vendor === 'focuscom') ? 2322 : ($vendor === 'atop' ? 2000 : 80));
                         $ports = [$def, 80, 23];
                     }
                 }
@@ -867,6 +871,30 @@ class NetworkController {
                                 'success' => false,
                                 'status' => 'auth_failed',
                                 'message' => "Login Failed! Could not authenticate with ATOP OLT on port {$port}. Verify credentials and Web port.",
+                            ]);
+                            return;
+                        }
+                    } elseif (in_array($vendor, ['cdata', 'itlink', 'it-link', 'itcom', 'cortina'])) {
+                        require_once __DIR__ . '/../lib/CdataOltClient.php';
+                        $port = $webPort ?: ($managementPort ?: 1014);
+                        $proto = ($port == 443) ? 'https' : 'http';
+                        $client = new CdataOltClient($ip, $port, $username, $password, $proto, 6);
+                        $ok = @$client->login();
+                        if ($ok) {
+                            $sys = $client->getSystemInfo(4);
+                            $model = $sys['model'] ?? 'C-Data / IT-Link EPON OLT';
+                            Response::json([
+                                'success' => true,
+                                'status' => 'authenticated',
+                                'message' => "Login Successful! Connected to {$model} Web Management Engine.",
+                                'data' => ['model' => $model],
+                            ]);
+                            return;
+                        } else {
+                            Response::json([
+                                'success' => false,
+                                'status' => 'auth_failed',
+                                'message' => "Login Failed! Could not authenticate with C-Data / ITCOM OLT on port {$port}. Verify credentials and Web port.",
                             ]);
                             return;
                         }

@@ -10,6 +10,7 @@ require_once __DIR__ . '/BtponOltClient.php';
 require_once __DIR__ . '/BdcomOltClient.php';
 require_once __DIR__ . '/BdcomWebOltClient.php';
 require_once __DIR__ . '/AtopOltClient.php';
+require_once __DIR__ . '/CdataOltClient.php';
 
 class OltSyncService {
     public const DEFAULT_SYNC_INTERVAL_SECONDS = 7200; // 2 Hours
@@ -42,6 +43,7 @@ class OltSyncService {
         $isBtpon = in_array($vendor, ['btpon', 'tbs', 'ip-com', 'ipcom']);
         $isFocuscom = ($vendor === 'focuscom');
         $isAtop = ($vendor === 'atop');
+        $isCdata = in_array($vendor, ['cdata', 'itlink', 'it-link', 'itcom', 'cortina']);
 
         if ($isBdcom) {
             // BDCOM supports GoAhead Web Engine (port 2321 / 80) and Telnet CLI (port 23 / 1081)
@@ -55,6 +57,10 @@ class OltSyncService {
                 $port = $mgmtP ?: 23;
                 $proto = 'telnet';
             }
+        } elseif ($isCdata) {
+            $defaultPort = 1014;
+            $port = (int)($oltDev['web_port'] ?: ($oltDev['management_port'] ?: $defaultPort));
+            $proto = ($port == 443) ? 'https' : 'http';
         } else {
             $defaultPort = $isBtpon ? 16148 : ($isFocuscom ? 2322 : ($isAtop ? 2000 : 1010));
             $port = (int)($oltDev['web_port'] ?: ($oltDev['management_port'] ?: $defaultPort));
@@ -63,11 +69,11 @@ class OltSyncService {
                 $proto = 'https';
             }
         }
-        $user = $oltDev['api_username'] ?: ($isAtop ? 'root' : (($isBdcom || $isFocuscom || $isBtpon) ? 'admin' : 'star'));
-        $pass = $oltDev['api_password'] ?: (($isBdcom || $isFocuscom || $isBtpon || $isAtop) ? 'admin' : 'star321');
+        $user = $oltDev['api_username'] ?: ($isAtop ? 'root' : (($isBdcom || $isFocuscom || $isBtpon || $isCdata) ? 'admin' : 'star'));
+        $pass = $oltDev['api_password'] ?: (($isBdcom || $isFocuscom || $isBtpon || $isAtop || $isCdata) ? 'admin' : 'star321');
 
-        $totalPonPorts = (int)($oltDev['total_pon_ports'] ?? (($isFocuscom || $isBdcom) ? 4 : 8));
-        if ($totalPonPorts <= 0) $totalPonPorts = (($isFocuscom || $isBdcom) ? 4 : 8);
+        $totalPonPorts = (int)($oltDev['total_pon_ports'] ?? (($isFocuscom || $isBdcom || $isCdata) ? 4 : 8));
+        if ($totalPonPorts <= 0) $totalPonPorts = (($isFocuscom || $isBdcom || $isCdata) ? 4 : 8);
         $ponType = strtolower($oltDev['pon_type'] ?? 'epon');
 
         // Dynamic timeout: 45s for 8+ port OLTs with hundreds of ONUs, 25s for 4-port
@@ -79,6 +85,8 @@ class OltSyncService {
             } else {
                 $client = new BdcomOltClient($ip, $port, $user, $pass, $proto, $timeout);
             }
+        } elseif ($isCdata) {
+            $client = new CdataOltClient($ip, $port, $user, $pass, $proto, $timeout);
         } elseif ($isBtpon) {
             $client = new BtponOltClient($ip, $port, $user, $pass, $proto, $timeout);
         } elseif ($isFocuscom) {
@@ -95,7 +103,7 @@ class OltSyncService {
         // Option 2: Live MAC Address Table from OLT (includes Router MAC, VLAN ID, Port ID)
         $macTable = [];
         try {
-            if ($isBdcom || $isBtpon || $isFocuscom || $isAtop) {
+            if ($isBdcom || $isBtpon || $isFocuscom || $isAtop || $isCdata) {
                 $macTable = $client->getMacTable(null, $onus);
             } else {
                 $macTable = $client->getMacTable();
@@ -116,6 +124,8 @@ class OltSyncService {
 
         if ($isBdcom) {
             $defaultModel = 'BDCOM P3310D';
+        } elseif ($isCdata) {
+            $defaultModel = 'C-Data / ITCOM EPON OLT';
         } elseif ($isBtpon) {
             $defaultModel = 'BTPON PTF-EP8X4G8';
         } elseif ($isFocuscom) {
