@@ -845,13 +845,24 @@ export default function TenantDashboard() {
               <Activity className="w-4 h-4 text-blue-500" />
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">Recent Activity</h3>
             </div>
-            <button
-              type="button"
-              onClick={retryRecentActivity}
-              className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-            >
-              Refresh
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => navigate('/dashboard/pppoe-logs')}
+                className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold"
+                title="View Live MikroTik PPPoE Logs"
+              >
+                PPPoE Logs →
+              </button>
+              <span className="text-slate-300 dark:text-slate-700">|</span>
+              <button
+                type="button"
+                onClick={retryRecentActivity}
+                className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                Refresh
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-[260px] custom-scrollbar">
@@ -1449,20 +1460,34 @@ export default function TenantDashboard() {
         </div>
       </div>
 
-      {/* 7. Network Infrastructure Quick Links (ISP Admin only) */}
-      {isIspAdmin && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Server className="w-4 h-4 text-slate-500" />
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                Infrastructure & System Shortcuts
-              </h3>
-            </div>
-            <span className="text-xs text-slate-400">Quick jump</span>
+      {/* 7. Network Infrastructure Quick Links */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Server className="w-4 h-4 text-slate-500" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+              Infrastructure & System Shortcuts
+            </h3>
           </div>
+          <span className="text-xs text-slate-400">Quick jump</span>
+        </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
+          <button
+            type="button"
+            onClick={() => navigate('/dashboard/pppoe-logs')}
+            className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/20 hover:border-indigo-200 dark:hover:border-indigo-800 transition-all text-left"
+          >
+            <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+              <Activity className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-slate-900 dark:text-white truncate">PPPoE Logs</p>
+              <p className="text-[11px] text-slate-400 truncate">Live router sessions</p>
+            </div>
+          </button>
+
+          {isIspAdmin && (
             <button
               type="button"
               onClick={() => navigate('/dashboard/network/mikrotik')}
@@ -1476,7 +1501,9 @@ export default function TenantDashboard() {
                 <p className="text-[11px] text-slate-400 truncate">Manage NAS & API</p>
               </div>
             </button>
+          )}
 
+          {isIspAdmin && (
             <button
               type="button"
               onClick={() => navigate('/dashboard/network/olt')}
@@ -1490,21 +1517,23 @@ export default function TenantDashboard() {
                 <p className="text-[11px] text-slate-400 truncate">Fiber optical lines</p>
               </div>
             </button>
+          )}
 
-            <button
-              type="button"
-              onClick={() => navigate('/dashboard/service-area/areas')}
-              className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 hover:bg-purple-50/50 dark:hover:bg-purple-900/20 hover:border-purple-200 dark:hover:border-purple-800 transition-all text-left"
-            >
-              <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
-                <Layers className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-slate-900 dark:text-white truncate">Coverage Areas</p>
-                <p className="text-[11px] text-slate-400 truncate">Zones & sub-areas</p>
-              </div>
-            </button>
+          <button
+            type="button"
+            onClick={() => navigate('/dashboard/service-area/areas')}
+            className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 hover:bg-purple-50/50 dark:hover:bg-purple-900/20 hover:border-purple-200 dark:hover:border-purple-800 transition-all text-left"
+          >
+            <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+              <Layers className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-slate-900 dark:text-white truncate">Coverage Areas</p>
+              <p className="text-[11px] text-slate-400 truncate">Zones & sub-areas</p>
+            </div>
+          </button>
 
+          {isIspAdmin && (
             <button
               type="button"
               onClick={() => navigate('/dashboard/reseller')}
@@ -1518,9 +1547,9 @@ export default function TenantDashboard() {
                 <p className="text-[11px] text-slate-400 truncate">Sub-networks</p>
               </div>
             </button>
-          </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

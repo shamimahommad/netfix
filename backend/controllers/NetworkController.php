@@ -1478,6 +1478,14 @@ class NetworkController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
+        $userId = (int)$user['user_id'];
+        $callerRole = strtolower($user['role'] ?? '');
+        $isLevel0 = in_array($callerRole, ['admin', 'isp_admin', 'manager', 'tenant_admin', 'saas_admin', 'super_admin'], true);
+
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        $hierarchyUser = HierarchySecurityService::getUser($userId);
+        $userHierarchyPath = $hierarchyUser['hierarchy_path'] ?? "/{$userId}/";
+
         // 1. Get all routers for this tenant
         if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
             $rStmt = $db->prepare("SELECT network_device_id, device_name, management_ip, management_port, status 
@@ -1485,9 +1493,9 @@ class NetworkController {
                                    WHERE tenant_id = :tid AND device_type = 'router' 
                                    ORDER BY network_device_id ASC");
             $rStmt->execute(['tid' => $tenantId]);
-            $routers = $rStmt->fetchAll() ?: [];
+            $routers = $rStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         } else {
-            $routers = $db->query("SELECT network_device_id, device_name, management_ip, management_port, status FROM network_devices WHERE device_type = 'router' ORDER BY network_device_id ASC")->fetchAll() ?: [];
+            $routers = $db->query("SELECT network_device_id, device_name, management_ip, management_port, status FROM network_devices WHERE device_type = 'router' ORDER BY network_device_id ASC")->fetchAll(PDO::FETCH_ASSOC) ?: [];
         }
 
         if (empty($routers)) {
@@ -1503,137 +1511,247 @@ class NetworkController {
             return;
         }
 
-        // 2. Determine target router
+        // 2. Fetch allowed customers for this user (Strict Hierarchical RBAC)
+        // - Admin sees all customers in tenant
+        // - Reseller sees only own customers + downline agents' customers
+        // - Agent sees only own customers
+        // - Admin's customers are strictly excluded for Resellers and Agents!
+        $custSql = "SELECT na.username, na.mac_address, na.remote_address, na.network_device_id as router_id,
+                           c.customer_id, c.customer_code, c.full_name, c.phone,
+                           c.owner_id, c.owner_role, c.owner_path,
+                           u.username as owner_username, u.first_name as owner_first_name, u.last_name as owner_last_name, u.role as owner_user_role
+                    FROM customer_network_accounts na 
+                    JOIN customers c ON c.customer_id = na.customer_id 
+                    LEFT JOIN users u ON u.user_id = c.owner_id
+                    WHERE na.tenant_id = :tid AND na.username IS NOT NULL";
+        $custParams = ['tid' => $tenantId];
+
+        if (!$isLevel0) {
+            $custSql .= " AND (c.owner_id = :user_owner_id OR c.owner_path LIKE :user_path_like)";
+            $custParams['user_owner_id'] = $userId;
+            $custParams['user_path_like'] = rtrim($userHierarchyPath, '/') . '/%';
+        }
+
+        $cStmt = $db->prepare($custSql);
+        $cStmt->execute($custParams);
+        $allowedCustomers = $cStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $custMap = [];
+        $custMacMap = [];
+        $custIpMap = [];
+        $customerRouterCounts = [];
+
+        foreach ($allowedCustomers as $c) {
+            $rId = (string)($c['router_id'] ?? '');
+            if ($rId) {
+                $customerRouterCounts[$rId] = ($customerRouterCounts[$rId] ?? 0) + 1;
+            }
+            if (!empty($c['username'])) {
+                $custMap[strtolower(trim($c['username']))] = $c;
+            }
+            if (!empty($c['mac_address'])) {
+                $normMac = strtoupper(str_replace(['-', '.', ' '], ':', trim($c['mac_address'])));
+                $custMacMap[$normMac] = $c;
+            }
+            if (!empty($c['remote_address'])) {
+                $custIpMap[trim($c['remote_address'])] = $c;
+            }
+        }
+
+        // 3. Determine target router(s)
         $targetRouterId = $_GET['router_id'] ?? null;
+        $queryAllRouters = ($targetRouterId === 'all');
         $targetRouter = null;
 
-        if ($targetRouterId) {
+        if (!$targetRouterId && !$queryAllRouters) {
+            // For Resellers / Agents, auto-select router that holds their customers!
+            if (!$isLevel0 && !empty($customerRouterCounts)) {
+                arsort($customerRouterCounts);
+                $bestRouterId = array_key_first($customerRouterCounts);
+                foreach ($routers as $r) {
+                    if ((string)$r['network_device_id'] === (string)$bestRouterId) {
+                        $targetRouter = $r;
+                        break;
+                    }
+                }
+            }
+            if (!$targetRouter) {
+                $targetRouter = $routers[0];
+            }
+        } elseif ($targetRouterId && !$queryAllRouters) {
             foreach ($routers as $r) {
                 if ((string)$r['network_device_id'] === (string)$targetRouterId) {
                     $targetRouter = $r;
                     break;
                 }
             }
-        }
-
-        if (!$targetRouter) {
-            $targetRouter = $routers[0];
-        }
-
-        // Fetch full router details including credentials
-        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
-            $dStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id AND tenant_id = :tid LIMIT 1");
-            $dStmt->execute(['id' => $targetRouter['network_device_id'], 'tid' => $tenantId]);
-        } else {
-            $dStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id LIMIT 1");
-            $dStmt->execute(['id' => $targetRouter['network_device_id']]);
-        }
-        $routerFull = $dStmt->fetch();
-
-        if (!$routerFull) {
-            Response::error('Selected router not found', 404);
-            return;
+            if (!$targetRouter) {
+                $targetRouter = $routers[0];
+            }
         }
 
         require_once __DIR__ . '/../lib/MikrotikSyncService.php';
-        $api = MikrotikSyncService::connect($routerFull, 4);
 
-        $parsedLogs = [];
+        // 4. Fetch raw logs from target router(s)
+        $routersToQuery = [];
+        if ($queryAllRouters) {
+            $routersToQuery = $routers;
+        } else {
+            $routersToQuery = [$targetRouter];
+        }
 
-        if ($api) {
-            $rawLogs = $api->comm('/log/print');
-            $api->disconnect();
+        $allRawLogs = [];
+        $anyOnline = false;
 
-            // Filter for PPP & PPPoE logs
-            $filtered = array_reverse(array_filter($rawLogs ?: [], function($l) {
-                $topics = strtolower($l['topics'] ?? '');
-                $msg = strtolower($l['message'] ?? '');
-                return str_contains($topics, 'ppp') || str_contains($topics, 'pppoe') || str_contains($msg, 'pppoe');
-            }));
-
-            // Fetch known customer pppoe usernames for this tenant to cross-match
-            $cStmt = $db->prepare("SELECT na.username, na.mac_address, na.remote_address, c.customer_id, c.customer_code, c.full_name, c.phone 
-                                   FROM customer_network_accounts na 
-                                   JOIN customers c ON c.customer_id = na.customer_id 
-                                   WHERE na.tenant_id = :tid AND na.username IS NOT NULL");
-            $cStmt->execute(['tid' => $tenantId]);
-            $customersMap = [];
-            foreach ($cStmt->fetchAll() as $c) {
-                if (!empty($c['username'])) {
-                    $customersMap[strtolower(trim($c['username']))] = $c;
-                }
+        foreach ($routersToQuery as $rItem) {
+            if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+                $dStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id AND tenant_id = :tid LIMIT 1");
+                $dStmt->execute(['id' => $rItem['network_device_id'], 'tid' => $tenantId]);
+            } else {
+                $dStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id LIMIT 1");
+                $dStmt->execute(['id' => $rItem['network_device_id']]);
             }
+            $routerFull = $dStmt->fetch(PDO::FETCH_ASSOC);
+            if (!$routerFull) continue;
 
-            foreach ($filtered as $item) {
-                $msg = $item['message'] ?? '';
-                $topics = $item['topics'] ?? '';
-                $time = $item['time'] ?? '';
-
-                $username = null;
-                if (preg_match('/<pppoe-([^>]+)>/i', $msg, $m)) {
-                    $username = $m[1];
-                } elseif (preg_match('/^([a-zA-Z0-9_.-]+)\s+logged\s+in/i', $msg, $m)) {
-                    $username = $m[1];
-                } elseif (preg_match('/user\s+([a-zA-Z0-9_.-]+)/i', $msg, $m)) {
-                    $username = $m[1];
+            $timeout = count($routersToQuery) > 1 ? 3 : 4;
+            $api = MikrotikSyncService::connect($routerFull, $timeout);
+            if ($api) {
+                $anyOnline = true;
+                $logs = $api->comm('/log/print');
+                $api->disconnect();
+                if (is_array($logs)) {
+                    foreach ($logs as $l) {
+                        $l['_router_id'] = (string)$rItem['network_device_id'];
+                        $l['_router_name'] = $rItem['device_name'];
+                        $allRawLogs[] = $l;
+                    }
                 }
-
-                $mac = null;
-                if (preg_match('/((?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})/', $msg, $m)) {
-                    $mac = strtoupper(str_replace('-', ':', $m[1]));
-                }
-
-                $ip = null;
-                if (preg_match('/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/', $msg, $m)) {
-                    $ip = $m[1];
-                }
-
-                $action = 'info';
-                if (stripos($msg, 'logged in') !== false) {
-                    $action = 'login';
-                } elseif (stripos($msg, 'logged out') !== false || stripos($msg, 'disconnected') !== false || stripos($msg, 'terminated') !== false) {
-                    $action = 'logout';
-                } elseif (stripos($msg, 'authentication failed') !== false || stripos($msg, 'failed') !== false) {
-                    $action = 'failed';
-                } elseif (stripos($msg, 'connected') !== false || stripos($msg, 'connection established') !== false) {
-                    $action = 'connected';
-                } elseif (stripos($msg, 'authenticated') !== false) {
-                    $action = 'authenticated';
-                }
-
-                $customerInfo = null;
-                if ($username && isset($customersMap[strtolower($username)])) {
-                    $customerInfo = $customersMap[strtolower($username)];
-                }
-
-                $parsedLogs[] = [
-                    'id' => $item['.id'] ?? uniqid(),
-                    'time' => $time,
-                    'topics' => $topics,
-                    'action' => $action,
-                    'username' => $username,
-                    'customer' => $customerInfo ? [
-                        'customer_id' => (string)$customerInfo['customer_id'],
-                        'customer_code' => $customerInfo['customer_code'],
-                        'full_name' => $customerInfo['full_name'],
-                        'phone' => $customerInfo['phone']
-                    ] : null,
-                    'ip' => $ip,
-                    'mac' => $mac,
-                    'message' => $msg,
-                ];
             }
         }
 
-        Response::json([
-            'success' => true,
-            'is_online' => $connected,
-            'current_router' => [
+        // 5. Filter for PPP & PPPoE logs
+        $filtered = array_reverse(array_filter($allRawLogs, function($l) {
+            $topics = strtolower($l['topics'] ?? '');
+            $msg = strtolower($l['message'] ?? '');
+            return str_contains($topics, 'ppp') || str_contains($topics, 'pppoe') || str_contains($msg, 'pppoe');
+        }));
+
+        $parsedLogs = [];
+
+        foreach ($filtered as $item) {
+            $msg = $item['message'] ?? '';
+            $topics = $item['topics'] ?? '';
+            $time = $item['time'] ?? '';
+            $rId = $item['_router_id'] ?? ($targetRouter ? (string)$targetRouter['network_device_id'] : '');
+            $rName = $item['_router_name'] ?? ($targetRouter ? $targetRouter['device_name'] : '');
+
+            // Robust Username parsing across MikroTik formats
+            $username = null;
+            if (preg_match('/<(?:pppoe|pptp|ovpn|l2tp)-([^>]+)>:\s*(.*)/i', $msg, $m)) {
+                $username = trim($m[1]);
+            } elseif (preg_match('/(?:^|\s)user\s+([a-zA-Z0-9_.@-]+)/i', $msg, $m)) {
+                $username = trim($m[1]);
+            } elseif (preg_match('/^([a-zA-Z0-9_.@-]+)\s+logged\s+(?:in|out)/i', $msg, $m)) {
+                $username = trim($m[1]);
+            }
+
+            // MAC Address parsing
+            $mac = null;
+            if (preg_match('/((?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})/', $msg, $m)) {
+                $mac = strtoupper(str_replace('-', ':', $m[1]));
+            }
+
+            // IP Address parsing
+            $ip = null;
+            if (preg_match('/(\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b)/', $msg, $m)) {
+                $ip = $m[1];
+            }
+
+            // Cross-match customer from allowed pool
+            $customerInfo = null;
+            if ($username && isset($custMap[strtolower($username)])) {
+                $customerInfo = $custMap[strtolower($username)];
+            } elseif ($mac && isset($custMacMap[$mac])) {
+                $customerInfo = $custMacMap[$mac];
+                if (!$username) $username = $customerInfo['username'];
+            } elseif ($ip && isset($custIpMap[$ip])) {
+                $customerInfo = $custIpMap[$ip];
+                if (!$username) $username = $customerInfo['username'];
+            }
+
+            // DOWNWARD-ONLY RBAC ENFORCEMENT:
+            // Resellers and Agents can ONLY see logs that belong to their accessible customers!
+            // Admin's customers and other resellers' customers are completely hidden!
+            if (!$isLevel0 && !$customerInfo) {
+                continue;
+            }
+
+            $action = 'info';
+            if (stripos($msg, 'logged in') !== false) {
+                $action = 'login';
+            } elseif (stripos($msg, 'logged out') !== false || stripos($msg, 'disconnected') !== false || stripos($msg, 'terminated') !== false) {
+                $action = 'logout';
+            } elseif (stripos($msg, 'authentication failed') !== false || stripos($msg, 'failed') !== false) {
+                $action = 'failed';
+            } elseif (stripos($msg, 'connected') !== false || stripos($msg, 'connection established') !== false) {
+                $action = 'connected';
+            } elseif (stripos($msg, 'authenticated') !== false) {
+                $action = 'authenticated';
+            }
+
+            $ownerFullName = '';
+            if ($customerInfo) {
+                $ownerFullName = trim(($customerInfo['owner_first_name'] ?? '') . ' ' . ($customerInfo['owner_last_name'] ?? ''));
+                if (empty($ownerFullName)) {
+                    $ownerFullName = $customerInfo['owner_username'] ?? 'Admin';
+                }
+            }
+
+            $parsedLogs[] = [
+                'id' => $item['.id'] ?? uniqid(),
+                'time' => $time,
+                'topics' => $topics,
+                'action' => $action,
+                'username' => $username,
+                'customer' => $customerInfo ? [
+                    'customer_id' => (string)$customerInfo['customer_id'],
+                    'customer_code' => $customerInfo['customer_code'],
+                    'full_name' => $customerInfo['full_name'],
+                    'phone' => $customerInfo['phone'] ?? null,
+                    'owner_id' => (string)($customerInfo['owner_id'] ?? ''),
+                    'owner_name' => $ownerFullName,
+                    'owner_role' => $customerInfo['owner_user_role'] ?? ($customerInfo['owner_role'] ?? 'admin'),
+                ] : null,
+                'ip' => $ip,
+                'mac' => $mac,
+                'message' => $msg,
+                'router_id' => $rId,
+                'router_name' => $rName,
+            ];
+        }
+
+        $currentRouterData = null;
+        if ($queryAllRouters) {
+            $currentRouterData = [
+                'network_device_id' => 'all',
+                'device_name' => 'All Routers Combined (' . count($routers) . ' Routers)',
+                'management_ip' => 'Cluster',
+                'management_port' => 0,
+            ];
+        } elseif ($targetRouter) {
+            $currentRouterData = [
                 'network_device_id' => (string)$targetRouter['network_device_id'],
                 'device_name' => $targetRouter['device_name'],
                 'management_ip' => $targetRouter['management_ip'],
                 'management_port' => (int)$targetRouter['management_port'],
-            ],
+            ];
+        }
+
+        Response::json([
+            'success' => true,
+            'is_online' => $anyOnline,
+            'current_router' => $currentRouterData,
             'routers' => array_map(function($r) {
                 return [
                     'network_device_id' => (string)$r['network_device_id'],
@@ -1642,9 +1760,11 @@ class NetworkController {
                     'status' => $r['status'],
                 ];
             }, $routers),
+            'user_role' => $callerRole,
+            'is_admin' => $isLevel0,
             'total' => count($parsedLogs),
             'logs' => $parsedLogs,
-            'status_message' => $connected ? 'Logs retrieved from live router' : 'Router unreachable or API disconnected',
+            'status_message' => $anyOnline ? 'Logs retrieved from live router' : 'Router unreachable or API disconnected',
         ]);
     }
 
