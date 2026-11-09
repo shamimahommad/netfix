@@ -136,6 +136,7 @@ export default function OltDetailPage() {
 
   const [selectedPon, setSelectedPon] = useState<number | 'all'>('all');
   const [signalFilter, setSignalFilter] = useState<'all' | 'good' | 'fair' | 'low'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'online' | 'offline'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedMac, setCopiedMac] = useState<string | null>(null);
 
@@ -273,18 +274,62 @@ export default function OltDetailPage() {
     return 'EPON 0/';
   }, [device?.ponType]);
 
-  // Group ONUs by PON port
-  const ponCounts = useMemo(() => {
-    const counts: Record<number, number> = {};
+  // Overall ONU counts (Total, Online, Offline)
+  const totalOnusCount = onus.length;
+  const totalOnlineCount = useMemo(() => {
+    return onus.filter((o) => (o.status || '').toLowerCase() === 'online').length;
+  }, [onus]);
+  const totalOfflineCount = Math.max(0, totalOnusCount - totalOnlineCount);
+
+  // Group ONUs by PON port with online / offline breakdown
+  const ponStats = useMemo(() => {
+    const stats: Record<number, { total: number; online: number; offline: number }> = {};
     for (let i = 1; i <= totalPonPorts; i++) {
-      counts[i] = 0;
+      stats[i] = { total: 0, online: 0, offline: 0 };
     }
     for (const onu of onus) {
       const p = onu.ponPort || 1;
-      counts[p] = (counts[p] || 0) + 1;
+      if (!stats[p]) stats[p] = { total: 0, online: 0, offline: 0 };
+      stats[p].total += 1;
+      if ((onu.status || '').toLowerCase() === 'online') {
+        stats[p].online += 1;
+      } else {
+        stats[p].offline += 1;
+      }
+    }
+    return stats;
+  }, [onus, totalPonPorts]);
+
+  const ponCounts = useMemo(() => {
+    const counts: Record<number, number> = {};
+    for (let i = 1; i <= totalPonPorts; i++) {
+      counts[i] = ponStats[i]?.total || 0;
     }
     return counts;
-  }, [onus, totalPonPorts]);
+  }, [ponStats, totalPonPorts]);
+
+  // Current scope counts (for Selected PON or All)
+  const currentScopeCounts = useMemo(() => {
+    if (selectedPon === 'all') {
+      return {
+        total: totalOnusCount,
+        online: totalOnlineCount,
+        offline: totalOfflineCount,
+      };
+    }
+    return ponStats[selectedPon] || { total: 0, online: 0, offline: 0 };
+  }, [selectedPon, totalOnusCount, totalOnlineCount, totalOfflineCount, ponStats]);
+
+  // Active PON ports count
+  const activePonCount = useMemo(() => {
+    const fromTelemetry = (telemetry?.ponPorts || []).filter((p: any) => p.status === 'online').length;
+    if (fromTelemetry > 0) return fromTelemetry;
+    let activePorts = 0;
+    for (let i = 1; i <= totalPonPorts; i++) {
+      if ((ponStats[i]?.total || 0) > 0) activePorts++;
+    }
+    return activePorts;
+  }, [telemetry?.ponPorts, totalPonPorts, ponStats]);
 
   // Sync Progress Calculation & Animated Stages
   const estimatedDuration = totalPonPorts > 4 ? 45 : 15;
@@ -324,6 +369,11 @@ export default function OltDetailPage() {
       // PON filter
       if (selectedPon !== 'all' && onu.ponPort !== selectedPon) return false;
 
+      // Status filter
+      const isOnline = (onu.status || '').toLowerCase() === 'online';
+      if (statusFilter === 'online' && !isOnline) return false;
+      if (statusFilter === 'offline' && isOnline) return false;
+
       // Optical Signal filter
       if (signalFilter === 'good') {
         if (onu.rxPowerDbm === null || onu.rxPowerDbm === undefined || isNaN(onu.rxPowerDbm) || onu.rxPowerDbm < -24) return false;
@@ -350,7 +400,7 @@ export default function OltDetailPage() {
 
       return macMatches || routerMacMatches || vlanMatches || pppoeMatches || onuIdMatches || custNameMatches || custUserMatches || custCodeMatches || uptimeMatches;
     });
-  }, [onus, selectedPon, signalFilter, searchQuery]);
+  }, [onus, selectedPon, statusFilter, signalFilter, searchQuery]);
 
   const getPowerColor = (power: number | null | undefined) => {
     if (power === null || power === undefined || isNaN(power)) {
@@ -425,6 +475,18 @@ export default function OltDetailPage() {
             <span className="px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
               {telemetry?.model || telemetry?.system?.model || `${(device?.vendor || 'VSOL').toUpperCase()} ${totalPonPorts}P OLT`}
             </span>
+            {totalOnusCount > 0 && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  {totalOnlineCount} Online
+                </span>
+                <span className="text-slate-300 dark:text-slate-600">•</span>
+                <span className={totalOfflineCount > 0 ? "text-rose-600 dark:text-rose-400 font-extrabold" : "text-slate-400"}>
+                  {totalOfflineCount} Offline
+                </span>
+              </span>
+            )}
             {pingData && (
               <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg border ${
                 pingData.status === 'online'
@@ -553,26 +615,80 @@ export default function OltDetailPage() {
           <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 font-medium">Max threshold: 75°C</p>
         </div>
 
-        {/* Total ONUs Online */}
+        {/* Total Connected ONUs with Online & Offline breakdown */}
         <div className="bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-4 sm:p-5 shadow-sm">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
             <span className="flex items-center gap-2">
               <span className="p-1.5 rounded-lg bg-sky-50 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400">
                 <Wifi className="w-4 h-4" />
               </span>
-              Total Connected ONUs
+              Connected ONUs
             </span>
-            <span className="text-xl font-extrabold text-blue-600 dark:text-blue-400">
-              {onus.length}
+            <span className="text-xl font-extrabold text-blue-600 dark:text-blue-400 font-mono">
+              {totalOnusCount}
             </span>
           </div>
-          <div className="flex items-center gap-1.5 mt-3 text-xs text-slate-600 dark:text-slate-300 font-medium">
-            <Radio className="w-4 h-4 text-emerald-500" />
+
+          {/* Online vs Offline Counter Badges (Interactive Filters) */}
+          <div className="grid grid-cols-2 gap-2 mt-2.5">
+            <button
+              type="button"
+              onClick={() => setStatusFilter((p) => (p === 'online' ? 'all' : 'online'))}
+              className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl border text-left transition-all ${
+                statusFilter === 'online'
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm ring-1 ring-emerald-500'
+                  : 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200/70 dark:border-emerald-800/60 text-emerald-700 dark:text-emerald-300 hover:border-emerald-400'
+              }`}
+              title="Click to filter Online ONUs"
+            >
+              <div className="flex items-center gap-1.5 text-xs font-bold">
+                <span className={`w-2 h-2 rounded-full ${statusFilter === 'online' ? 'bg-white' : 'bg-emerald-500'} animate-pulse`} />
+                <span>Online</span>
+              </div>
+              <span className="font-mono font-extrabold text-sm">{totalOnlineCount}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStatusFilter((p) => (p === 'offline' ? 'all' : 'offline'))}
+              className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl border text-left transition-all ${
+                statusFilter === 'offline'
+                  ? 'bg-rose-600 text-white border-rose-600 shadow-sm ring-1 ring-rose-500'
+                  : 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-200/70 dark:border-rose-800/60 text-rose-700 dark:text-rose-300 hover:border-rose-400'
+              }`}
+              title="Click to filter Offline ONUs"
+            >
+              <div className="flex items-center gap-1.5 text-xs font-bold">
+                <span className={`w-2 h-2 rounded-full ${statusFilter === 'offline' ? 'bg-white' : 'bg-rose-500'}`} />
+                <span>Offline</span>
+              </div>
+              <span className="font-mono font-extrabold text-sm">{totalOfflineCount}</span>
+            </button>
+          </div>
+
+          {/* Visual Online Ratio Bar */}
+          <div className="w-full bg-slate-100 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden mt-3 flex">
+            <div
+              className="bg-emerald-500 h-full transition-all duration-500"
+              style={{ width: `${totalOnusCount > 0 ? (totalOnlineCount / totalOnusCount) * 100 : 0}%` }}
+              title={`Online: ${totalOnlineCount}`}
+            />
+            <div
+              className="bg-rose-500 h-full transition-all duration-500"
+              style={{ width: `${totalOnusCount > 0 ? (totalOfflineCount / totalOnusCount) * 100 : 0}%` }}
+              title={`Offline: ${totalOfflineCount}`}
+            />
+          </div>
+
+          <div className="flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500 mt-2 font-medium">
+            <span className="flex items-center gap-1">
+              <Radio className="w-3.5 h-3.5 text-emerald-500" />
+              {activePonCount} of {totalPonPorts} PON Ports Active
+            </span>
             <span>
-              {telemetry?.ponPorts?.filter((p: any) => p.status === 'online').length || (onus.length > 0 ? 1 : 0)} of {totalPonPorts} PON Ports Active
+              {totalOnusCount > 0 ? `${Math.round((totalOnlineCount / totalOnusCount) * 100)}% Online` : '0%'}
             </span>
           </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 font-medium">Live Hardware Telemetry</p>
         </div>
       </div>
 
@@ -670,6 +786,26 @@ export default function OltDetailPage() {
                   Tx: {txPower}
                 </span>
               </div>
+              <div className="flex items-center justify-between mt-1 text-[10px] font-mono">
+                {count > 0 ? (
+                  <div className="flex items-center gap-1.5 font-semibold">
+                    <span className="inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      {ponStats[ponNum]?.online || 0} on
+                    </span>
+                    {(ponStats[ponNum]?.offline || 0) > 0 ? (
+                      <span className="inline-flex items-center gap-0.5 text-rose-600 dark:text-rose-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                        {ponStats[ponNum]?.offline} off
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 text-[9px]">(all on)</span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-slate-400 dark:text-slate-500">0 ONUs</span>
+                )}
+              </div>
               <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 truncate">
                 {isSelected 
                   ? '✓ Filter active' 
@@ -701,25 +837,79 @@ export default function OltDetailPage() {
                     : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/80 border border-slate-200/80 dark:border-slate-700/80'
                 }`}
               >
-                All Ports ({onus.length})
+                All Ports ({totalOnusCount})
               </button>
-              {ponPortsList.map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setSelectedPon(p)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 ${
-                    selectedPon === p
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/80 border border-slate-200/80 dark:border-slate-700/80'
-                  }`}
-                >
-                  PON {p} ({ponCounts[p] || 0})
-                </button>
-              ))}
+              {ponPortsList.map((p) => {
+                const pStat = ponStats[p] || { total: 0, online: 0, offline: 0 };
+                return (
+                  <button
+                    key={p}
+                    onClick={() => setSelectedPon(p)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 flex items-center gap-1.5 ${
+                      selectedPon === p
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/80 border border-slate-200/80 dark:border-slate-700/80'
+                    }`}
+                  >
+                    <span>PON {p} ({pStat.total})</span>
+                    {pStat.offline > 0 && (
+                      <span className={`px-1.5 py-0.2 text-[9px] rounded-md font-mono font-bold ${
+                        selectedPon === p 
+                          ? 'bg-rose-500 text-white' 
+                          : 'bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60'
+                      }`}>
+                        {pStat.offline} off
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Signal & Search Controls */}
             <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+              {/* Status Filter Segmented Control (All / Online / Offline) */}
+              <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-1 shrink-0 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter('all')}
+                  className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${
+                    statusFilter === 'all'
+                      ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs font-semibold'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                  }`}
+                  title="Show all ONUs"
+                >
+                  All ({currentScopeCounts.total})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter('online')}
+                  className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all flex items-center gap-1 ${
+                    statusFilter === 'online'
+                      ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                      : 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30'
+                  }`}
+                  title="Show Online ONUs only"
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${statusFilter === 'online' ? 'bg-white' : 'bg-emerald-500'} ${statusFilter === 'online' ? 'animate-pulse' : ''}`} />
+                  Online ({currentScopeCounts.online})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter('offline')}
+                  className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all flex items-center gap-1 ${
+                    statusFilter === 'offline'
+                      ? 'bg-rose-600 text-white shadow-xs font-semibold'
+                      : 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30'
+                  }`}
+                  title="Show Offline ONUs only"
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${statusFilter === 'offline' ? 'bg-white' : 'bg-rose-500'}`} />
+                  Offline ({currentScopeCounts.offline})
+                </button>
+              </div>
+
               {/* Signal Filter Segmented Control */}
               <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-1 shrink-0 shadow-2xs">
                 <button
@@ -904,10 +1094,24 @@ export default function OltDetailPage() {
                 <tr>
                   <td colSpan={7} className="text-center py-16 text-slate-400">
                     <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto mb-2">
-                      <Search className="w-5 h-5 text-slate-400" />
+                      {statusFilter === 'offline' ? (
+                        <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                      ) : (
+                        <Search className="w-5 h-5 text-slate-400" />
+                      )}
                     </div>
-                    <span className="font-semibold text-xs text-slate-700 dark:text-slate-300 block">No ONUs match your filter</span>
-                    <span className="text-[11px] text-slate-400">Try adjusting your port selection or search term</span>
+                    <span className="font-semibold text-xs text-slate-700 dark:text-slate-300 block">
+                      {statusFilter === 'offline'
+                        ? 'Great! No offline ONUs found'
+                        : (statusFilter === 'online'
+                            ? 'No online ONUs found'
+                            : 'No ONUs match your filter')}
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      {statusFilter === 'offline'
+                        ? `All ${currentScopeCounts.total} connected subscribers in this scope are online and healthy.`
+                        : 'Try adjusting your port selection, status filter, or search term'}
+                    </span>
                   </td>
                 </tr>
               ) : (

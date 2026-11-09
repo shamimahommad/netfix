@@ -1,20 +1,28 @@
 <?php
 /**
- * NetFix ISP SaaS - BDCOM OLT Telnet API Client
- * Compatible with BDCOM P3310, P3600 (P3600-04, P3600-08, P3600-16), GP3600 series EPON & GPON OLTs.
- * Connects via high-speed Telnet CLI socket to extract real-time system metrics, PON ports,
- * optical transceiver diagnostics (Tx/Rx power dBm), registered ONUs, and customer router MAC addresses.
+ * NetFix ISP SaaS - BDCOM OLT Telnet & Web API Client
+ * Compatible with BDCOM P3310 (P3310, P3310B, P3310C, P3310D), P3600 (P3600-04, P3600-08, P3600-16), GP3600 series EPON & GPON OLTs.
+ * Connects via high-speed Telnet CLI socket or GoAhead Web Engine (HTTP port 2321 / 80)
+ * to extract real-time system metrics, PON ports, optical transceiver diagnostics (Tx/Rx power dBm),
+ * registered ONUs, and customer router MAC addresses.
  */
+
+require_once __DIR__ . '/BdcomWebOltClient.php';
 
 class BdcomOltClient {
     private string $host;
     private int $port;
     private string $username;
     private string $password;
+    private string $protocol;
     private int $timeout;
     private $socket = null;
     private bool $isLoggedIn = false;
     private string $prompt = '#';
+
+    // Optional web client delegation for web-based BDCOM OLTs (port 2321, 80, etc.)
+    private ?BdcomWebOltClient $webClient = null;
+    private bool $isWebMode = false;
 
     // Cached telemetry during single sync execution
     private ?array $cachedSysInfo = null;
@@ -32,7 +40,15 @@ class BdcomOltClient {
         $this->port = $port > 0 ? $port : 23;
         $this->username = $username ?: 'admin';
         $this->password = $password ?: 'admin';
+        $this->protocol = strtolower(trim($protocol ?: 'telnet'));
         $this->timeout = $timeout;
+
+        // Auto-detect web mode if protocol is http/https/web or port is a web management port (2321, 80, 8080, etc.)
+        if (in_array($this->protocol, ['http', 'https', 'web']) || in_array($this->port, [2321, 80, 8080, 8000, 8888])) {
+            $this->isWebMode = true;
+            $proto = in_array($this->protocol, ['http', 'https']) ? $this->protocol : 'http';
+            $this->webClient = new BdcomWebOltClient($this->host, $this->port, $this->username, $this->password, $proto, $this->timeout);
+        }
     }
 
     public function __destruct() {
@@ -101,18 +117,30 @@ class BdcomOltClient {
     }
 
     /**
-     * Establish Telnet connection, authenticate, enter enable mode, and set terminal length 0
+     * Establish Telnet connection or Web connection, authenticate, and enter enable mode
      */
     public function login(): bool {
+        if ($this->isWebMode && $this->webClient) {
+            $this->isLoggedIn = $this->webClient->login();
+            return $this->isLoggedIn;
+        }
+
         if ($this->isLoggedIn && $this->socket && !feof($this->socket)) {
             return true;
         }
 
         $this->disconnect();
 
-        $fp = @fsockopen($this->host, $this->port, $errno, $errstr, 6);
+        $fp = @fsockopen($this->host, $this->port, $errno, $errstr, 5);
         if (!$fp) {
-            error_log("BdcomOltClient: Socket connect failed to {$this->host}:{$this->port} - {$errstr} ({$errno})");
+            error_log("BdcomOltClient: Telnet connect failed to {$this->host}:{$this->port} - {$errstr} ({$errno}), attempting Web fallback...");
+            $tryWebPort = ($this->port !== 23) ? $this->port : 2321;
+            $this->webClient = new BdcomWebOltClient($this->host, $tryWebPort, $this->username, $this->password, 'http', $this->timeout);
+            if ($this->webClient->login()) {
+                $this->isWebMode = true;
+                $this->isLoggedIn = true;
+                return true;
+            }
             return false;
         }
 
@@ -195,6 +223,9 @@ class BdcomOltClient {
      * Terminate connection gracefully
      */
     public function disconnect(): void {
+        if ($this->webClient) {
+            $this->webClient->disconnect();
+        }
         if ($this->socket) {
             try {
                 @fwrite($this->socket, "exit\r\n");
@@ -215,9 +246,13 @@ class BdcomOltClient {
     }
 
     /**
-     * Retrieve BDCOM OLT System Information via 'show version' and 'show cpu'
+     * Retrieve BDCOM OLT System Information via 'show version' and 'show cpu' or Web Management
      */
     public function getSystemInfo(int $totalConfiguredPorts = 4): ?array {
+        if ($this->isWebMode && $this->webClient) {
+            return $this->webClient->getSystemInfo($totalConfiguredPorts);
+        }
+
         if ($this->cachedSysInfo !== null) {
             return $this->cachedSysInfo;
         }
@@ -320,6 +355,10 @@ class BdcomOltClient {
      * Retrieve PON port status and optical telemetry (TxPower, Temperature, Voltage)
      */
     public function getPonPorts(int $totalConfiguredPorts = 4, string $ponType = 'epon'): array {
+        if ($this->isWebMode && $this->webClient) {
+            return $this->webClient->getPonPorts($totalConfiguredPorts, $ponType);
+        }
+
         $sysInfo = $this->getSystemInfo($totalConfiguredPorts);
         $total = $sysInfo['totalPonPorts'] ?? ($totalConfiguredPorts > 0 ? $totalConfiguredPorts : 4);
 
@@ -393,6 +432,10 @@ class BdcomOltClient {
      * Retrieve all registered and unregistered ONUs with live optical levels (RxPower dBm)
      */
     public function getOnus(?int $targetPon = null, bool $forceRefresh = false, bool $includeOptics = true): array {
+        if ($this->isWebMode && $this->webClient) {
+            return $this->webClient->getOnus($targetPon, $forceRefresh, $includeOptics);
+        }
+
         if (!$forceRefresh && $this->cachedOnus !== null && $targetPon === null) {
             return $this->cachedOnus;
         }
@@ -509,6 +552,10 @@ class BdcomOltClient {
      * Runs 'show mac address-table interface epon 0/{p}'
      */
     public function getMacTable(?int $targetPon = null, array $onus = []): array {
+        if ($this->isWebMode && $this->webClient) {
+            return $this->webClient->getMacTable($targetPon, $onus);
+        }
+
         $sysInfo = $this->getSystemInfo();
         $totalPon = $sysInfo['totalPonPorts'] ?? 4;
         $scanPorts = ($targetPon !== null) ? [$targetPon] : range(1, $totalPon);

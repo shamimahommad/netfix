@@ -8,6 +8,7 @@ require_once __DIR__ . '/VsolOltClient.php';
 require_once __DIR__ . '/FocuscomOltClient.php';
 require_once __DIR__ . '/BtponOltClient.php';
 require_once __DIR__ . '/BdcomOltClient.php';
+require_once __DIR__ . '/BdcomWebOltClient.php';
 require_once __DIR__ . '/AtopOltClient.php';
 
 class OltSyncService {
@@ -43,19 +44,27 @@ class OltSyncService {
         $isAtop = ($vendor === 'atop');
 
         if ($isBdcom) {
-            // BDCOM communicates strictly via Telnet CLI socket.
-            // Priority: management_port (e.g. 1081 or 23) -> web_port -> default 23
-            $port = (int)($oltDev['management_port'] ?: ($oltDev['web_port'] ?: 23));
+            // BDCOM supports GoAhead Web Engine (port 2321 / 80) and Telnet CLI (port 23 / 1081)
+            $webP = (int)($oltDev['web_port'] ?? 0);
+            $mgmtP = (int)($oltDev['management_port'] ?? 0);
+
+            if ($webP > 0 || $mgmtP === 2321 || $mgmtP === 80 || $mgmtP === 8080) {
+                $port = $webP ?: ($mgmtP ?: 2321);
+                $proto = ($port == 443) ? 'https' : 'http';
+            } else {
+                $port = $mgmtP ?: 23;
+                $proto = 'telnet';
+            }
         } else {
             $defaultPort = $isBtpon ? 16148 : ($isFocuscom ? 2322 : ($isAtop ? 2000 : 1010));
             $port = (int)($oltDev['web_port'] ?: ($oltDev['management_port'] ?: $defaultPort));
+            $proto = ($port == 443) ? 'https' : 'http';
+            if ($vendor === 'vsol' && $port != 80) {
+                $proto = 'https';
+            }
         }
         $user = $oltDev['api_username'] ?: ($isAtop ? 'root' : (($isBdcom || $isFocuscom || $isBtpon) ? 'admin' : 'star'));
         $pass = $oltDev['api_password'] ?: (($isBdcom || $isFocuscom || $isBtpon || $isAtop) ? 'admin' : 'star321');
-        $proto = ($port == 443) ? 'https' : 'http';
-        if ($vendor === 'vsol' && $port != 80) {
-            $proto = 'https';
-        }
 
         $totalPonPorts = (int)($oltDev['total_pon_ports'] ?? (($isFocuscom || $isBdcom) ? 4 : 8));
         if ($totalPonPorts <= 0) $totalPonPorts = (($isFocuscom || $isBdcom) ? 4 : 8);
@@ -65,7 +74,11 @@ class OltSyncService {
         $timeout = ($totalPonPorts > 4) ? 45 : 25;
 
         if ($isBdcom) {
-            $client = new BdcomOltClient($ip, $port, $user, $pass, 'telnet', $timeout);
+            if ($proto === 'http' || $proto === 'https' || $port === 2321 || $port === 80 || $port === 8080) {
+                $client = new BdcomWebOltClient($ip, $port, $user, $pass, $proto, $timeout);
+            } else {
+                $client = new BdcomOltClient($ip, $port, $user, $pass, $proto, $timeout);
+            }
         } elseif ($isBtpon) {
             $client = new BtponOltClient($ip, $port, $user, $pass, $proto, $timeout);
         } elseif ($isFocuscom) {
@@ -92,7 +105,7 @@ class OltSyncService {
         if (!$sysInfo && empty($onus)) {
             // If connection failed, return honest error so user knows hardware was unreachable
             $local = self::getLocalData($db, $tenantId, $deviceId, $oltDev);
-            $protoName = $isBdcom ? 'Telnet CLI' : 'API/Web';
+            $protoName = ($isBdcom && ($proto === 'http' || $proto === 'https' || $port === 2321)) ? 'Web Management' : ($isBdcom ? 'Telnet CLI' : 'API/Web');
             $local['syncError'] = "Could not connect to OLT {$protoName} at {$ip}:{$port}. Please verify the IP address, {$protoName} port, and credentials.";
             $local['isOnline'] = false;
             return $local;
@@ -102,7 +115,7 @@ class OltSyncService {
         self::ensureOltSchema($db);
 
         if ($isBdcom) {
-            $defaultModel = 'BDCOM P3600-04';
+            $defaultModel = 'BDCOM P3310D';
         } elseif ($isBtpon) {
             $defaultModel = 'BTPON PTF-EP8X4G8';
         } elseif ($isFocuscom) {
@@ -376,6 +389,7 @@ class OltSyncService {
             'ponPorts' => $ponPorts,
             'totalOnus' => $totalStored,
             'totalOnusOnline' => $totalOnline,
+            'totalOnusOffline' => max(0, $totalStored - $totalOnline),
         ];
     }
 

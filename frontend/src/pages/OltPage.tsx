@@ -12,7 +12,7 @@ import { ActionDropdown } from '@/components/ui/ActionDropdown';
 import { usePingStatus } from '@/hooks/usePingStatus';
 import { usePingStatusStore } from '@/stores/pingStatusStore';
 import { PageHeader } from '@/components/common';
-import { Lock, Zap, Radio, Key, RefreshCw, X, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Lock, Zap, Radio, Key, RefreshCw, X, CheckCircle2, AlertTriangle, Globe, Terminal } from 'lucide-react';
 
 const getStatusBadgeClass = (status: NetworkDevice['status']): string => {
   const classes: Record<NetworkDevice['status'], string> = {
@@ -127,6 +127,7 @@ export default function OltPage() {
     isProduction: true,
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [bdcomMode, setBdcomMode] = useState<'web' | 'telnet'>('web');
 
   // Pre-flight Connection & Login Testing States
   const [isTestingPing, setIsTestingPing] = useState(false);
@@ -151,8 +152,8 @@ export default function OltPage() {
         deviceType: 'olt',
         vendor: targetForm.vendor || 'vsol',
         managementIp: targetForm.managementIp,
-        managementPort: targetForm.managementPort,
-        webPort: targetForm.webPort,
+        managementPort: targetForm.vendor === 'bdcom' && bdcomMode === 'web' ? 0 : targetForm.managementPort,
+        webPort: targetForm.vendor === 'bdcom' && bdcomMode === 'telnet' ? 0 : (targetForm.vendor === 'bdcom' ? (targetForm.webPort || 2321) : targetForm.webPort),
       });
       setTestResult({
         type: 'ping',
@@ -191,8 +192,8 @@ export default function OltPage() {
         deviceType: 'olt',
         vendor: targetForm.vendor || 'vsol',
         managementIp: targetForm.managementIp,
-        managementPort: targetForm.managementPort,
-        webPort: targetForm.webPort,
+        managementPort: targetForm.vendor === 'bdcom' && bdcomMode === 'web' ? 0 : targetForm.managementPort,
+        webPort: targetForm.vendor === 'bdcom' && bdcomMode === 'telnet' ? 0 : (targetForm.vendor === 'bdcom' ? (targetForm.webPort || 2321) : targetForm.webPort),
         apiUsername: targetForm.apiUsername,
         apiPassword: targetForm.apiPassword,
       });
@@ -274,8 +275,8 @@ export default function OltPage() {
         totalPonPorts: formData.totalPonPorts || 8,
         managementIp: formData.managementIp.trim(),
         dnsName: formData.dnsName?.trim() || undefined,
-        managementPort: formData.managementPort ?? 23,
-        webPort: formData.webPort ?? 80,
+        managementPort: formData.vendor === 'bdcom' && bdcomMode === 'web' ? 0 : (formData.managementPort ?? 23),
+        webPort: formData.vendor === 'bdcom' && bdcomMode === 'telnet' ? 0 : (formData.webPort ?? (formData.vendor === 'bdcom' ? 2321 : 80)),
         snmpCommunity: formData.snmpCommunity?.trim() || 'public',
         snmpPort: formData.snmpPort ?? 161,
         apiUsername: formData.apiUsername?.trim() || undefined,
@@ -306,8 +307,8 @@ export default function OltPage() {
         totalPonPorts: formData.totalPonPorts || 8,
         managementIp: formData.managementIp.trim(),
         dnsName: formData.dnsName?.trim() || undefined,
-        managementPort: formData.managementPort ?? 23,
-        webPort: formData.webPort ?? 80,
+        managementPort: formData.vendor === 'bdcom' && bdcomMode === 'web' ? 0 : (formData.managementPort ?? 23),
+        webPort: formData.vendor === 'bdcom' && bdcomMode === 'telnet' ? 0 : (formData.webPort ?? (formData.vendor === 'bdcom' ? 2321 : 80)),
         snmpCommunity: formData.snmpCommunity?.trim() || 'public',
         snmpPort: formData.snmpPort ?? 161,
         apiUsername: formData.apiUsername?.trim() || undefined,
@@ -330,6 +331,15 @@ export default function OltPage() {
 
   const handleEdit = (device: NetworkDevice) => {
     setEditingDevice(device);
+    let mode: 'web' | 'telnet' = 'web';
+    if (device.vendor === 'bdcom') {
+      if (device.webPort && device.webPort > 0) {
+        mode = 'web';
+      } else if (device.managementPort && device.managementPort === 23) {
+        mode = 'telnet';
+      }
+    }
+    setBdcomMode(mode);
     setFormData({
       deviceCode: device.deviceCode,
       deviceName: device.deviceName,
@@ -339,7 +349,7 @@ export default function OltPage() {
       managementIp: device.managementIp || '',
       dnsName: device.dnsName || '',
       managementPort: device.managementPort ?? 23,
-      webPort: device.webPort ?? 80,
+      webPort: device.webPort ?? (device.vendor === 'bdcom' ? 2321 : 80),
       snmpCommunity: device.snmpCommunity || 'public',
       snmpPort: device.snmpPort ?? 161,
       apiUsername: device.apiUsername || '',
@@ -490,6 +500,7 @@ export default function OltPage() {
       isProduction: true,
     });
     setFormErrors({});
+    setBdcomMode('web');
     setTestResult(null);
     setIsTestingPing(false);
     setIsTestingLogin(false);
@@ -619,7 +630,8 @@ export default function OltPage() {
                         setFormData((p) => ({
                           ...p,
                           vendor: v,
-                          webPort: v === 'atop' ? 2000 : (v === 'btpon' ? 16148 : (v === 'focuscom' ? 2322 : p.webPort)),
+                          webPort: v === 'atop' ? 2000 : (v === 'btpon' ? 16148 : (v === 'focuscom' ? 2322 : (v === 'bdcom' ? (bdcomMode === 'web' ? 2321 : 0) : p.webPort))),
+                          managementPort: v === 'bdcom' ? (bdcomMode === 'telnet' ? 23 : 0) : p.managementPort,
                           apiUsername: v === 'atop' && !p.apiUsername ? 'root' : p.apiUsername,
                           apiPassword: v === 'atop' && !p.apiPassword ? 'admin' : p.apiPassword,
                         }));
@@ -671,8 +683,77 @@ export default function OltPage() {
                   </div>
                 </div>
 
-                {/* Network & Ports 3-column Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {/* BDCOM Protocol Mode Checkmark / Radio Selector */}
+                {formData.vendor === 'bdcom' && (
+                  <div className="p-2.5 bg-teal-500/10 dark:bg-teal-950/30 border border-teal-500/30 rounded-xl space-y-2 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-teal-800 dark:text-teal-200 flex items-center gap-1.5">
+                        <Zap className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                        Select BDCOM Connection Mode:
+                      </span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-teal-100 dark:bg-teal-900/60 text-teal-700 dark:text-teal-300 font-bold">
+                        {bdcomMode === 'web' ? 'Web Mode (Port 2321 / 80)' : 'Telnet Mode (Port 23)'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBdcomMode('web');
+                          setFormData((p) => ({ ...p, webPort: p.webPort || 2321, managementPort: 0 }));
+                        }}
+                        className={`flex items-center gap-2.5 p-2 rounded-xl border text-left cursor-pointer transition-all ${
+                          bdcomMode === 'web'
+                            ? 'bg-teal-600 text-white border-teal-600 shadow-sm ring-2 ring-teal-500/20'
+                            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-teal-400'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                          bdcomMode === 'web' ? 'border-white bg-white' : 'border-slate-400'
+                        }`}>
+                          {bdcomMode === 'web' && <div className="w-2 h-2 rounded-full bg-teal-600" />}
+                        </div>
+                        <Globe className={`w-4 h-4 shrink-0 ${bdcomMode === 'web' ? 'text-white' : 'text-teal-600 dark:text-teal-400'}`} />
+                        <div>
+                          <div className="text-xs font-bold leading-tight">Web Management (HTTP)</div>
+                          <div className={`text-[10px] leading-tight ${bdcomMode === 'web' ? 'text-teal-100' : 'text-slate-400'}`}>
+                            GoAhead Web GUI (Port 2321 / 80)
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBdcomMode('telnet');
+                          setFormData((p) => ({ ...p, managementPort: p.managementPort || 23, webPort: 0 }));
+                        }}
+                        className={`flex items-center gap-2.5 p-2 rounded-xl border text-left cursor-pointer transition-all ${
+                          bdcomMode === 'telnet'
+                            ? 'bg-teal-600 text-white border-teal-600 shadow-sm ring-2 ring-teal-500/20'
+                            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-teal-400'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                          bdcomMode === 'telnet' ? 'border-white bg-white' : 'border-slate-400'
+                        }`}>
+                          {bdcomMode === 'telnet' && <div className="w-2 h-2 rounded-full bg-teal-600" />}
+                        </div>
+                        <Terminal className={`w-4 h-4 shrink-0 ${bdcomMode === 'telnet' ? 'text-white' : 'text-teal-600 dark:text-teal-400'}`} />
+                        <div>
+                          <div className="text-xs font-bold leading-tight">Telnet CLI Socket</div>
+                          <div className={`text-[10px] leading-tight ${bdcomMode === 'telnet' ? 'text-teal-100' : 'text-slate-400'}`}>
+                            CLI Console Socket (Port 23 / 1081)
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Network & Ports Grid */}
+                <div className={`grid grid-cols-1 ${formData.vendor === 'bdcom' ? 'sm:grid-cols-2' : 'sm:grid-cols-3'} gap-2.5`}>
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
                       Management IP <span className="text-red-500">*</span>
@@ -690,35 +771,73 @@ export default function OltPage() {
                     {formErrors.managementIp && <p className="mt-0.5 text-[11px] text-red-500">{formErrors.managementIp}</p>}
                   </div>
 
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                      Web API Port
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={65535}
-                      value={formData.webPort ?? 80}
-                      onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || 80 }))}
-                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
-                      placeholder="80 (or 1010/2322)"
-                    />
-                  </div>
+                  {formData.vendor === 'bdcom' ? (
+                    bdcomMode === 'web' ? (
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1 flex items-center justify-between">
+                          <span>Web Management Port <span className="text-red-500">*</span></span>
+                          <span className="text-[10px] text-teal-600 dark:text-teal-400 font-bold">(HTTP GoAhead)</span>
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={65535}
+                          value={formData.webPort ?? 2321}
+                          onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || 2321, managementPort: 0 }))}
+                          className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                          placeholder="2321 (or 80)"
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1 flex items-center justify-between">
+                          <span>Telnet CLI Port <span className="text-red-500">*</span></span>
+                          <span className="text-[10px] text-teal-600 dark:text-teal-400 font-bold">(CLI Socket)</span>
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={65535}
+                          value={formData.managementPort ?? 23}
+                          onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23, webPort: 0 }))}
+                          className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                          placeholder="23 (or 1081)"
+                        />
+                      </div>
+                    )
+                  ) : (
+                    <>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                          Web API Port
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={65535}
+                          value={formData.webPort ?? 80}
+                          onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || 80 }))}
+                          className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                          placeholder="80 (or 1010/2322)"
+                        />
+                      </div>
 
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                      Telnet / CLI Port {formData.vendor === 'bdcom' && <span className="text-emerald-500 font-bold">(BDCOM)</span>}
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={65535}
-                      value={formData.managementPort ?? 23}
-                      onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23 }))}
-                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
-                      placeholder="23 (or 1081)"
-                    />
-                  </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                          Telnet / CLI Port
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={65535}
+                          value={formData.managementPort ?? 23}
+                          onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23 }))}
+                          className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                          placeholder="23 (or 1081)"
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Credentials */}
@@ -897,19 +1016,96 @@ export default function OltPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {/* BDCOM Protocol Mode Checkmark / Radio Selector for Edit Modal */}
+                {formData.vendor === 'bdcom' && (
+                  <div className="p-2.5 bg-teal-500/10 dark:bg-teal-950/30 border border-teal-500/30 rounded-xl space-y-2 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-teal-800 dark:text-teal-200 flex items-center gap-1.5">
+                        <Zap className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                        Select BDCOM Connection Mode:
+                      </span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-teal-100 dark:bg-teal-900/60 text-teal-700 dark:text-teal-300 font-bold">
+                        {bdcomMode === 'web' ? 'Web Mode (Port 2321 / 80)' : 'Telnet Mode (Port 23)'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBdcomMode('web');
+                          setFormData((p) => ({ ...p, webPort: p.webPort || 2321, managementPort: 0 }));
+                        }}
+                        className={`flex items-center gap-2.5 p-2 rounded-xl border text-left cursor-pointer transition-all ${
+                          bdcomMode === 'web'
+                            ? 'bg-teal-600 text-white border-teal-600 shadow-sm ring-2 ring-teal-500/20'
+                            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-teal-400'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                          bdcomMode === 'web' ? 'border-white bg-white' : 'border-slate-400'
+                        }`}>
+                          {bdcomMode === 'web' && <div className="w-2 h-2 rounded-full bg-teal-600" />}
+                        </div>
+                        <Globe className={`w-4 h-4 shrink-0 ${bdcomMode === 'web' ? 'text-white' : 'text-teal-600 dark:text-teal-400'}`} />
+                        <div>
+                          <div className="text-xs font-bold leading-tight">Web Management (HTTP)</div>
+                          <div className={`text-[10px] leading-tight ${bdcomMode === 'web' ? 'text-teal-100' : 'text-slate-400'}`}>
+                            GoAhead Web GUI (Port 2321 / 80)
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBdcomMode('telnet');
+                          setFormData((p) => ({ ...p, managementPort: p.managementPort || 23, webPort: 0 }));
+                        }}
+                        className={`flex items-center gap-2.5 p-2 rounded-xl border text-left cursor-pointer transition-all ${
+                          bdcomMode === 'telnet'
+                            ? 'bg-teal-600 text-white border-teal-600 shadow-sm ring-2 ring-teal-500/20'
+                            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-teal-400'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                          bdcomMode === 'telnet' ? 'border-white bg-white' : 'border-slate-400'
+                        }`}>
+                          {bdcomMode === 'telnet' && <div className="w-2 h-2 rounded-full bg-teal-600" />}
+                        </div>
+                        <Terminal className={`w-4 h-4 shrink-0 ${bdcomMode === 'telnet' ? 'text-white' : 'text-teal-600 dark:text-teal-400'}`} />
+                        <div>
+                          <div className="text-xs font-bold leading-tight">Telnet CLI Socket</div>
+                          <div className={`text-[10px] leading-tight ${bdcomMode === 'telnet' ? 'text-teal-100' : 'text-slate-400'}`}>
+                            CLI Console Socket (Port 23 / 1081)
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className={`grid grid-cols-1 ${formData.vendor === 'bdcom' ? 'sm:grid-cols-2' : 'sm:grid-cols-3'} gap-2.5`}>
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
                       OLT Vendor
                     </label>
                     <select
                       value={formData.vendor || 'vsol'}
-                      onChange={(e) => setFormData((p) => ({ ...p, vendor: e.target.value }))}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setFormData((p) => ({
+                          ...p,
+                          vendor: v,
+                          webPort: v === 'bdcom' ? (bdcomMode === 'web' ? 2321 : 0) : p.webPort,
+                          managementPort: v === 'bdcom' ? (bdcomMode === 'telnet' ? 23 : 0) : p.managementPort,
+                        }));
+                      }}
                       className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
                     >
                       <option value="vsol">VSOL</option>
                       <option value="atop">ATOP</option>
-                      <option value="bdcom">BDCOM</option>
+                      <option value="bdcom">BDCOM (Web & Telnet)</option>
                       <option value="btpon">BTPON / TBS</option>
                       <option value="focuscom">Focuscom</option>
                       <option value="huawei">Huawei</option>
@@ -920,29 +1116,61 @@ export default function OltPage() {
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                      Web Port
-                    </label>
-                    <input
-                      type="number"
-                      value={formData.webPort ?? 80}
-                      onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || 80 }))}
-                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
-                    />
-                  </div>
+                  {formData.vendor === 'bdcom' ? (
+                    bdcomMode === 'web' ? (
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1 flex items-center justify-between">
+                          <span>Web Management Port</span>
+                          <span className="text-[10px] text-teal-600 dark:text-teal-400 font-bold">(HTTP GoAhead)</span>
+                        </label>
+                        <input
+                          type="number"
+                          value={formData.webPort ?? 2321}
+                          onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || 2321, managementPort: 0 }))}
+                          className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1 flex items-center justify-between">
+                          <span>Telnet CLI Port</span>
+                          <span className="text-[10px] text-teal-600 dark:text-teal-400 font-bold">(CLI Socket)</span>
+                        </label>
+                        <input
+                          type="number"
+                          value={formData.managementPort ?? 23}
+                          onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23, webPort: 0 }))}
+                          className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                        />
+                      </div>
+                    )
+                  ) : (
+                    <>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                          Web Port
+                        </label>
+                        <input
+                          type="number"
+                          value={formData.webPort ?? 80}
+                          onChange={(e) => setFormData((p) => ({ ...p, webPort: parseInt(e.target.value) || 80 }))}
+                          className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                        />
+                      </div>
 
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                      Telnet / CLI Port
-                    </label>
-                    <input
-                      type="number"
-                      value={formData.managementPort ?? 23}
-                      onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23 }))}
-                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
-                    />
-                  </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                          Telnet / CLI Port
+                        </label>
+                        <input
+                          type="number"
+                          value={formData.managementPort ?? 23}
+                          onChange={(e) => setFormData((p) => ({ ...p, managementPort: parseInt(e.target.value) || 23 }))}
+                          className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-900 dark:text-slate-100"
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

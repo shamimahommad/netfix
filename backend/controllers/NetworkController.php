@@ -412,10 +412,10 @@ class NetworkController {
         if ($type === 'olt') {
             $vendor = strtolower(trim($device['vendor'] ?? ''));
             if ($vendor === 'bdcom') {
-                // For BDCOM OLT: Telnet CLI port (management_port e.g. 1081 / 23) is top priority
-                if (!empty($device['management_port'])) $ports[] = (int)$device['management_port'];
+                // For BDCOM OLT: Check Web port (e.g. 2321 / 80) and Telnet CLI port (e.g. 23 / 1081)
                 if (!empty($device['web_port'])) $ports[] = (int)$device['web_port'];
-                if (empty($ports)) $ports = [23, 1081];
+                if (!empty($device['management_port'])) $ports[] = (int)$device['management_port'];
+                if (empty($ports)) $ports = [2321, 23, 1081, 80];
             } else {
                 // For Web API OLTs (VSOL, BTPON, Focuscom): Web API port is priority
                 if (!empty($device['web_port'])) $ports[] = (int)$device['web_port'];
@@ -553,9 +553,9 @@ class NetworkController {
                 if (empty($ports)) $ports = $useSsl ? [8729, 8291, 50000, 80] : [8728, 8729, 50000, 80, 8291];
             } else {
                 if ($vendor === 'bdcom') {
-                    if ($managementPort) $ports[] = $managementPort;
                     if ($webPort) $ports[] = $webPort;
-                    if (empty($ports)) $ports = [23, 1081, 80];
+                    if ($managementPort) $ports[] = $managementPort;
+                    if (empty($ports)) $ports = [2321, 23, 1081, 80];
                 } else {
                     if ($webPort) $ports[] = $webPort;
                     if ($managementPort) $ports[] = $managementPort;
@@ -737,25 +737,67 @@ class NetworkController {
                     // OLT Login test
                     if ($vendor === 'bdcom') {
                         require_once __DIR__ . '/../lib/BdcomOltClient.php';
-                        $port = $managementPort ?: ($webPort ?: 23);
-                        $client = new BdcomOltClient($ip, $port, $username, $password, 'telnet', 6);
-                        $ok = @$client->login();
+                        require_once __DIR__ . '/../lib/BdcomWebOltClient.php';
+
+                        $webP = (int)($webPort ?: 0);
+                        $cliP = (int)($managementPort ?: 0);
+
+                        // If webPort is specified (e.g. 2321, 80, 8080) or if managementPort is a web port:
+                        // Web mode testing:
+                        if ($webP > 0 || $cliP === 2321 || $cliP === 80 || $cliP === 8080) {
+                            $targetWebPort = $webP ?: ($cliP ?: 2321);
+                            $webClient = new BdcomWebOltClient($ip, $targetWebPort, $username, $password, 'http', 8);
+                            if ($webClient->login()) {
+                                $sys = $webClient->getSystemInfo(4);
+                                $model = $sys['model'] ?? 'BDCOM OLT';
+                                Response::json([
+                                    'success' => true,
+                                    'status' => 'authenticated',
+                                    'message' => "Login Successful! Connected to {$model} via BDCOM Web Management (port {$targetWebPort}).",
+                                    'data' => [
+                                        'model' => $model,
+                                        'protocol' => 'BDCOM Web Management',
+                                        'serial' => $sys['serial'] ?? '',
+                                        'firmware' => $sys['firmware'] ?? '',
+                                        'hardware' => $sys['hardware'] ?? '',
+                                    ],
+                                ]);
+                                return;
+                            } else {
+                                Response::json([
+                                    'success' => false,
+                                    'status' => 'auth_failed',
+                                    'message' => "Login Failed! Could not authenticate to BDCOM OLT Web Management on port {$targetWebPort}. Verify web username, password, or port.",
+                                ]);
+                                return;
+                            }
+                        }
+
+                        // Telnet CLI mode testing:
+                        $targetCliPort = ($cliP && $cliP !== 2321) ? $cliP : 23;
+                        $cliClient = new BdcomOltClient($ip, $targetCliPort, $username, $password, 'telnet', 6);
+                        $ok = @$cliClient->login();
                         if ($ok) {
-                            $sys = $client->getSystemInfo(4);
-                            $client->disconnect();
+                            $sys = $cliClient->getSystemInfo(4);
+                            $cliClient->disconnect();
                             $model = $sys['model'] ?? 'BDCOM OLT';
                             Response::json([
                                 'success' => true,
                                 'status' => 'authenticated',
-                                'message' => "Login Successful! Connected to {$model} via Telnet CLI.",
-                                'data' => ['model' => $model],
+                                'message' => "Login Successful! Connected to {$model} via BDCOM Telnet CLI (port {$targetCliPort}).",
+                                'data' => [
+                                    'model' => $model,
+                                    'protocol' => 'Telnet CLI',
+                                    'serial' => $sys['serial'] ?? '',
+                                    'firmware' => $sys['firmware'] ?? '',
+                                ],
                             ]);
                             return;
                         } else {
                             Response::json([
                                 'success' => false,
                                 'status' => 'auth_failed',
-                                'message' => "Login Failed! Could not authenticate to BDCOM OLT via Telnet on port {$port}. Verify CLI username and password.",
+                                'message' => "Login Failed! Could not connect or authenticate to BDCOM OLT via Telnet on port {$targetCliPort}. Verify CLI credentials, or switch to Web mode if Telnet is disabled.",
                             ]);
                             return;
                         }
@@ -1349,10 +1391,22 @@ class NetworkController {
             ];
         }
 
+        $onlineCount = 0;
+        $offlineCount = 0;
+        foreach ($onus as $o) {
+            if (strtolower($o['status'] ?? '') === 'online') {
+                $onlineCount++;
+            } else {
+                $offlineCount++;
+            }
+        }
+
         Response::json([
             'success' => true,
             'data' => [
                 'total' => count($onus),
+                'online' => $onlineCount,
+                'offline' => $offlineCount,
                 'onus' => $onus,
             ],
         ]);
