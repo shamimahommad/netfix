@@ -56,6 +56,19 @@ class CdataOltClient {
      * Terminate connection gracefully
      */
     public function disconnect(): void {
+        if ($this->isLoggedIn && $this->cookieFile && file_exists($this->cookieFile)) {
+            try {
+                $ch = curl_init($this->getBaseUrl() . '/cgi/login.php?logout=1');
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 2);
+                curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 1);
+                curl_setopt($ch, CURLOPT_COOKIEFILE, $this->cookieFile);
+                curl_exec($ch);
+                curl_close($ch);
+            } catch (\Throwable $e) {}
+        }
         $this->isLoggedIn = false;
         if ($this->cookieFile && file_exists($this->cookieFile)) {
             @unlink($this->cookieFile);
@@ -297,7 +310,7 @@ class CdataOltClient {
         $totalPon = $totalConfiguredPorts > 0 ? $totalConfiguredPorts : 4;
         $portHtml = $this->request('home.php?isajax=1&runtab=1&fun=pon&page=ponPortInfoTable', [], false, 8);
         if ($portHtml && preg_match_all('/<td>(PON\d+\/\d+\/\d+)<\/td>/i', $portHtml, $pm)) {
-            $detected = count(array_unique($pm[1]));
+            $detected = count(array_unique(array_map('strtoupper', $pm[1])));
             if ($detected > 0) {
                 $totalPon = $detected;
             }
@@ -331,6 +344,19 @@ class CdataOltClient {
         $portHtml = $this->request('home.php?isajax=1&runtab=1&fun=pon&page=ponPortInfoTable', [], false, 8);
         $ports = [];
 
+        // Pre-query ponlist to calculate exact registered & offline count per PON port
+        $portRegistered = [];
+        $ponListHtml = $this->request('home.php?isajax=1&&page=ponlist', [], false, 8);
+        if ($ponListHtml) {
+            $plPat = '/<li\s+id=(\d+)\s+title=ONU(\d+)\[([^\]]+)\]\s+onclick=[\'"]doSubmit\(this,\s*"onu",\s*"index",\s*"1\.0\.(\d+)",\s*"\d+"\);?[\'"]>/is';
+            if (preg_match_all($plPat, $ponListHtml, $plMatches, PREG_SET_ORDER)) {
+                foreach ($plMatches as $plm) {
+                    $pNum = (int)$plm[4] - 6;
+                    $portRegistered[$pNum] = ($portRegistered[$pNum] ?? 0) + 1;
+                }
+            }
+        }
+
         if ($portHtml) {
             // Regex to parse port rows from ponPortInfoTable
             // Columns: Port, Port Name, Operation Status, Upline ONU Number, Max UsBandwidth, Actual UsBandwidth, Remain UsBandwidth
@@ -348,12 +374,15 @@ class CdataOltClient {
                         $pNum = (int)$nm[1];
                     }
 
+                    $totalReg = $portRegistered[$pNum] ?? $onlineCount;
+                    $offlineCount = max(0, $totalReg - $onlineCount);
+
                     $ports[] = [
                         'portNum' => $pNum,
                         'portName' => $rawName,
                         'status' => ($operStatus === 'UP') ? 'online' : 'offline',
                         'online' => $onlineCount,
-                        'offline' => 0,
+                        'offline' => $offlineCount,
                         'operStatus' => $operStatus,
                     ];
                     $idx++;
@@ -404,85 +433,153 @@ class CdataOltClient {
             return $this->cachedOnus;
         }
 
-        // 1. Fetch high-speed JSON from getonuinfo AJAX endpoint
-        $res = $this->request('home.php?fun=ajax&function=getonuinfo', [], true, 12);
-        if (!$res) {
-            return [];
+        // 1. Fetch visual ponlist tree to get the ground-truth online/offline status icon for all ONUs
+        $ponlistMap = []; // key: "{ponPort}:{onuId}" -> array
+        $ponListHtml = $this->request('home.php?isajax=1&&page=ponlist', [], false, 8);
+        if ($ponListHtml) {
+            $plPat = '/<li\s+id=(\d+)\s+title=ONU(\d+)\[([^\]]+)\]\s+onclick=[\'"]doSubmit\(this,\s*"onu",\s*"index",\s*"1\.0\.(\d+)",\s*"\d+"\);?[\'"]>\s*<span><a><img[^>]*src=[\'"]([^\'"]+)[\'"]/is';
+            if (preg_match_all($plPat, $ponListHtml, $plMatches, PREG_SET_ORDER)) {
+                foreach ($plMatches as $plm) {
+                    $eid = (int)$plm[1];
+                    $oId = (int)$plm[2];
+                    $mac = $this->normalizeMac($plm[3]);
+                    $pNum = (int)$plm[4] - 6;
+                    $isOnline = strpos($plm[5], 'li2-img2') !== false;
+
+                    $ponlistMap["{$pNum}:{$oId}"] = [
+                        'entryId' => $eid,
+                        'onuId' => (string)$oId,
+                        'ponPort' => $pNum,
+                        'mac' => $mac,
+                        'isOnline' => $isOnline,
+                    ];
+                }
+            }
         }
 
-        $rawOnus = json_decode($res, true);
-        if (!is_array($rawOnus)) {
-            return [];
-        }
+        // 2. Fetch high-speed JSON from getonuinfo AJAX endpoint
+        $res = $this->request('home.php?fun=ajax&function=getonuinfo', [], true, 12);
+        $rawOnus = $res ? json_decode($res, true) : [];
 
         $onus = [];
         $activePons = [];
 
-        foreach ($rawOnus as $item) {
-            if (!is_array($item) || empty($item[0])) continue;
+        if (is_array($rawOnus)) {
+            foreach ($rawOnus as $item) {
+                if (!is_array($item) || empty($item[0])) continue;
 
-            $entryId = (int)$item[0];
-            // Decode PON port and ONU ID from C-Data 32-bit entryId:
-            // High byte 2 = Slot (1), Byte 1 = Port (7..10), Low byte = ONU ID (1..64)
-            $portRaw = ($entryId >> 8) & 0xFF;
-            $ponPort = $portRaw - 6; // 7 -> 1, 8 -> 2, 9 -> 3, 10 -> 4
-            $onuId = $entryId & 0xFF;
+                $entryId = (int)$item[0];
+                // Decode PON port and ONU ID from C-Data 32-bit entryId:
+                // High byte 2 = Slot (1), Byte 1 = Port (7..10), Low byte = ONU ID (1..64)
+                $portRaw = ($entryId >> 8) & 0xFF;
+                $ponPort = $portRaw - 6; // 7 -> 1, 8 -> 2, 9 -> 3, 10 -> 4
+                $onuId = $entryId & 0xFF;
 
-            if ($targetPon !== null && $ponPort !== $targetPon) {
-                continue;
+                if ($targetPon !== null && $ponPort !== $targetPon) {
+                    continue;
+                }
+
+                $key = "{$ponPort}:{$onuId}";
+                // Determine accurate online/offline state
+                if (isset($ponlistMap[$key])) {
+                    $isOnline = $ponlistMap[$key]['isOnline'];
+                } else {
+                    $operStatus = strtolower(trim($item[9] ?? 'up'));
+                    $isOnline = ($operStatus === 'up');
+                }
+
+                $rawMac = $item[7] ?? ($ponlistMap[$key]['mac'] ?? '');
+                $mac = $this->normalizeMac($rawMac);
+
+                // Distance (only valid if online)
+                $distanceMeters = null;
+                if ($isOnline && !empty($item[15])) {
+                    $distanceMeters = (int)preg_replace('/[^0-9]/', '', (string)$item[15]);
+                }
+
+                // Uptime (only valid if online)
+                $uptimeSeconds = null;
+                if ($isOnline && !empty($item[18])) {
+                    $uptimeSeconds = (int)preg_replace('/[^0-9]/', '', (string)$item[18]);
+                }
+
+                $desc = trim($item[2] ?? '');
+                $software = trim($item[13] ?? '');
+                $model = trim($item[26] ?? ($item[27] ?? ''));
+                $vendor = trim($item[25] ?? '');
+
+                $onuRecord = [
+                    'ponPort' => $ponPort,
+                    'ponPortName' => "PON0/0/{$ponPort}",
+                    'portName' => "PON0/0/{$ponPort}",
+                    'onuId' => (string)$onuId,
+                    'mac' => $mac,
+                    'macAddress' => $mac,
+                    'status' => $isOnline ? 'online' : 'offline',
+                    'name' => $desc ?: "ONU-{$ponPort}:{$onuId}",
+                    'distanceMeters' => $distanceMeters,
+                    'distance' => $distanceMeters !== null ? "{$distanceMeters}m" : null,
+                    'uptimeSeconds' => $uptimeSeconds,
+                    'softwareVersion' => $software,
+                    'model' => $model ?: 'ONU',
+                    'vendor' => $vendor,
+                    'entryId' => $entryId,
+                    'rxPower' => null,
+                    'rxPowerDbm' => null,
+                    'txPower' => null,
+                    'txPowerDbm' => null,
+                    'voltage' => null,
+                    'temperature' => null,
+                    'biasCurrent' => null,
+                ];
+
+                $onus[$key] = $onuRecord;
+                if ($isOnline) {
+                    $activePons[$ponPort] = true;
+                }
             }
-
-            $rawMac = $item[7] ?? '';
-            $mac = $this->normalizeMac($rawMac);
-            $operStatus = strtolower(trim($item[9] ?? 'up'));
-            $isOnline = ($operStatus === 'up');
-
-            // Distance
-            $distanceMeters = null;
-            if (!empty($item[15])) {
-                $distanceMeters = (int)preg_replace('/[^0-9]/', '', (string)$item[15]);
-            }
-
-            // Uptime
-            $uptimeSeconds = null;
-            if (!empty($item[18])) {
-                $uptimeSeconds = (int)preg_replace('/[^0-9]/', '', (string)$item[18]);
-            }
-
-            $desc = trim($item[2] ?? '');
-            $software = trim($item[13] ?? '');
-            $model = trim($item[26] ?? ($item[27] ?? ''));
-            $vendor = trim($item[25] ?? '');
-
-            $onuRecord = [
-                'ponPort' => $ponPort,
-                'onuId' => (string)$onuId,
-                'mac' => $mac,
-                'macAddress' => $mac,
-                'status' => $isOnline ? 'online' : 'offline',
-                'name' => $desc ?: "ONU-{$ponPort}:{$onuId}",
-                'distanceMeters' => $distanceMeters,
-                'distance' => $distanceMeters !== null ? "{$distanceMeters}m" : null,
-                'uptimeSeconds' => $uptimeSeconds,
-                'softwareVersion' => $software,
-                'model' => $model,
-                'vendor' => $vendor,
-                'entryId' => $entryId,
-                'rxPower' => null,
-                'rxPowerDbm' => null,
-                'txPower' => null,
-                'txPowerDbm' => null,
-                'voltage' => null,
-                'temperature' => null,
-                'biasCurrent' => null,
-            ];
-
-            $onus["{$ponPort}:{$onuId}"] = $onuRecord;
-            $activePons[$ponPort] = true;
         }
 
-        // 2. Fetch live Optical Power if requested
-        if ($withOptical && !empty($onus)) {
+        // Include any registered ONUs from ponlist that were not returned by getonuinfo
+        foreach ($ponlistMap as $key => $pEntry) {
+            if ($targetPon !== null && $pEntry['ponPort'] !== $targetPon) {
+                continue;
+            }
+            if (!isset($onus[$key])) {
+                $pNum = $pEntry['ponPort'];
+                $oId = $pEntry['onuId'];
+                $onus[$key] = [
+                    'ponPort' => $pNum,
+                    'ponPortName' => "PON0/0/{$pNum}",
+                    'portName' => "PON0/0/{$pNum}",
+                    'onuId' => (string)$oId,
+                    'mac' => $pEntry['mac'],
+                    'macAddress' => $pEntry['mac'],
+                    'status' => $pEntry['isOnline'] ? 'online' : 'offline',
+                    'name' => "ONU-{$pNum}:{$oId}",
+                    'distanceMeters' => null,
+                    'distance' => null,
+                    'uptimeSeconds' => null,
+                    'softwareVersion' => '',
+                    'model' => 'ONU',
+                    'vendor' => '',
+                    'entryId' => $pEntry['entryId'],
+                    'rxPower' => null,
+                    'rxPowerDbm' => null,
+                    'txPower' => null,
+                    'txPowerDbm' => null,
+                    'voltage' => null,
+                    'temperature' => null,
+                    'biasCurrent' => null,
+                ];
+                if ($pEntry['isOnline']) {
+                    $activePons[$pNum] = true;
+                }
+            }
+        }
+
+        // 3. Fetch live Optical Power for active online PON ports
+        if ($withOptical && !empty($activePons)) {
             foreach (array_keys($activePons) as $pNum) {
                 $eid = "1.0." . ($pNum + 6); // 1.0.7 for PON 1, 1.0.9 for PON 3, etc.
                 $optUrl = "home.php?isajax=1&runtab=1&fun=pon&page=pononuOpticalParameterTable&pageSize=128&entryid={$eid}";
@@ -501,7 +598,8 @@ class CdataOltClient {
                         $tempStr = trim($om[6]);
 
                         $key = "{$pNum}:{$oId}";
-                        if (isset($onus[$key])) {
+                        // Optical telemetry is only meaningful for online ONUs
+                        if (isset($onus[$key]) && $onus[$key]['status'] === 'online') {
                             if (is_numeric($rxStr)) {
                                 $onus[$key]['rxPowerDbm'] = (float)$rxStr;
                                 $onus[$key]['rxPower'] = "{$rxStr} dBm";

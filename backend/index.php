@@ -465,6 +465,14 @@ if ($method === 'GET' && ($uri === '/network/mikrotik/sessions' || $uri === '/mo
 if ($method === 'GET' && preg_match('#^/monitoring/servers/([^/]+)/interfaces$#', $uri, $m)) {
     NetworkController::activeSessions($m[1]);
 }
+if ($method === 'GET' && ($uri === '/logs/pppoe' || $uri === '/logs/pppoe.php')) {
+    require __DIR__ . '/api/logs/pppoe.php';
+    exit;
+}
+if ($method === 'GET' && ($uri === '/routers/syslog_setup_script.php' || $uri === '/routers/syslog-script' || $uri === '/network/mikrotik/syslog-script')) {
+    require __DIR__ . '/api/routers/syslog_setup_script.php';
+    exit;
+}
 if ($method === 'GET' && ($uri === '/network/mikrotik/pppoe-logs' || $uri === '/network/pppoe-logs')) {
     NetworkController::pppoeLogs();
 }

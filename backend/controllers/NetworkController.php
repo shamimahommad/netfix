@@ -1586,6 +1586,23 @@ class NetworkController {
             }
         }
 
+        // Check if high-throughput Syslog DB has ingested records for this tenant
+        $source = strtolower(trim($_GET['source'] ?? ''));
+        $checkSyslog = ($source !== 'api' && $source !== 'live' && $source !== 'router');
+        if ($checkSyslog && ($tenantId !== null || $user['role'] === 'saas_admin')) {
+            $syslogCountStmt = ($tenantId !== null)
+                ? $db->prepare("SELECT COUNT(*) FROM pppoe_connection_logs WHERE tenant_id = :tid LIMIT 1")
+                : $db->query("SELECT COUNT(*) FROM pppoe_connection_logs LIMIT 1");
+            if ($tenantId !== null) {
+                $syslogCountStmt->execute(['tid' => $tenantId]);
+            }
+            $hasSyslog = ((int)$syslogCountStmt->fetchColumn()) > 0;
+            if ($hasSyslog || $source === 'syslog') {
+                require __DIR__ . '/../api/logs/pppoe.php';
+                exit;
+            }
+        }
+
         // 3. Determine target router(s)
         $targetRouterId = $_GET['router_id'] ?? null;
         $queryAllRouters = ($targetRouterId === 'all');

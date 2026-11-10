@@ -215,17 +215,19 @@ class OltSyncService {
                         $pppoeUser = $custMap[$routerMac];
                     }
 
+                    $pName = !empty($onu['ponPortName']) ? $onu['ponPortName'] : (!empty($onu['portName']) ? $onu['portName'] : ("PON0/0/" . ($onu['ponPort'] ?? 1)));
+
                     $insStmt->execute([
                         'tid' => $tenantId,
                         'did' => $deviceId,
-                        'pon' => $onu['ponPort'],
-                        'pname' => $onu['ponPortName'],
-                        'onuid' => $onu['onuId'],
-                        'mac' => $onu['macAddress'],
+                        'pon' => $onu['ponPort'] ?? 1,
+                        'pname' => $pName,
+                        'onuid' => $onu['onuId'] ?? 1,
+                        'mac' => $onu['macAddress'] ?? ($onu['mac'] ?? ''),
                         'rmac' => $routerMac,
                         'vlan' => $vlanId,
                         'pppoe' => $pppoeUser,
-                        'rx' => $onu['rxPowerDbm'],
+                        'rx' => $onu['rxPowerDbm'] ?? null,
                         'status' => $onu['status'] ?? 'online',
                         'uptime' => !empty($onu['aliveTime']) ? $onu['aliveTime'] : (!empty($onu['uptime']) ? $onu['uptime'] : null),
                     ]);
@@ -251,14 +253,15 @@ class OltSyncService {
 
                     $db->beginTransaction();
                     foreach ($onus as $onu) {
+                        $pName = !empty($onu['ponPortName']) ? $onu['ponPortName'] : (!empty($onu['portName']) ? $onu['portName'] : ("PON0/0/" . ($onu['ponPort'] ?? 1)));
                         $basicStmt->execute([
                             'tid' => $tenantId,
                             'did' => $deviceId,
-                            'pon' => $onu['ponPort'],
-                            'pname' => $onu['ponPortName'],
-                            'onuid' => $onu['onuId'],
-                            'mac' => $onu['macAddress'],
-                            'rx' => $onu['rxPowerDbm'],
+                            'pon' => $onu['ponPort'] ?? 1,
+                            'pname' => $pName,
+                            'onuid' => $onu['onuId'] ?? 1,
+                            'mac' => $onu['macAddress'] ?? ($onu['mac'] ?? ''),
+                            'rx' => $onu['rxPowerDbm'] ?? null,
                             'status' => $onu['status'] ?? 'online',
                             'uptime' => !empty($onu['aliveTime']) ? $onu['aliveTime'] : (!empty($onu['uptime']) ? $onu['uptime'] : null),
                         ]);
