@@ -6,6 +6,7 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
 require_once __DIR__ . '/../lib/AuthMiddleware.php';
+require_once __DIR__ . '/../lib/MikrotikSyncService.php';
 
 class AccessProfilesController {
     public static function dropdown(): void {
@@ -341,6 +342,264 @@ class AccessProfilesController {
             'success' => true,
             'message' => 'Package deleted successfully',
         ]);
+    }
+
+    /**
+     * Preview profiles directly from live MikroTik router
+     */
+    public static function mikrotikPreview(): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $deviceId = trim($_GET['serverId'] ?? $_GET['deviceId'] ?? '');
+        $protocol = strtolower(trim($_GET['protocol'] ?? 'pppoe'));
+
+        // Pick device
+        if (!empty($deviceId) && $deviceId !== '0') {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id AND (tenant_id = :tid OR :is_saas = 1) LIMIT 1");
+            $stmt->execute(['id' => $deviceId, 'tid' => $tenantId, 'is_saas' => (($user['role'] ?? '') === 'saas_admin' ? 1 : 0)]);
+            $router = $stmt->fetch();
+        } else {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE (tenant_id = :tid OR :is_saas = 1) AND status = 'active' AND device_type = 'router' ORDER BY network_device_id ASC LIMIT 1");
+            $stmt->execute(['tid' => $tenantId, 'is_saas' => (($user['role'] ?? '') === 'saas_admin' ? 1 : 0)]);
+            $router = $stmt->fetch();
+        }
+
+        if (!$router) {
+            Response::error('MikroTik router not found or not configured for this account', 404);
+            return;
+        }
+
+        $api = MikrotikSyncService::connect($router, 5);
+        if (!$api) {
+            Response::error("Could not connect to MikroTik router {$router['device_name']} ({$router['management_ip']}:{$router['management_port']}). Please verify IP reachable and API port 8728.", 503);
+            return;
+        }
+
+        try {
+            $cmd = ($protocol === 'hotspot') ? '/ip/hotspot/user/profile/print' : '/ppp/profile/print';
+            $results = $api->comm($cmd);
+            $api->disconnect();
+
+            if (!is_array($results)) {
+                $results = [];
+            }
+
+            // Existing packages in DB to check duplicates
+            $pkgStmt = $db->prepare("SELECT access_profile_id, LOWER(profile_name) as pname, LOWER(COALESCE(mikrotik_profile_name, '')) as mpname, price, download_speed_kbps, upload_speed_kbps FROM access_profiles WHERE tenant_id = :tid");
+            $pkgStmt->execute(['tid' => $tenantId]);
+            $existing = [];
+            while ($p = $pkgStmt->fetch()) {
+                if (!empty($p['mpname'])) {
+                    $existing[$p['mpname']] = $p;
+                }
+                if (!empty($p['pname'])) {
+                    $existing[$p['pname']] = $p;
+                }
+            }
+
+            $list = [];
+            foreach ($results as $item) {
+                $name = trim($item['name'] ?? '');
+                if (empty($name)) continue;
+
+                $rateLimit = trim($item['rate-limit'] ?? '');
+                $parsedSpeed = self::parseRateLimit($rateLimit, $name);
+                $isDefault = in_array(strtolower($name), ['default', 'default-encryption'], true);
+
+                $lowerName = strtolower($name);
+                $isExisting = isset($existing[$lowerName]);
+                $existingPrice = $isExisting ? (float)$existing[$lowerName]['price'] : null;
+
+                // Suggested price based on download speed if no existing price
+                $suggestedPrice = $existingPrice ?: ($parsedSpeed['download_mbps'] * 50 > 300 ? $parsedSpeed['download_mbps'] * 50 : 500);
+
+                $list[] = [
+                    'id' => (string)($item['.id'] ?? $name),
+                    'name' => $name,
+                    'rate_limit' => $rateLimit ?: 'Not set',
+                    'download_speed' => $parsedSpeed['download_mbps'],
+                    'upload_speed' => $parsedSpeed['upload_mbps'],
+                    'download_kbps' => $parsedSpeed['download_kbps'],
+                    'upload_kbps' => $parsedSpeed['upload_kbps'],
+                    'is_existing' => $isExisting,
+                    'suggested_price' => $suggestedPrice,
+                    'is_default' => $isDefault,
+                ];
+            }
+
+            Response::json([
+                'success' => true,
+                'router' => [
+                    'id' => (string)$router['network_device_id'],
+                    'name' => $router['device_name'],
+                    'ip' => $router['management_ip'],
+                ],
+                'protocol' => $protocol,
+                'total' => count($list),
+                'data' => $list,
+            ]);
+        } catch (\Throwable $e) {
+            if ($api) $api->disconnect();
+            Response::error('Failed to read profiles from MikroTik: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Import selected profiles from MikroTik into access_profiles
+     */
+    public static function mikrotikImport(): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+        $deviceId = !empty($data['serverId']) ? (int)$data['serverId'] : (!empty($data['deviceId']) ? (int)$data['deviceId'] : 0);
+        $protocol = strtolower(trim($data['protocol'] ?? 'pppoe'));
+        $packages = $data['packages'] ?? [];
+
+        if (!is_array($packages) || empty($packages)) {
+            Response::error('No packages selected for import', 400);
+            return;
+        }
+
+        $presetColors = ['#2563EB', '#059669', '#7C3AED', '#D97706', '#DC2626', '#0284C7', '#4F46E5', '#DB2777'];
+        $importedCount = 0;
+        $updatedCount = 0;
+
+        foreach ($packages as $idx => $pkg) {
+            $name = trim($pkg['name'] ?? '');
+            if (empty($name)) continue;
+
+            $mtkName = trim($pkg['mikrotik_profile_name'] ?? $name);
+            $dlMbps = max(1, (int)($pkg['download_speed'] ?? 10));
+            $ulMbps = max(1, (int)($pkg['upload_speed'] ?? 10));
+            $price = max(0, (float)($pkg['price'] ?? 500));
+            $validityDays = max(1, (int)($pkg['validityDays'] ?? 30));
+            $volumeType = $pkg['volumeType'] ?? 'unlimited';
+            $volumeGb = !empty($pkg['volumeGb']) ? (int)$pkg['volumeGb'] : null;
+            $color = $presetColors[$idx % count($presetColors)];
+
+            $dlKbps = $dlMbps * 1024;
+            $ulKbps = $ulMbps * 1024;
+            $code = strtoupper(preg_replace('/[^a-zA-Z0-9]/', '', $name)) . '-' . rand(100, 999);
+
+            // Check if profile exists for this tenant
+            $checkStmt = $db->prepare("SELECT access_profile_id FROM access_profiles WHERE tenant_id = :tid AND (LOWER(profile_name) = LOWER(:pname) OR LOWER(mikrotik_profile_name) = LOWER(:mpname)) LIMIT 1");
+            $checkStmt->execute(['tid' => $tenantId, 'pname' => $name, 'mpname' => $mtkName]);
+            $existingId = $checkStmt->fetchColumn();
+
+            if ($existingId) {
+                // Update existing package price and speed
+                $updateStmt = $db->prepare("UPDATE access_profiles SET 
+                    network_device_id = :did,
+                    protocol = :proto,
+                    price = :price,
+                    download_speed_kbps = :dl,
+                    upload_speed_kbps = :ul,
+                    validity_days = :vdays,
+                    mikrotik_profile_name = :mpname,
+                    updated_at = NOW()
+                    WHERE access_profile_id = :id AND tenant_id = :tid");
+                $updateStmt->execute([
+                    'did' => $deviceId,
+                    'proto' => $protocol,
+                    'price' => $price,
+                    'dl' => $dlKbps,
+                    'ul' => $ulKbps,
+                    'vdays' => $validityDays,
+                    'mpname' => $mtkName,
+                    'id' => $existingId,
+                    'tid' => $tenantId,
+                ]);
+                $updatedCount++;
+            } else {
+                // Insert new package
+                $insertStmt = $db->prepare("INSERT INTO access_profiles 
+                    (tenant_id, network_device_id, profile_code, profile_name, protocol, color_hex, download_speed_kbps, upload_speed_kbps, price, validity_days, validity_hours, data_volume_type, data_volume_gb, privacy, status, mikrotik_profile_id, mikrotik_profile_name)
+                    VALUES (:tid, :did, :code, :name, :proto, :color, :dl, :ul, :price, :vdays, 0, :vtype, :vgb, 'public', 'enabled', :mpid, :mpname)");
+                $insertStmt->execute([
+                    'tid' => $tenantId,
+                    'did' => $deviceId,
+                    'code' => $code,
+                    'name' => $name,
+                    'proto' => $protocol,
+                    'color' => $color,
+                    'dl' => $dlKbps,
+                    'ul' => $ulKbps,
+                    'price' => $price,
+                    'vdays' => $validityDays,
+                    'vtype' => $volumeType,
+                    'vgb' => $volumeGb,
+                    'mpid' => $mtkName,
+                    'mpname' => $mtkName,
+                ]);
+                $importedCount++;
+            }
+        }
+
+        Response::json([
+            'success' => true,
+            'message' => "Successfully processed packages: {$importedCount} newly imported, {$updatedCount} updated.",
+            'imported_count' => $importedCount,
+            'updated_count' => $updatedCount,
+            'total_processed' => $importedCount + $updatedCount,
+        ]);
+    }
+
+    /**
+     * Bandwidth helper parsers
+     */
+    public static function parseRateLimit(?string $rateLimit, ?string $profileName = null): array {
+        $dl = 10;
+        $ul = 10;
+        
+        if (!empty($rateLimit)) {
+            $parts = explode(' ', trim($rateLimit))[0];
+            $rxTx = explode('/', $parts);
+            if (count($rxTx) === 2) {
+                $ulKbps = self::parseBandwidthToKbps($rxTx[0]);
+                $dlKbps = self::parseBandwidthToKbps($rxTx[1]);
+                if ($ulKbps > 0) $ul = (int)round($ulKbps / 1024);
+                if ($dlKbps > 0) $dl = (int)round($dlKbps / 1024);
+            }
+        }
+        
+        if ($dl === 10 && $ul === 10 && !empty($profileName)) {
+            if (preg_match('/(\d+)\s*(?:mbps|mb|m)/i', $profileName, $m)) {
+                $spd = (int)$m[1];
+                if ($spd > 0) {
+                    $dl = $spd;
+                    $ul = $spd;
+                }
+            }
+        }
+        
+        return [
+            'download_mbps' => max(1, $dl),
+            'upload_mbps' => max(1, $ul),
+            'download_kbps' => max(1, $dl) * 1024,
+            'upload_kbps' => max(1, $ul) * 1024,
+        ];
+    }
+
+    private static function parseBandwidthToKbps(string $val): int {
+        $val = trim($val);
+        if (empty($val)) return 0;
+        if (preg_match('/^(\d+(?:\.\d+)?)\s*g(?:bps)?$/i', $val, $m)) {
+            return (int)round((float)$m[1] * 1024 * 1024);
+        }
+        if (preg_match('/^(\d+(?:\.\d+)?)\s*m(?:bps)?$/i', $val, $m)) {
+            return (int)round((float)$m[1] * 1024);
+        }
+        if (preg_match('/^(\d+(?:\.\d+)?)\s*k(?:bps)?$/i', $val, $m)) {
+            return (int)round((float)$m[1]);
+        }
+        if (is_numeric($val)) {
+            return (int)round((float)$val / 1000);
+        }
+        return 0;
     }
 }
 

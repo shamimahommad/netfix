@@ -455,3 +455,4 @@ foreach ($argv as $arg) {
 
 $daemon = new MikrotikSyslogCollector($port, $batchSize, $flushInterval);
 $daemon->start();
+

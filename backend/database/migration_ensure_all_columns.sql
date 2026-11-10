@@ -61,3 +61,34 @@ ALTER TABLE `olt_onus`
     ADD COLUMN IF NOT EXISTS `vlan_id` INT(11) DEFAULT NULL AFTER `router_mac`,
     ADD COLUMN IF NOT EXISTS `pppoe_username` VARCHAR(100) DEFAULT NULL AFTER `vlan_id`;
 
+-- 6. Ensure syslog_token in network_devices & create pppoe_connection_logs table
+ALTER TABLE `network_devices`
+    ADD COLUMN IF NOT EXISTS `syslog_token` VARCHAR(64) DEFAULT NULL AFTER `telemetry`,
+    ADD UNIQUE KEY IF NOT EXISTS `uq_syslog_token` (`syslog_token`);
+
+CREATE TABLE IF NOT EXISTS `pppoe_connection_logs` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `tenant_id` BIGINT UNSIGNED NOT NULL,
+    `router_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    `username` VARCHAR(100) NOT NULL,
+    `event_type` ENUM('connected', 'disconnected', 'auth_failed', 'info') NOT NULL,
+    `assigned_ip` VARCHAR(45) DEFAULT NULL,
+    `caller_mac` VARCHAR(20) DEFAULT NULL,
+    `interface_name` VARCHAR(100) DEFAULT NULL,
+    `session_time_seconds` INT UNSIGNED DEFAULT NULL,
+    `bytes_uploaded` BIGINT UNSIGNED DEFAULT NULL,
+    `bytes_downloaded` BIGINT UNSIGNED DEFAULT NULL,
+    `disconnect_reason` VARCHAR(255) DEFAULT NULL,
+    `raw_message` VARCHAR(500) DEFAULT NULL,
+    `logged_at` DATETIME NOT NULL,
+    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`, `logged_at`),
+    KEY `idx_tenant_logged` (`tenant_id`, `logged_at` DESC),
+    KEY `idx_tenant_user_logged` (`tenant_id`, `username`, `logged_at` DESC),
+    KEY `idx_tenant_router_logged` (`tenant_id`, `router_id`, `logged_at` DESC),
+    KEY `idx_tenant_event_logged` (`tenant_id`, `event_type`, `logged_at` DESC),
+    KEY `idx_caller_mac` (`caller_mac`),
+    KEY `idx_assigned_ip` (`assigned_ip`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+

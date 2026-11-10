@@ -13,17 +13,22 @@ import {
   Filter,
   Terminal,
   Calendar,
-  ChevronLeft,
-  ChevronRight,
   X,
   Database,
-  Zap,
+  Globe,
   Clock,
-  ArrowUpDown
+  Layers,
+  Download,
+  CheckCircle2,
+  Zap,
+  Settings2,
+  Radio,
+  CheckCheck
 } from 'lucide-react';
 import { api } from '@/lib/api';
-import { PageHeader } from '@/components/common';
+import { PageHeader, MetricCard, ModernCheckbox } from '@/components/common';
 import { Link } from 'react-router-dom';
+import { useToastContext } from '@/contexts/ToastContext';
 
 interface RouterOption {
   network_device_id: string;
@@ -106,16 +111,40 @@ interface SyslogSetupScriptResponse {
   };
   server_host: string;
   server_port: number;
+  host_source?: string;
   prefix: string;
   script: string;
   message?: string;
 }
 
+function formatLogTimestamp(ts: string | undefined): { date: string; time: string } {
+  if (!ts) return { date: '—', time: '—' };
+  try {
+    const cleanTs = ts.includes(' ') && !ts.includes('T') ? ts.replace(' ', 'T') : ts;
+    const d = new Date(cleanTs);
+    if (isNaN(d.getTime())) {
+      return { date: ts, time: '' };
+    }
+    const day = d.getDate();
+    const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
+    const yr = d.getFullYear();
+    const h = String(d.getHours()).padStart(2, '0');
+    const m = String(d.getMinutes()).padStart(2, '0');
+    const s = String(d.getSeconds()).padStart(2, '0');
+    return {
+      date: `${day} ${mon} ${yr}`,
+      time: `${h}:${m}:${s}`,
+    };
+  } catch {
+    return { date: ts, time: '' };
+  }
+}
+
 export default function PppoeLogsPage() {
+  const toast = useToastContext();
   const [logs, setLogs] = useState<PppoeLogItem[]>([]);
   const [routers, setRouters] = useState<RouterOption[]>([]);
   const [selectedRouterId, setSelectedRouterId] = useState<string>('all');
-  const [currentRouter, setCurrentRouter] = useState<PppoeLogsResponse['current_router']>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -127,6 +156,9 @@ export default function PppoeLogsPage() {
   const [customDateFrom, setCustomDateFrom] = useState<string>('');
   const [customDateTo, setCustomDateTo] = useState<string>('');
   const [userFilter, setUserFilter] = useState<string | null>(null);
+
+  // Selection state (ModernCheckbox)
+  const [selectedLogIds, setSelectedLogIds] = useState<Set<string>>(new Set());
 
   // Pagination
   const [page, setPage] = useState<number>(1);
@@ -144,10 +176,16 @@ export default function PppoeLogsPage() {
   // UI state
   const [copiedText, setCopiedText] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
+
+  // Setup Modal State & 1-Click Trigger
   const [showSetupModal, setShowSetupModal] = useState<boolean>(false);
   const [setupModalRouterId, setSetupModalRouterId] = useState<string>('');
   const [setupScriptData, setSetupScriptData] = useState<SyslogSetupScriptResponse | null>(null);
   const [isLoadingScript, setIsLoadingScript] = useState<boolean>(false);
+  const [customServerHost, setCustomServerHost] = useState<string>('');
+  const [isConfiguringRouter, setIsConfiguringRouter] = useState<boolean>(false);
+  const [autoSetupSuccess, setAutoSetupSuccess] = useState<string | null>(null);
+  const [autoSetupError, setAutoSetupError] = useState<string | null>(null);
 
   // Fetch Logs from High-Throughput Engine
   const fetchLogs = useCallback(async (isSilent = false) => {
@@ -202,24 +240,21 @@ export default function PppoeLogsPage() {
         if (customDateTo) params.date_to = customDateTo;
       }
 
-      // Query high-throughput PPPoE syslog logs endpoint
       const response = await api.get<PppoeLogsResponse>('/logs/pppoe', { params });
 
       if (response.data.success) {
         const rawLogs = response.data.data || response.data.logs || [];
         setLogs(rawLogs);
         setRouters(response.data.routers || []);
-        if (response.data.current_router) {
-          setCurrentRouter(response.data.current_router);
-        }
 
         const pagination = response.data.pagination;
         if (pagination) {
           setTotalRecords(pagination.total);
           setTotalPages(pagination.total_pages || Math.ceil(pagination.total / perPage) || 1);
         } else {
-          setTotalRecords(response.data.total || rawLogs.length);
-          setTotalPages(Math.ceil((response.data.total || rawLogs.length) / perPage) || 1);
+          const tot = response.data.total || rawLogs.length;
+          setTotalRecords(tot);
+          setTotalPages(Math.ceil(tot / perPage) || 1);
         }
 
         if (response.data.metrics) {
@@ -234,7 +269,7 @@ export default function PppoeLogsPage() {
       }
     } catch (err: any) {
       console.error('Error fetching PPPoE logs:', err);
-      // Fallback to /network/pppoe-logs if needed
+      // Fallback
       try {
         const fallbackRes = await api.get<PppoeLogsResponse>('/network/pppoe-logs', { 
           params: { router_id: selectedRouterId } 
@@ -246,16 +281,23 @@ export default function PppoeLogsPage() {
           return;
         }
       } catch {}
-      setError(err?.response?.data?.message || err?.message || 'Error communicating with logging service');
+      const msg = err?.response?.data?.message || err?.message || 'Error communicating with logging service';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [page, perPage, selectedRouterId, eventTypeFilter, userFilter, searchQuery, dateRangePreset, customDateFrom, customDateTo]);
+  }, [page, perPage, selectedRouterId, eventTypeFilter, userFilter, searchQuery, dateRangePreset, customDateFrom, customDateTo, toast]);
 
   useEffect(() => {
     fetchLogs();
   }, [fetchLogs]);
+
+  // Clear selections when page or filters change
+  useEffect(() => {
+    setSelectedLogIds(new Set());
+  }, [page, perPage, selectedRouterId, eventTypeFilter, userFilter, searchQuery]);
 
   // Auto-refresh interval (every 6 seconds if enabled)
   useEffect(() => {
@@ -266,16 +308,21 @@ export default function PppoeLogsPage() {
     return () => clearInterval(interval);
   }, [autoRefresh, fetchLogs]);
 
-  // Fetch Syslog Setup Script when modal opens
-  const fetchSetupScript = useCallback(async (rId: string) => {
+  // Fetch Syslog Setup Script with Auto-Detected IP & Token
+  const fetchSetupScript = useCallback(async (rId: string, overrideHost?: string) => {
     if (!rId) return;
     setIsLoadingScript(true);
+    setAutoSetupSuccess(null);
+    setAutoSetupError(null);
     try {
-      const res = await api.get<SyslogSetupScriptResponse>('/routers/syslog-script', {
-        params: { router_id: rId }
-      });
+      const params: Record<string, any> = { router_id: rId };
+      if (overrideHost) params.server_host = overrideHost;
+      const res = await api.get<SyslogSetupScriptResponse>('/routers/syslog-script', { params });
       if (res.data.success) {
         setSetupScriptData(res.data);
+        if (!overrideHost) {
+          setCustomServerHost(res.data.server_host);
+        }
       }
     } catch (err) {
       console.error('Failed to load setup script:', err);
@@ -290,9 +337,10 @@ export default function PppoeLogsPage() {
     }
   }, [showSetupModal, setupModalRouterId, fetchSetupScript]);
 
-  const copyToClipboard = (text: string) => {
+  const copyToClipboard = (text: string, label = 'Copied to clipboard') => {
     navigator.clipboard.writeText(text);
     setCopiedText(text);
+    toast.success(label);
     setTimeout(() => setCopiedText(null), 1500);
   };
 
@@ -301,7 +349,39 @@ export default function PppoeLogsPage() {
       ? selectedRouterId 
       : (routers[0]?.network_device_id || '');
     setSetupModalRouterId(targetId);
+    setAutoSetupSuccess(null);
+    setAutoSetupError(null);
     setShowSetupModal(true);
+  };
+
+  // 1-Click Automatic Router Configuration
+  const handle1ClickAutoSetup = async () => {
+    if (!setupModalRouterId) return;
+    setIsConfiguringRouter(true);
+    setAutoSetupSuccess(null);
+    setAutoSetupError(null);
+
+    try {
+      const payload = {
+        router_id: setupModalRouterId,
+        server_host: customServerHost || setupScriptData?.server_host,
+        server_port: setupScriptData?.server_port || 514,
+      };
+      const res = await api.post<{ success: boolean; message: string; script?: string }>('/routers/syslog-auto-setup', payload);
+      if (res.data.success) {
+        setAutoSetupSuccess(res.data.message || 'Syslog server successfully configured in router!');
+        toast.success('MikroTik Router configured automatically!');
+        fetchLogs(true);
+      } else {
+        setAutoSetupError(res.data.message || 'Failed to auto-configure router');
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'Could not connect to router API. Please check router reachability.';
+      setAutoSetupError(msg);
+      toast.error('Router auto-configuration failed');
+    } finally {
+      setIsConfiguringRouter(false);
+    }
   };
 
   const handleFilterByUser = (username: string) => {
@@ -314,81 +394,243 @@ export default function PppoeLogsPage() {
     setPage(1);
   };
 
+  // Modern Checkbox Selection Handlers
+  const isAllSelected = useMemo(() => {
+    if (logs.length === 0) return false;
+    return logs.every((l) => selectedLogIds.has(l.id));
+  }, [logs, selectedLogIds]);
+
+  const isIndeterminate = useMemo(() => {
+    if (logs.length === 0) return false;
+    const someSelected = logs.some((l) => selectedLogIds.has(l.id));
+    return someSelected && !isAllSelected;
+  }, [logs, selectedLogIds, isAllSelected]);
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const next = new Set(selectedLogIds);
+      logs.forEach((l) => next.add(l.id));
+      setSelectedLogIds(next);
+    } else {
+      const next = new Set(selectedLogIds);
+      logs.forEach((l) => next.delete(l.id));
+      setSelectedLogIds(next);
+    }
+  };
+
+  const handleSelectLog = (id: string) => {
+    const next = new Set(selectedLogIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedLogIds(next);
+  };
+
+  // Bulk Actions
+  const selectedLogs = useMemo(() => {
+    return logs.filter((l) => selectedLogIds.has(l.id));
+  }, [logs, selectedLogIds]);
+
+  const handleCopySelectedIps = () => {
+    const ips = Array.from(new Set(selectedLogs.map((l) => l.assigned_ip || l.ip).filter(Boolean)));
+    if (ips.length === 0) {
+      toast.warning('No IP addresses found in selected items');
+      return;
+    }
+    copyToClipboard(ips.join('\n'), `Copied ${ips.length} IP address(es)`);
+  };
+
+  const handleCopySelectedMacs = () => {
+    const macs = Array.from(new Set(selectedLogs.map((l) => l.caller_mac || l.mac).filter(Boolean)));
+    if (macs.length === 0) {
+      toast.warning('No MAC addresses found in selected items');
+      return;
+    }
+    copyToClipboard(macs.join('\n'), `Copied ${macs.length} MAC address(es)`);
+  };
+
+  const handleCopySelectedUsers = () => {
+    const users = Array.from(new Set(selectedLogs.map((l) => l.username).filter(Boolean)));
+    if (users.length === 0) {
+      toast.warning('No usernames found in selected items');
+      return;
+    }
+    copyToClipboard(users.join(', '), `Copied ${users.length} username(s)`);
+  };
+
+  const handleExportSelectedCSV = () => {
+    if (selectedLogs.length === 0) return;
+    const headers = [
+      'Timestamp',
+      'Router',
+      'Event',
+      'Username',
+      'Customer Code',
+      'Customer Name',
+      'IP Address',
+      'MAC Address',
+      'Interface',
+      'Disconnect Reason',
+      'Message'
+    ];
+    const rows = selectedLogs.map((l) => [
+      `"${l.logged_at || l.time || ''}"`,
+      `"${l.router_name || ''}"`,
+      `"${l.event_type || l.action || ''}"`,
+      `"${l.username || ''}"`,
+      `"${l.customer?.customer_code || ''}"`,
+      `"${(l.customer?.full_name || '').replace(/"/g, '""')}"`,
+      `"${l.assigned_ip || l.ip || ''}"`,
+      `"${l.caller_mac || l.mac || ''}"`,
+      `"${l.interface_name || ''}"`,
+      `"${l.disconnect_reason || ''}"`,
+      `"${(l.message || l.raw_message || '').replace(/"/g, '""')}"`
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `pppoe_logs_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success(`Exported ${selectedLogs.length} logs to CSV`);
+  };
+
+  // Pagination page items generator (matches BillingPage / CustomersPage)
+  const getPaginationItems = (current: number, total: number): (number | string)[] => {
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    if (current <= 4) {
+      return [1, 2, 3, 4, 5, '...', total];
+    }
+    if (current >= total - 3) {
+      return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+    }
+    return [1, '...', current - 1, current, current + 1, '...', total];
+  };
+
+  const startEntryDisplay = totalRecords === 0 ? 0 : (page - 1) * perPage + 1;
+  const endEntryDisplay = Math.min(page * perPage, totalRecords);
+
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="w-full min-w-0 space-y-6">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <PageHeader
-          icon={<Activity className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />}
-          title="PPPoE Connection Logs"
-          subtitle="Real-time multi-tenant MikroTik router authentication, live logins, and session disconnection events"
+      <PageHeader
+        icon={<Activity className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
+        title="PPPoE Connection Logs"
+        subtitle="Real-time multi-tenant MikroTik router authentication, live logins, and session disconnection events"
+        badge={`${totalRecords.toLocaleString()} Events`}
+        actions={
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Setup Syslog Button */}
+            <button
+              type="button"
+              onClick={handleOpenSetupGuide}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/60 shadow-xs transition-all active:scale-95"
+              title="View MikroTik remote syslog configuration commands and 1-click auto setup"
+            >
+              <Zap className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span>Setup Syslog Stream</span>
+            </button>
+
+            {/* Modern Checkbox Auto Refresh Toggle */}
+            <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer select-none bg-white dark:bg-slate-800 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 shadow-xs hover:border-slate-300 dark:hover:border-slate-600 transition-colors">
+              <ModernCheckbox
+                checked={autoRefresh}
+                onChange={(checked) => setAutoRefresh(checked)}
+                size="sm"
+                ariaLabel="Toggle auto-refresh"
+              />
+              <span className="flex items-center gap-1.5">
+                <span>Auto Refresh (6s)</span>
+                {autoRefresh && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+              </span>
+            </label>
+
+            {/* Refresh Button */}
+            <button
+              type="button"
+              onClick={() => fetchLogs(false)}
+              disabled={isLoading || isRefreshing}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 shadow-xs active:scale-95 transition-all disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing || isLoading ? 'animate-spin text-blue-600' : ''}`} />
+              <span>Refresh</span>
+            </button>
+          </div>
+        }
+      />
+
+      {/* Summary Metric Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <MetricCard
+          title="Matching Logs"
+          value={totalRecords.toLocaleString()}
+          subtext="Indexed database events"
+          variant="blue"
+          icon={<Database className="w-5 h-5" />}
         />
-
-        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          {/* Syslog Setup Guide Button */}
-          <button
-            onClick={handleOpenSetupGuide}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 shadow-xs transition-all active:scale-95"
-            title="View MikroTik remote syslog configuration commands"
-          >
-            <Terminal className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-            <span>Setup Syslog Stream</span>
-          </button>
-
-          <label className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-400 cursor-pointer select-none bg-white dark:bg-slate-800 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 shadow-xs">
-            <input
-              type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
-            />
-            <span>Auto Refresh (6s)</span>
-          </label>
-
-          <button
-            onClick={() => fetchLogs(false)}
-            disabled={isLoading || isRefreshing}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 shadow-xs active:scale-95 transition-all disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing || isLoading ? 'animate-spin text-indigo-600' : ''}`} />
-            <span>Refresh</span>
-          </button>
-        </div>
+        <MetricCard
+          title="Connected"
+          value={(metrics.connected || 0).toLocaleString()}
+          subtext="Past 24 hours active sessions"
+          variant="emerald"
+          icon={<UserCheck className="w-5 h-5" />}
+        />
+        <MetricCard
+          title="Disconnected"
+          value={(metrics.disconnected || 0).toLocaleString()}
+          subtext="Past 24 hours closed sessions"
+          variant="slate"
+          icon={<UserX className="w-5 h-5" />}
+        />
+        <MetricCard
+          title="Auth Failures"
+          value={(metrics.auth_failed || 0).toLocaleString()}
+          subtext="Bad credentials / timed out"
+          variant="amber"
+          icon={<AlertCircle className="w-5 h-5" />}
+        />
       </div>
 
       {/* Router Selector & Connection Status Banner */}
-      <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 sm:p-5 border border-slate-200/80 dark:border-slate-700 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-            <Database className="w-5 h-5" />
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/50">
+            <Server className="w-5 h-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Storage Target</span>
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 CENTRALIZED SYSLOG ENGINE
               </span>
-              <span className="text-[11px] text-slate-400 font-mono hidden sm:inline">Port 514 UDP</span>
+              <span className="text-xs text-slate-400 font-mono hidden sm:inline">Port 514 UDP</span>
             </div>
-            <p className="text-sm font-bold text-slate-900 dark:text-slate-100">
+            <p className="text-sm font-bold text-slate-900 dark:text-slate-100 mt-0.5">
               {selectedRouterId === 'all' 
                 ? `All Configured Routers (${routers.length} Active)` 
-                : (routers.find(r => r.network_device_id === selectedRouterId)?.device_name || 'Selected Router')}
+                : (routers.find((r) => r.network_device_id === selectedRouterId)?.device_name || 'Selected Router')}
             </p>
           </div>
         </div>
 
         {routers.length > 0 && (
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-slate-500 shrink-0">Filter Router:</span>
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 shrink-0 uppercase tracking-wider">Router:</span>
             <select
               value={selectedRouterId}
               onChange={(e) => {
                 setSelectedRouterId(e.target.value);
                 setPage(1);
               }}
-              className="text-xs font-semibold px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-500"
+              className="text-xs font-medium px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
             >
               <option value="all">🌐 All Routers Combined ({routers.length})</option>
               {routers.map((r) => (
@@ -401,118 +643,63 @@ export default function PppoeLogsPage() {
         )}
       </div>
 
-      {/* Metrics Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        <div className="bg-white dark:bg-slate-800 rounded-xl p-3.5 sm:p-4 border border-slate-200/80 dark:border-slate-700 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500">Matching Logs</span>
-            <span className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
-              <Activity className="w-4 h-4" />
-            </span>
-          </div>
-          <p className="text-xl sm:text-2xl font-black text-slate-900 dark:text-slate-100 mt-1">
-            {totalRecords.toLocaleString()}
-          </p>
-          <span className="text-[11px] text-slate-400">Indexed Database Rows</span>
-        </div>
-
-        <div className="bg-white dark:bg-slate-800 rounded-xl p-3.5 sm:p-4 border border-slate-200/80 dark:border-slate-700 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500">Connected</span>
-            <span className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
-              <UserCheck className="w-4 h-4" />
-            </span>
-          </div>
-          <p className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
-            {(metrics.connected || 0).toLocaleString()}
-          </p>
-          <span className="text-[11px] text-emerald-600/70 dark:text-emerald-400/70">Past 24 Hours</span>
-        </div>
-
-        <div className="bg-white dark:bg-slate-800 rounded-xl p-3.5 sm:p-4 border border-slate-200/80 dark:border-slate-700 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500">Disconnected</span>
-            <span className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
-              <UserX className="w-4 h-4" />
-            </span>
-          </div>
-          <p className="text-xl sm:text-2xl font-black text-slate-700 dark:text-slate-300 mt-1">
-            {(metrics.disconnected || 0).toLocaleString()}
-          </p>
-          <span className="text-[11px] text-slate-400">Past 24 Hours</span>
-        </div>
-
-        <div className="bg-white dark:bg-slate-800 rounded-xl p-3.5 sm:p-4 border border-slate-200/80 dark:border-slate-700 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500">Auth Failures</span>
-            <span className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
-              <AlertCircle className="w-4 h-4" />
-            </span>
-          </div>
-          <p className="text-xl sm:text-2xl font-black text-amber-600 dark:text-amber-400 mt-1">
-            {(metrics.auth_failed || 0).toLocaleString()}
-          </p>
-          <span className="text-[11px] text-amber-600/70 dark:text-amber-400/70">Bad Credentials / Timeout</span>
-        </div>
-      </div>
-
       {/* Filter & Search Bar */}
-      <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-700 shadow-xs space-y-3">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm space-y-4">
         {/* Active Customer Filter Pill */}
         {userFilter && (
-          <div className="flex items-center gap-2 p-2 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs">
-            <span className="text-indigo-700 dark:text-indigo-300 font-semibold">
-              Viewing connection history for PPPoE user: <strong>{userFilter}</strong>
+          <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-xl text-xs">
+            <span className="text-blue-700 dark:text-blue-300 font-semibold">
+              Viewing connection history for PPPoE user: <strong className="font-mono">{userFilter}</strong>
             </span>
             <button
               onClick={clearUserFilter}
-              className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700"
+              className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors shadow-xs"
             >
-              <X className="w-3 h-3" />
+              <X className="w-3.5 h-3.5" />
               <span>Clear Filter</span>
             </button>
           </div>
         )}
 
-        <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+        <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-center justify-between">
           {/* Event Type Filter Pills */}
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => { setEventTypeFilter('all'); setPage(1); }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                 eventTypeFilter === 'all'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700/60'
               }`}
             >
               All Events
             </button>
             <button
               onClick={() => { setEventTypeFilter('connected'); setPage(1); }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                 eventTypeFilter === 'connected'
                   ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700/60'
               }`}
             >
               Connected
             </button>
             <button
               onClick={() => { setEventTypeFilter('disconnected'); setPage(1); }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                 eventTypeFilter === 'disconnected'
                   ? 'bg-slate-700 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700/60'
               }`}
             >
               Disconnected
             </button>
             <button
               onClick={() => { setEventTypeFilter('auth_failed'); setPage(1); }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                 eventTypeFilter === 'auth_failed'
                   ? 'bg-amber-600 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700/60'
               }`}
             >
               Auth Failed
@@ -521,11 +708,11 @@ export default function PppoeLogsPage() {
 
           {/* Date Presets */}
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-slate-400 font-medium flex items-center gap-1 mr-1">
+            <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider flex items-center gap-1 mr-1">
               <Calendar className="w-3.5 h-3.5" />
               <span>Time:</span>
             </span>
-            {(['all', 'today', 'yesterday', '7d', '30d'] as const).map((preset) => (
+            {(['all', 'today', 'yesterday', '7d', '30d', 'custom'] as const).map((preset) => (
               <button
                 key={preset}
                 onClick={() => {
@@ -534,8 +721,8 @@ export default function PppoeLogsPage() {
                 }}
                 className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
                   dateRangePreset === preset
-                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 font-bold'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
+                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 font-bold shadow-xs'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700/60'
                 }`}
               >
                 {preset === 'all' && 'All Time'}
@@ -543,13 +730,14 @@ export default function PppoeLogsPage() {
                 {preset === 'yesterday' && 'Yesterday'}
                 {preset === '7d' && '7 Days'}
                 {preset === '30d' && '30 Days'}
+                {preset === 'custom' && 'Custom'}
               </button>
             ))}
           </div>
 
           {/* Search Input */}
-          <div className="relative w-full lg:w-64">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <div className="relative w-full lg:w-72">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
@@ -557,18 +745,121 @@ export default function PppoeLogsPage() {
                 setSearchQuery(e.target.value);
                 setPage(1);
               }}
-              placeholder="Search User, IP, MAC..."
-              className="w-full pl-9 pr-3.5 py-1.5 text-xs bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500"
+              placeholder="Search User, IP, MAC, Message..."
+              className="w-full pl-9 pr-8 py-2 text-xs sm:text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg outline-none text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setPage(1);
+                }}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
+
+        {/* Custom Date Pickers when 'custom' is active */}
+        {dateRangePreset === 'custom' && (
+          <div className="pt-3 border-t border-slate-200/60 dark:border-slate-800/80 flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">From:</label>
+              <input
+                type="date"
+                value={customDateFrom}
+                onChange={(e) => {
+                  setCustomDateFrom(e.target.value);
+                  setPage(1);
+                }}
+                className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">To:</label>
+              <input
+                type="date"
+                value={customDateTo}
+                onChange={(e) => {
+                  setCustomDateTo(e.target.value);
+                  setPage(1);
+                }}
+                className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+            </div>
+          </div>
+        )}
       </div>
 
+      {/* Floating Modern Checkbox Bulk Action Bar */}
+      {selectedLogIds.size > 0 && (
+        <div className="bg-blue-50/90 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800/80 rounded-xl p-3 sm:p-3.5 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in slide-in-from-top-1 duration-200">
+          <div className="flex items-center gap-2.5">
+            <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shadow-xs">
+              {selectedLogIds.size}
+            </span>
+            <span className="text-xs sm:text-sm font-semibold text-blue-900 dark:text-blue-100">
+              Log entries selected on this page
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCopySelectedIps}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 shadow-xs active:scale-95 transition-all"
+            >
+              <Copy className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span>Copy IPs</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCopySelectedMacs}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 shadow-xs active:scale-95 transition-all"
+            >
+              <Copy className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span>Copy MACs</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCopySelectedUsers}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 shadow-xs active:scale-95 transition-all"
+            >
+              <Copy className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>Copy Users</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportSelectedCSV}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-xs active:scale-95 transition-all"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export CSV</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedLogIds(new Set())}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Deselect</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Logs DataTable */}
-      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700 shadow-xs overflow-hidden">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden">
         {isLoading ? (
-          <div className="p-12 text-center text-slate-500 dark:text-slate-400 space-y-3">
-            <RefreshCw className="w-8 h-8 animate-spin mx-auto text-indigo-600" />
+          <div className="p-16 text-center text-slate-500 dark:text-slate-400 space-y-3">
+            <RefreshCw className="w-8 h-8 animate-spin mx-auto text-blue-600" />
             <p className="text-sm font-medium">Querying time-series PPPoE connection logs...</p>
           </div>
         ) : error && logs.length === 0 ? (
@@ -577,68 +868,99 @@ export default function PppoeLogsPage() {
             <p className="text-sm font-semibold">{error}</p>
             <button
               onClick={() => fetchLogs(false)}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-xs"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-xs transition-colors shadow-sm"
             >
               Retry
             </button>
           </div>
         ) : logs.length === 0 ? (
-          <div className="p-12 text-center text-slate-400 space-y-3">
-            <Filter className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600" />
-            <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">No PPPoE connection logs recorded yet</p>
-            <p className="text-xs text-slate-400 max-w-md mx-auto">
-              Configure your MikroTik router to forward PPPoE events to NetFix UDP Syslog on port 514 using the Setup Guide.
+          <div className="p-16 text-center text-slate-400 space-y-3">
+            <div className="w-14 h-14 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto text-slate-400">
+              <Filter className="w-6 h-6" />
+            </div>
+            <p className="text-base font-bold text-slate-700 dark:text-slate-200">No PPPoE connection logs found</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+              Configure your MikroTik router to forward PPPoE events to NetFix UDP Syslog on port 514 using 1-Click Auto Setup or the Setup Guide.
             </p>
             <button
               onClick={handleOpenSetupGuide}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-xs shadow-xs"
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-xs shadow-sm transition-all active:scale-95"
             >
-              <Terminal className="w-3.5 h-3.5" />
-              <span>Open MikroTik Setup Guide</span>
+              <Zap className="w-3.5 h-3.5" />
+              <span>Open Setup & 1-Click Auto Config</span>
             </button>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs sm:text-sm">
-              <thead className="bg-slate-50/75 dark:bg-slate-900/50 border-b border-slate-200/80 dark:border-slate-700 text-slate-500 font-semibold uppercase tracking-wider text-[11px]">
+              <thead className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold uppercase tracking-wider text-[11px] sticky top-0 z-10 select-none">
                 <tr>
-                  <th className="py-3 px-4">Timestamp</th>
-                  <th className="py-3 px-4">Router</th>
-                  <th className="py-3 px-4">Event Status</th>
-                  <th className="py-3 px-4">PPPoE User & Customer</th>
-                  <th className="py-3 px-4">Assigned IP</th>
-                  <th className="py-3 px-4">Caller MAC</th>
-                  <th className="py-3 px-4">Interface</th>
-                  <th className="py-3 px-4">Details / Message</th>
+                  <th className="py-3 px-4" style={{ width: '48px' }}>
+                    <ModernCheckbox
+                      checked={isAllSelected}
+                      indeterminate={isIndeterminate}
+                      onChange={handleSelectAll}
+                      title="Select all logs on this page"
+                    />
+                  </th>
+                  <th className="py-3 px-4">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-blue-500" />
+                      TIMESTAMP
+                    </span>
+                  </th>
+                  <th className="py-3 px-4">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Server className="w-3.5 h-3.5 text-purple-500" />
+                      ROUTER
+                    </span>
+                  </th>
+                  <th className="py-3 px-4">EVENT STATUS</th>
+                  <th className="py-3 px-4">PPPOE USER & CUSTOMER</th>
+                  <th className="py-3 px-4">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Globe className="w-3.5 h-3.5 text-emerald-500" />
+                      ASSIGNED IP
+                    </span>
+                  </th>
+                  <th className="py-3 px-4">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-indigo-500" />
+                      CALLER MAC
+                    </span>
+                  </th>
+                  <th className="py-3 px-4">INTERFACE</th>
+                  <th className="py-3 px-4">DETAILS / MESSAGE</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60 font-medium">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium bg-white dark:bg-slate-900">
                 {logs.map((item) => {
                   const ev = item.event_type || item.action || 'info';
+                  const isSelected = selectedLogIds.has(item.id);
 
                   let badge = (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                       {ev.toUpperCase()}
                     </span>
                   );
 
                   if (ev === 'connected' || ev === 'login' || ev === 'authenticated') {
                     badge = (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                         CONNECTED
                       </span>
                     );
                   } else if (ev === 'disconnected' || ev === 'logout') {
                     badge = (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
                         <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
                         DISCONNECTED
                       </span>
                     );
                   } else if (ev === 'auth_failed' || ev === 'failed') {
                     badge = (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
                         AUTH FAILED
                       </span>
@@ -647,32 +969,61 @@ export default function PppoeLogsPage() {
 
                   const ipAddr = item.assigned_ip || item.ip;
                   const macAddr = item.caller_mac || item.mac;
-                  const timeVal = item.logged_at || item.time;
+                  const timeFormatted = formatLogTimestamp(item.logged_at || item.time);
 
                   return (
-                    <tr key={item.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-700/30 transition-colors">
-                      <td className="py-3 px-4 whitespace-nowrap text-slate-500 font-mono text-xs">
-                        {timeVal}
+                    <tr 
+                      key={item.id} 
+                      className={`transition-colors cursor-pointer ${
+                        isSelected 
+                          ? 'bg-blue-50/60 dark:bg-blue-900/15' 
+                          : 'hover:bg-slate-50/70 dark:hover:bg-slate-800/50'
+                      }`}
+                      onClick={() => handleSelectLog(item.id)}
+                    >
+                      {/* Checkbox Cell */}
+                      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                        <ModernCheckbox
+                          checked={isSelected}
+                          onChange={() => handleSelectLog(item.id)}
+                          title="Select this log"
+                        />
                       </td>
 
+                      {/* Timestamp Cell */}
+                      <td className="py-3 px-4 whitespace-nowrap text-xs">
+                        <div className="flex flex-col">
+                          <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                            {timeFormatted.time}
+                          </span>
+                          <span className="text-[11px] text-slate-400">
+                            {timeFormatted.date}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Router Cell */}
                       <td className="py-3 px-4 whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-slate-100 dark:bg-slate-700/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                           <Server className="w-3 h-3 text-slate-400" />
                           <span>{item.router_name || 'Router'}</span>
                         </span>
                       </td>
 
+                      {/* Event Status Cell */}
                       <td className="py-3 px-4 whitespace-nowrap">
                         {badge}
                       </td>
 
-                      <td className="py-3 px-4 whitespace-nowrap">
+                      {/* PPPoE User & Customer Cell */}
+                      <td className="py-3 px-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         {item.username ? (
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-2">
                               <button
+                                type="button"
                                 onClick={() => handleFilterByUser(item.username!)}
-                                className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline font-mono text-left cursor-pointer"
+                                className="font-bold text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline font-mono text-left cursor-pointer"
                                 title="Click to filter connection history for this user"
                               >
                                 {item.username}
@@ -680,7 +1031,7 @@ export default function PppoeLogsPage() {
                               {item.customer && (
                                 <Link
                                   to={`/dashboard/customers/view/${item.customer.customer_id}`}
-                                  className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 font-semibold"
+                                  className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 font-semibold"
                                   title={`View customer ${item.customer.full_name} (${item.customer.customer_code})`}
                                 >
                                   <span>{item.customer.customer_code}</span>
@@ -690,11 +1041,13 @@ export default function PppoeLogsPage() {
                             </div>
                             {item.customer && (
                               <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5 flex-wrap">
-                                <span className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[150px]">{item.customer.full_name}</span>
+                                <span className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[150px]">
+                                  {item.customer.full_name}
+                                </span>
                                 {item.customer.owner_name && (
                                   <>
                                     <span>•</span>
-                                    <span className="px-1.5 py-0.2 rounded text-[10px] bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 font-semibold">
+                                    <span className="px-1.5 py-0.2 rounded text-[10px] bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60 font-semibold">
                                       {item.customer.owner_role === 'agent' ? 'Agent: ' : (item.customer.owner_role === 'reseller' ? 'Reseller: ' : 'Owner: ')}
                                       <strong>{item.customer.owner_name}</strong>
                                     </span>
@@ -708,18 +1061,20 @@ export default function PppoeLogsPage() {
                         )}
                       </td>
 
-                      <td className="py-3 px-4 whitespace-nowrap">
+                      {/* IP Address Cell */}
+                      <td className="py-3 px-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         {ipAddr ? (
                           <div className="flex items-center gap-1.5">
-                            <span className="font-mono text-xs text-slate-700 dark:text-slate-300 font-semibold">
+                            <span className="font-mono text-xs text-slate-800 dark:text-slate-200 font-semibold">
                               {ipAddr}
                             </span>
                             <button
-                              onClick={() => copyToClipboard(ipAddr)}
+                              type="button"
+                              onClick={() => copyToClipboard(ipAddr, `Copied IP: ${ipAddr}`)}
                               title="Copy IP"
-                              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
                             >
-                              {copiedText === ipAddr ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                              {copiedText === ipAddr ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
                             </button>
                           </div>
                         ) : (
@@ -727,18 +1082,20 @@ export default function PppoeLogsPage() {
                         )}
                       </td>
 
-                      <td className="py-3 px-4 whitespace-nowrap">
+                      {/* MAC Address Cell */}
+                      <td className="py-3 px-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         {macAddr ? (
                           <div className="flex items-center gap-1.5">
-                            <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded-md font-semibold border border-indigo-200 dark:border-indigo-800">
+                            <span className="font-mono text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 rounded-md font-semibold border border-indigo-200 dark:border-indigo-800">
                               {macAddr}
                             </span>
                             <button
-                              onClick={() => copyToClipboard(macAddr)}
+                              type="button"
+                              onClick={() => copyToClipboard(macAddr, `Copied MAC: ${macAddr}`)}
                               title="Copy MAC"
-                              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
                             >
-                              {copiedText === macAddr ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                              {copiedText === macAddr ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
                             </button>
                           </div>
                         ) : (
@@ -746,17 +1103,21 @@ export default function PppoeLogsPage() {
                         )}
                       </td>
 
+                      {/* Interface Cell */}
                       <td className="py-3 px-4 whitespace-nowrap text-slate-500 font-mono text-xs">
-                        {item.interface_name || `pppoe-${item.username || 'user'}`}
+                        <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px]">
+                          {item.interface_name || `pppoe-${item.username || 'user'}`}
+                        </span>
                       </td>
 
+                      {/* Message Cell */}
                       <td className="py-3 px-4 text-xs text-slate-600 dark:text-slate-400 max-w-md truncate font-mono" title={item.raw_message || item.message}>
                         {item.disconnect_reason ? (
-                          <span className="font-semibold text-rose-600 dark:text-rose-400 mr-1.5">
-                            [{item.disconnect_reason}]
+                          <span className="font-semibold text-rose-600 dark:text-rose-400 mr-1.5 bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 rounded border border-rose-200 dark:border-rose-900">
+                            {item.disconnect_reason}
                           </span>
                         ) : null}
-                        {item.message || item.raw_message}
+                        <span>{item.message || item.raw_message}</span>
                       </td>
                     </tr>
                   );
@@ -766,24 +1127,28 @@ export default function PppoeLogsPage() {
           </div>
         )}
 
-        {/* Pagination Bar */}
+        {/* Unified Pagination Bar matching NetFix standards */}
         {totalRecords > 0 && (
-          <div className="p-4 border-t border-slate-200/80 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-            <div className="text-slate-500">
-              Showing <strong>{((page - 1) * perPage) + 1}</strong> to <strong>{Math.min(page * perPage, totalRecords)}</strong> of <strong>{totalRecords.toLocaleString()}</strong> logs
+          <div className="bg-white dark:bg-slate-900 px-4 sm:px-6 py-3.5 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              Showing <span className="font-semibold text-slate-700 dark:text-slate-300">{startEntryDisplay}</span> to{' '}
+              <span className="font-semibold text-slate-700 dark:text-slate-300">{endEntryDisplay}</span> of{' '}
+              <span className="font-semibold text-slate-700 dark:text-slate-300">{totalRecords.toLocaleString()}</span> entries
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-400">Rows:</span>
+              {/* Rows Per Page selector */}
+              <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                <span>Rows:</span>
                 <select
                   value={perPage}
                   onChange={(e) => {
                     setPerPage(Number(e.target.value));
                     setPage(1);
                   }}
-                  className="px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs outline-none"
+                  className="px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-700 dark:text-slate-300 outline-none focus:ring-2 focus:ring-blue-500/20"
                 >
+                  <option value={10}>10</option>
                   <option value={25}>25</option>
                   <option value={50}>50</option>
                   <option value={100}>100</option>
@@ -791,25 +1156,52 @@ export default function PppoeLogsPage() {
                 </select>
               </div>
 
-              <div className="flex items-center gap-1">
+              {/* Page Number Buttons */}
+              <div className="flex items-center gap-1 select-none">
                 <button
+                  type="button"
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page <= 1}
-                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-700"
-                  title="Previous Page"
+                  className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs sm:text-sm transition-colors disabled:text-slate-300 dark:disabled:text-slate-600 disabled:cursor-not-allowed text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  title="Previous page"
                 >
-                  <ChevronLeft className="w-4 h-4" />
+                  ‹
                 </button>
-                <span className="px-2.5 py-1 text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Page {page} of {totalPages}
-                </span>
+
+                {getPaginationItems(page, totalPages).map((item, idx) => {
+                  if (item === '...') {
+                    return (
+                      <span key={`ellipsis-${idx}`} className="w-6 text-center text-slate-400 dark:text-slate-500 text-xs sm:text-sm">
+                        …
+                      </span>
+                    );
+                  }
+                  const pageNum = Number(item);
+                  const isActive = pageNum === page;
+                  return (
+                    <button
+                      key={`page-${pageNum}`}
+                      type="button"
+                      onClick={() => setPage(pageNum)}
+                      className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs sm:text-sm font-semibold transition-all ${
+                        isActive
+                          ? 'bg-blue-600 text-white shadow-xs cursor-default'
+                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white cursor-pointer'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+
                 <button
+                  type="button"
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page >= totalPages}
-                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-700"
-                  title="Next Page"
+                  className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs sm:text-sm transition-colors disabled:text-slate-300 dark:disabled:text-slate-600 disabled:cursor-not-allowed text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  title="Next page"
                 >
-                  <ChevronRight className="w-4 h-4" />
+                  ›
                 </button>
               </div>
             </div>
@@ -817,44 +1209,49 @@ export default function PppoeLogsPage() {
         )}
       </div>
 
-      {/* MikroTik Syslog Setup Guide Modal */}
+      {/* MikroTik Syslog Setup & 1-Click Auto Configuration Modal */}
       {showSetupModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-2xl w-full border border-slate-200 dark:border-slate-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-2xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
             {/* Modal Header */}
-            <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/30">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center">
-                  <Terminal className="w-4 h-4" />
+            <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/40">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm">
+                  <Zap className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100">
-                    MikroTik PPPoE Syslog Setup Guide
+                  <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                    MikroTik PPPoE Syslog Setup & Auto Config
                   </h3>
-                  <p className="text-[11px] text-slate-500">
-                    Stream connection & auth events directly to NetFix High-Throughput Engine
+                  <p className="text-xs text-slate-500">
+                    Auto-detect server IP, 1-Click trigger router setup, or copy pre-filled CLI script
                   </p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setShowSetupModal(false)}
-                className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600"
+                className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Modal Content */}
-            <div className="p-4 sm:p-6 overflow-y-auto space-y-4">
-              {/* Router Selector */}
+            <div className="p-4 sm:p-6 overflow-y-auto space-y-5">
+              {/* Target Router Selector */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
                   Select Target MikroTik Router:
                 </label>
                 <select
                   value={setupModalRouterId}
-                  onChange={(e) => setSetupModalRouterId(e.target.value)}
-                  className="w-full text-xs font-semibold px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-500"
+                  onChange={(e) => {
+                    setSetupModalRouterId(e.target.value);
+                    setAutoSetupSuccess(null);
+                    setAutoSetupError(null);
+                  }}
+                  className="w-full text-xs sm:text-sm font-medium px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                 >
                   {routers.map((r) => (
                     <option key={r.network_device_id} value={r.network_device_id}>
@@ -865,37 +1262,129 @@ export default function PppoeLogsPage() {
               </div>
 
               {isLoadingScript ? (
-                <div className="p-8 text-center text-slate-400">
-                  <RefreshCw className="w-6 h-6 animate-spin mx-auto text-indigo-600 mb-2" />
-                  <p className="text-xs">Generating router setup script...</p>
+                <div className="p-8 text-center text-slate-400 space-y-2">
+                  <RefreshCw className="w-6 h-6 animate-spin mx-auto text-blue-600" />
+                  <p className="text-xs font-medium">Auto-detecting Server IP & generating script...</p>
                 </div>
               ) : setupScriptData ? (
                 <div className="space-y-4">
-                  {/* Info Pill */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-3 bg-slate-50 dark:bg-slate-900 rounded-xl text-xs border border-slate-200 dark:border-slate-700">
-                    <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-semibold">Syslog Host</span>
-                      <p className="font-mono font-bold text-slate-800 dark:text-slate-200">{setupScriptData.server_host}</p>
+                  {/* Server Host Resolution Info Box */}
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2.5">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <Globe className="w-3.5 h-3.5 text-blue-500" />
+                        Syslog Destination Server
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                        <CheckCheck className="w-3 h-3" />
+                        Auto-Detected ({setupScriptData.host_source || 'WAN IP'})
+                      </span>
                     </div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-semibold">Port</span>
-                      <p className="font-mono font-bold text-indigo-600 dark:text-indigo-400">{setupScriptData.server_port} (UDP)</p>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-semibold">Router Token</span>
-                      <p className="font-mono font-bold text-emerald-600 dark:text-emerald-400">{setupScriptData.prefix}</p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="sm:col-span-2">
+                        <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">
+                          Server Public IP / Domain Host:
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={customServerHost}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setCustomServerHost(val);
+                              fetchSetupScript(setupModalRouterId, val);
+                            }}
+                            placeholder="e.g. 103.x.x.x or syslog.domain.com"
+                            className="w-full px-3 py-1.5 text-xs font-mono font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/20"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] text-slate-400 uppercase font-semibold block mb-1">
+                          Port (UDP):
+                        </label>
+                        <input
+                          type="text"
+                          readOnly
+                          value={`${setupScriptData.server_port} UDP`}
+                          className="w-full px-3 py-1.5 text-xs font-mono font-bold bg-slate-100 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-lg text-blue-600 dark:text-blue-400"
+                        />
+                      </div>
                     </div>
                   </div>
 
-                  {/* CLI Code Block */}
+                  {/* 1-CLICK AUTOMATIC SETUP BUTTON & BANNER */}
+                  <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 dark:from-blue-950/40 dark:via-indigo-950/30 dark:to-purple-950/40 p-4 rounded-xl border border-blue-200 dark:border-blue-800/80 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                          <Zap className="w-4 h-4 text-blue-600 dark:text-blue-400 fill-blue-600/20" />
+                          <span>1-Click Auto Configuration</span>
+                        </h4>
+                        <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                          NetFix will connect directly via RouterOS API to configure Syslog action & PPPoE rules automatically.
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handle1ClickAutoSetup}
+                        disabled={isConfiguringRouter}
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all active:scale-95 disabled:opacity-50 shrink-0 cursor-pointer"
+                      >
+                        {isConfiguringRouter ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Configuring Router...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Zap className="w-3.5 h-3.5" />
+                            <span>Trigger 1-Click Setup</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Auto Setup Success Notification */}
+                    {autoSetupSuccess && (
+                      <div className="p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 rounded-lg flex items-start gap-2.5 animate-in fade-in duration-150">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                        <div className="text-xs text-emerald-800 dark:text-emerald-300">
+                          <p className="font-bold">Setup Completed Successfully!</p>
+                          <p className="text-[11px] mt-0.5">{autoSetupSuccess}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Auto Setup Error Notification */}
+                    {autoSetupError && (
+                      <div className="p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 rounded-lg flex items-start gap-2.5 animate-in fade-in duration-150">
+                        <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                        <div className="text-xs text-rose-800 dark:text-rose-300">
+                          <p className="font-bold">Automatic Configuration Failed</p>
+                          <p className="text-[11px] mt-0.5">{autoSetupError}</p>
+                          <p className="text-[11px] text-slate-500 mt-1">
+                            Don't worry! You can copy the ready-to-use script below and paste it directly into MikroTik Winbox Terminal.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* CLI Code Block (Ready to Use) */}
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                        Copy & Paste into MikroTik Terminal:
+                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <Terminal className="w-3.5 h-3.5 text-slate-500" />
+                        Ready-to-Use Terminal Script (Copy & Paste):
                       </span>
                       <button
-                        onClick={() => copyToClipboard(setupScriptData.script)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-all active:scale-95"
+                        type="button"
+                        onClick={() => copyToClipboard(setupScriptData.script, 'Copied script to clipboard')}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-all active:scale-95"
                       >
                         {copiedText === setupScriptData.script ? (
                           <>
@@ -917,13 +1406,12 @@ export default function PppoeLogsPage() {
                   </div>
 
                   {/* 3 Step Instruction */}
-                  <div className="p-3 bg-indigo-50/70 dark:bg-indigo-950/30 rounded-xl border border-indigo-100 dark:border-indigo-900/50 space-y-1.5 text-xs text-slate-600 dark:text-slate-300">
-                    <p className="font-bold text-indigo-700 dark:text-indigo-300">How to activate:</p>
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 space-y-1.5 text-xs text-slate-600 dark:text-slate-300">
+                    <p className="font-bold text-slate-800 dark:text-slate-200">How it works:</p>
                     <ol className="list-decimal list-inside space-y-1 text-[11px] leading-relaxed">
-                      <li>Open Winbox or SSH into your MikroTik router.</li>
-                      <li>Click <strong>New Terminal</strong>.</li>
-                      <li>Paste the commands above and hit Enter.</li>
-                      <li>PPPoE connection and auth events will immediately stream into NetFix in real time!</li>
+                      <li><strong>1-Click Setup:</strong> Click "Trigger 1-Click Setup" above. NetFix connects to the router API and applies all rules automatically.</li>
+                      <li><strong>Manual Terminal:</strong> Or copy the commands above, open Winbox ➜ <strong>New Terminal</strong>, and hit Enter.</li>
+                      <li>PPPoE connection and auth logs will immediately stream into your NetFix dashboard in real time!</li>
                     </ol>
                   </div>
                 </div>
@@ -931,10 +1419,11 @@ export default function PppoeLogsPage() {
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30 flex justify-end">
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex justify-end">
               <button
+                type="button"
                 onClick={() => setShowSetupModal(false)}
-                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-semibold transition-colors"
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 rounded-lg text-xs font-semibold transition-colors"
               >
                 Close
               </button>

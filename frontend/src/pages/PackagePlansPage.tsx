@@ -16,6 +16,10 @@ import {
   X,
   Globe,
   Lock,
+  Download,
+  AlertCircle,
+  CheckCircle2,
+  CheckCheck,
 } from 'lucide-react';
 import { useToastContext } from '@/contexts/ToastContext';
 import { networkPackagesService } from '@/services/network-packages.service';
@@ -28,7 +32,7 @@ import {
   UpdateNetworkPackagePayload,
 } from '@/types/network.types';
 import { showDeleteConfirm, showError, showSuccess } from '@/lib/swal';
-import { PageHeader, StatusBadge } from '@/components/common';
+import { PageHeader, StatusBadge, ModernCheckbox } from '@/components/common';
 
 const protocolOptions: { label: string; value: NetworkProtocol | '' }[] = [
   { label: 'All Protocols', value: '' },
@@ -50,6 +54,19 @@ const PRESET_COLORS = [
   '#DB2777', // Pink
 ];
 
+interface ScannedMikrotikProfile {
+  id: string;
+  name: string;
+  rate_limit?: string;
+  download_speed: number;
+  upload_speed: number;
+  is_existing: boolean;
+  suggested_price: number;
+  price: number;
+  selected: boolean;
+  is_default?: boolean;
+}
+
 export default function PackagePlansPage() {
   const toast = useToastContext();
 
@@ -65,6 +82,7 @@ export default function PackagePlansPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Manual Add / Edit Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editing, setEditing] = useState<NetworkPackage | null>(null);
 
@@ -90,6 +108,16 @@ export default function PackagePlansPage() {
   const [profiles, setProfiles] = useState<Array<{ id: string; name: string }>>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [profilesError, setProfilesError] = useState<string | null>(null);
+
+  // Import from MikroTik Modal State
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importServerId, setImportServerId] = useState<string>('');
+  const [importProtocol, setImportProtocol] = useState<NetworkProtocol>('pppoe');
+  const [isScanningMikrotik, setIsScanningMikrotik] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [scannedProfiles, setScannedProfiles] = useState<ScannedMikrotikProfile[]>([]);
+  const [importSearch, setImportSearch] = useState('');
+  const [importError, setImportError] = useState<string | null>(null);
 
   const resetForm = () => {
     setEditing(null);
@@ -124,7 +152,7 @@ export default function PackagePlansPage() {
     }
   };
 
-  // Fetch MikroTik profiles when server or protocol changes
+  // Fetch MikroTik profiles when server or protocol changes (for manual form)
   const fetchProfiles = async (targetServerId?: string, targetProtocol?: NetworkProtocol) => {
     const proto = targetProtocol || formData.protocol;
     const isProfileProtocol = proto === 'pppoe' || proto === 'hotspot';
@@ -212,6 +240,7 @@ export default function PackagePlansPage() {
     return { total, pppoeCount, hotspotCount, totalSubscribers };
   }, [packages, pagination.total]);
 
+  // Submit manual create / edit form
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -319,6 +348,148 @@ export default function PackagePlansPage() {
     setIsModalOpen(true);
   };
 
+  // ---------------------------------------------------------------------------
+  // Import from MikroTik Handlers
+  // ---------------------------------------------------------------------------
+  const handleOpenImportModal = () => {
+    const defaultServerId = filters.serverId || (servers.length > 0 ? servers[0].networkDeviceId : '');
+    setImportServerId(defaultServerId);
+    setImportProtocol(filters.protocol && filters.protocol !== '' ? filters.protocol : 'pppoe');
+    setIsImportModalOpen(true);
+    setImportError(null);
+    if (defaultServerId) {
+      handleScanMikrotik(defaultServerId, filters.protocol && filters.protocol !== '' ? filters.protocol : 'pppoe');
+    }
+  };
+
+  const handleScanMikrotik = async (targetServerId?: string, targetProtocol?: NetworkProtocol) => {
+    const sId = targetServerId || importServerId;
+    const proto = targetProtocol || importProtocol;
+    if (!sId) {
+      toast.warning('Please select a MikroTik router');
+      return;
+    }
+
+    setIsScanningMikrotik(true);
+    setImportError(null);
+    try {
+      const res = await networkPackagesService.mikrotikPreview({
+        serverId: sId,
+        protocol: proto,
+      });
+
+      if (res.success && Array.isArray(res.data)) {
+        const mapped = res.data.map((item) => ({
+          ...item,
+          price: item.suggested_price || 500,
+          selected: !item.is_existing && !item.is_default,
+        }));
+        setScannedProfiles(mapped);
+        if (mapped.length === 0) {
+          toast.info('No profiles found on this MikroTik router for selected protocol');
+        }
+      } else {
+        setImportError('Failed to scan profiles from MikroTik');
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.message || err.message || 'Error connecting to MikroTik router';
+      setImportError(msg);
+      toast.error(msg);
+      setScannedProfiles([]);
+    } finally {
+      setIsScanningMikrotik(false);
+    }
+  };
+
+  const filteredScannedProfiles = useMemo(() => {
+    if (!importSearch.trim()) return scannedProfiles;
+    const q = importSearch.toLowerCase().trim();
+    return scannedProfiles.filter(
+      (p) => p.name.toLowerCase().includes(q) || (p.rate_limit && p.rate_limit.toLowerCase().includes(q))
+    );
+  }, [scannedProfiles, importSearch]);
+
+  const isAllImportSelected = useMemo(() => {
+    if (filteredScannedProfiles.length === 0) return false;
+    return filteredScannedProfiles.every((p) => p.selected);
+  }, [filteredScannedProfiles]);
+
+  const isSomeImportSelected = useMemo(() => {
+    if (filteredScannedProfiles.length === 0) return false;
+    const some = filteredScannedProfiles.some((p) => p.selected);
+    return some && !isAllImportSelected;
+  }, [filteredScannedProfiles, isAllImportSelected]);
+
+  const selectedImportCount = useMemo(() => {
+    return scannedProfiles.filter((p) => p.selected).length;
+  }, [scannedProfiles]);
+
+  const handleToggleSelectAllImport = (checked: boolean) => {
+    setScannedProfiles((prev) =>
+      prev.map((item) => ({
+        ...item,
+        selected: checked,
+      }))
+    );
+  };
+
+  const handleToggleSelectProfile = (id: string) => {
+    setScannedProfiles((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, selected: !item.selected } : item))
+    );
+  };
+
+  const handleUpdateProfileSpeed = (
+    id: string,
+    field: 'download_speed' | 'upload_speed' | 'price',
+    value: number
+  ) => {
+    setScannedProfiles((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+    );
+  };
+
+  const handleExecuteImport = async () => {
+    const selected = scannedProfiles.filter((p) => p.selected);
+    if (selected.length === 0) {
+      toast.warning('Please select at least one package to import');
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const payload = {
+        serverId: importServerId,
+        protocol: importProtocol,
+        packages: selected.map((p) => ({
+          name: p.name,
+          mikrotik_profile_name: p.name,
+          download_speed: p.download_speed,
+          upload_speed: p.upload_speed,
+          price: p.price,
+          validityDays: 30,
+          volumeType: 'unlimited',
+        })),
+      };
+
+      const res = await networkPackagesService.mikrotikImport(payload);
+      if (res.success) {
+        toast.success(res.message || `Successfully imported ${selected.length} package(s)!`);
+        setIsImportModalOpen(false);
+        setScannedProfiles([]);
+        loadPackages(1);
+      } else {
+        toast.error(res.message || 'Failed to import packages');
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.message || err.message || 'Failed to import packages';
+      toast.error(msg);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  // Render manual Add / Edit Package Modal
   const renderModal = () => {
     if (!isModalOpen) return null;
     return (
@@ -335,7 +506,7 @@ export default function PackagePlansPage() {
                   {editing ? 'Edit Package Plan' : 'Add New Package Plan'}
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Configure speed limits, billing rates, and MikroTik profile mapping
+                  Configure speed limits, billing rates, and MikroTik profile mapping manually
                 </p>
               </div>
             </div>
@@ -435,7 +606,6 @@ export default function PackagePlansPage() {
                               mikrotik_profile_id: selected?.id || val,
                               mikrotik_profile_name: val,
                             };
-                            // Auto-suggest speed if profile name contains bandwidth (e.g. 10Mbps, 20Mbps)
                             const speedMatch = val.match(/(\d+)\s*(?:mbps|m)/i);
                             if (speedMatch) {
                               const spd = parseInt(speedMatch[1], 10);
@@ -452,10 +622,9 @@ export default function PackagePlansPage() {
                         }}
                         className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
                       >
-                        <option value="">Select profile</option>
-                        {profiles.map((prof) => (
-                          <option key={prof.id} value={prof.name}>
-                            {prof.name}
+                        {profiles.map((p) => (
+                          <option key={p.id} value={p.name}>
+                            {p.name}
                           </option>
                         ))}
                       </select>
@@ -466,37 +635,34 @@ export default function PackagePlansPage() {
                         onChange={(e) =>
                           setFormData((prev) => ({
                             ...prev,
-                            mikrotik_profile_name: e.target.value,
                             mikrotik_profile_id: e.target.value,
+                            mikrotik_profile_name: e.target.value,
                           }))
                         }
-                        placeholder={loadingProfiles ? 'Loading profiles from router...' : 'e.g. default or 10Mbps'}
+                        placeholder="e.g. 10Mbps or default"
                         className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
                       />
-                    )}
-                    {profilesError && (
-                      <p className="text-[11px] text-amber-500 mt-1">{profilesError}</p>
                     )}
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Section 2: Plan Details & Bandwidth */}
+            {/* Section 2: General & Bandwidth */}
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-3">
-                2. Plan Information & Bandwidth
+                2. Plan Name & Bandwidth
               </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                    Package Name <span className="text-rose-500">*</span>
+                    Plan Display Name <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
                     value={formData.name}
                     onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
-                    placeholder="e.g. Premium 30 Mbps Unlimited"
+                    placeholder="e.g. Bronze 10 Mbps"
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
                     required
                   />
@@ -504,17 +670,34 @@ export default function PackagePlansPage() {
 
                 <div>
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                    Price (BDT ৳) <span className="text-rose-500">*</span>
+                    Price (Monthly / Rate) <span className="text-rose-500">*</span>
                   </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={formData.price}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none font-semibold text-slate-900 dark:text-slate-100"
-                    required
-                  />
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">৳</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={formData.price}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
+                      className="w-full pl-7 pr-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none font-semibold"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                    Status
+                  </label>
+                  <select
+                    value={formData.status}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, status: e.target.value as any }))}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                  >
+                    <option value="enabled">Active / Enabled</option>
+                    <option value="disabled">Disabled</option>
+                  </select>
                 </div>
 
                 <div>
@@ -525,11 +708,15 @@ export default function PackagePlansPage() {
                     <input
                       type="number"
                       min="1"
-                      value={formData.download_speed || 10}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, download_speed: parseInt(e.target.value) || 1 }))}
-                      className="w-full pl-8 pr-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                      value={formData.download_speed}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, download_speed: parseInt(e.target.value) || 1 }))
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none font-semibold text-blue-600 dark:text-blue-400"
                     />
-                    <ArrowDown className="w-3.5 h-3.5 text-blue-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium">
+                      Mbps
+                    </span>
                   </div>
                 </div>
 
@@ -541,17 +728,35 @@ export default function PackagePlansPage() {
                     <input
                       type="number"
                       min="1"
-                      value={formData.upload_speed || 10}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, upload_speed: parseInt(e.target.value) || 1 }))}
-                      className="w-full pl-8 pr-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                      value={formData.upload_speed}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, upload_speed: parseInt(e.target.value) || 1 }))
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none font-semibold text-indigo-600 dark:text-indigo-400"
                     />
-                    <ArrowUp className="w-3.5 h-3.5 text-indigo-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium">
+                      Mbps
+                    </span>
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                    Color Tag
+                    Privacy Scope
+                  </label>
+                  <select
+                    value={formData.privacy}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, privacy: e.target.value as any }))}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                  >
+                    <option value="public">Public (All Customers / Agents)</option>
+                    <option value="private">Private (Admin only)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                    Badge Color
                   </label>
                   <div className="flex items-center gap-2">
                     <input
@@ -638,33 +843,19 @@ export default function PackagePlansPage() {
                       required
                     />
                   </div>
-                ) : (
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                      Privacy & Portal
-                    </label>
-                    <select
-                      value={formData.privacy}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, privacy: e.target.value as any }))}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
-                    >
-                      <option value="public">Public (Visible to Clients)</option>
-                      <option value="private">Private (Admin only)</option>
-                    </select>
-                  </div>
-                )}
+                ) : null}
               </div>
             </div>
 
             {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3">
               <button
                 type="button"
                 onClick={() => {
                   setIsModalOpen(false);
                   resetForm();
                 }}
-                className="px-4 py-2 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-sm"
+                className="px-4 py-2 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-sm font-medium"
               >
                 Cancel
               </button>
@@ -681,6 +872,309 @@ export default function PackagePlansPage() {
     );
   };
 
+  // Render Import from MikroTik Modal
+  const renderImportModal = () => {
+    if (!isImportModalOpen) return null;
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden">
+          {/* Header */}
+          <div className="p-5 sm:p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/40">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center shadow-xs">
+                <Download className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <span>Import Packages from MikroTik</span>
+                  <span className="text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                    Live Router Sync
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Scan bandwidth profiles from your MikroTik router and import as NetFix billing plans
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsImportModalOpen(false)}
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Controls Bar: Router, Protocol & Scan Button */}
+          <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col sm:flex-row items-stretch sm:items-end justify-between gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Select MikroTik Router:
+                </label>
+                <select
+                  value={importServerId}
+                  onChange={(e) => {
+                    const sid = e.target.value;
+                    setImportServerId(sid);
+                    handleScanMikrotik(sid, importProtocol);
+                  }}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs sm:text-sm font-medium outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                >
+                  {servers.map((s) => (
+                    <option key={s.networkDeviceId} value={s.networkDeviceId}>
+                      {s.deviceName} ({s.managementIp})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  Target Protocol:
+                </label>
+                <select
+                  value={importProtocol}
+                  onChange={(e) => {
+                    const proto = e.target.value as NetworkProtocol;
+                    setImportProtocol(proto);
+                    handleScanMikrotik(importServerId, proto);
+                  }}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs sm:text-sm font-medium outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                >
+                  <option value="pppoe">PPPoE (Broadband Profiles)</option>
+                  <option value="hotspot">Hotspot (User Profiles)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleScanMikrotik()}
+                disabled={isScanningMikrotik}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isScanningMikrotik ? 'animate-spin text-emerald-600' : ''}`} />
+                <span>Re-Scan Profiles</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Body: Profile List Table */}
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4">
+            {isScanningMikrotik ? (
+              <div className="p-16 text-center space-y-3">
+                <RefreshCw className="w-8 h-8 animate-spin mx-auto text-emerald-600" />
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  Querying MikroTik Router via RouterOS API...
+                </p>
+                <p className="text-xs text-slate-400">
+                  Fetching bandwidth rate limits and profile configs
+                </p>
+              </div>
+            ) : importError ? (
+              <div className="p-8 text-center space-y-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl">
+                <AlertCircle className="w-8 h-8 mx-auto text-rose-500" />
+                <p className="text-sm font-bold text-rose-700 dark:text-rose-300">{importError}</p>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  Please verify that the router is reachable and API service is running on port 8728 (or Web API).
+                </p>
+                <button
+                  type="button"
+                  onClick={() => handleScanMikrotik()}
+                  className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold shadow-xs"
+                >
+                  Retry Scan
+                </button>
+              </div>
+            ) : scannedProfiles.length === 0 ? (
+              <div className="p-16 text-center text-slate-400 space-y-2">
+                <Package className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-600" />
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">No profiles found</p>
+                <p className="text-xs text-slate-400">
+                  Click 'Re-Scan Profiles' or check your MikroTik PPP / Hotspot configuration.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {/* Search Bar for Scanned Profiles */}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="relative flex-1 max-w-xs">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={importSearch}
+                      onChange={(e) => setImportSearch(e.target.value)}
+                      placeholder="Filter scanned profiles..."
+                      className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg outline-none text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-emerald-500/20"
+                    />
+                  </div>
+
+                  <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    Found <strong>{filteredScannedProfiles.length}</strong> profile(s) on MikroTik
+                  </div>
+                </div>
+
+                <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-xs">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold uppercase tracking-wider text-[11px] select-none">
+                        <tr>
+                          <th className="py-2.5 px-3.5" style={{ width: '40px' }}>
+                            <ModernCheckbox
+                              checked={isAllImportSelected}
+                              indeterminate={isSomeImportSelected}
+                              onChange={(checked) => handleToggleSelectAllImport(checked)}
+                              title="Select all profiles"
+                            />
+                          </th>
+                          <th className="py-2.5 px-3.5">MIKROTIK PROFILE</th>
+                          <th className="py-2.5 px-3.5">RATE LIMIT</th>
+                          <th className="py-2.5 px-3.5 text-center">DOWNLOAD (MBPS)</th>
+                          <th className="py-2.5 px-3.5 text-center">UPLOAD (MBPS)</th>
+                          <th className="py-2.5 px-3.5 text-center">PRICE (৳)</th>
+                          <th className="py-2.5 px-3.5 text-right">NETFIX STATUS</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900 font-medium">
+                        {filteredScannedProfiles.map((p) => (
+                          <tr
+                            key={p.id}
+                            className={`transition-colors ${
+                              p.selected ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : 'hover:bg-slate-50/60 dark:hover:bg-slate-800/40'
+                            }`}
+                          >
+                            <td className="py-2.5 px-3.5">
+                              <ModernCheckbox
+                                checked={p.selected}
+                                onChange={() => handleToggleSelectProfile(p.id)}
+                                title="Select this profile for import"
+                              />
+                            </td>
+
+                            <td className="py-2.5 px-3.5 whitespace-nowrap">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
+                                  {p.name}
+                                </span>
+                                {p.is_default && (
+                                  <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 px-1.5 py-0.2 rounded font-semibold">
+                                    Default
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-xs text-slate-500 dark:text-slate-400">
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                                {p.rate_limit || 'None'}
+                              </span>
+                            </td>
+
+                            <td className="py-2.5 px-3.5 text-center">
+                              <input
+                                type="number"
+                                min="1"
+                                value={p.download_speed}
+                                onChange={(e) =>
+                                  handleUpdateProfileSpeed(p.id, 'download_speed', parseInt(e.target.value) || 1)
+                                }
+                                className="w-16 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-center text-slate-900 dark:text-slate-100 outline-none focus:ring-1 focus:ring-emerald-500"
+                              />
+                            </td>
+
+                            <td className="py-2.5 px-3.5 text-center">
+                              <input
+                                type="number"
+                                min="1"
+                                value={p.upload_speed}
+                                onChange={(e) =>
+                                  handleUpdateProfileSpeed(p.id, 'upload_speed', parseInt(e.target.value) || 1)
+                                }
+                                className="w-16 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-center text-slate-900 dark:text-slate-100 outline-none focus:ring-1 focus:ring-emerald-500"
+                              />
+                            </td>
+
+                            <td className="py-2.5 px-3.5 text-center">
+                              <div className="inline-flex items-center gap-1">
+                                <span className="text-xs text-slate-400">৳</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={p.price}
+                                  onChange={(e) =>
+                                    handleUpdateProfileSpeed(p.id, 'price', parseFloat(e.target.value) || 0)
+                                  }
+                                  className="w-20 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-bold text-center text-emerald-600 dark:text-emerald-400 outline-none focus:ring-1 focus:ring-emerald-500"
+                                />
+                              </div>
+                            </td>
+
+                            <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
+                              {p.is_existing ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                  Already in NetFix
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                  Ready to Import
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Modal Footer */}
+          <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="text-xs text-slate-600 dark:text-slate-400">
+              <strong className="text-slate-900 dark:text-slate-100 font-bold">{selectedImportCount}</strong> of{' '}
+              {scannedProfiles.length} profile(s) selected for import
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsImportModalOpen(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-semibold transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteImport}
+                disabled={selectedImportCount === 0 || isImporting}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+              >
+                {isImporting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Importing Packages...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Import Selected Packages ({selectedImportCount})</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="w-full min-w-0 space-y-6">
       {/* Page Header */}
@@ -690,7 +1184,7 @@ export default function PackagePlansPage() {
         subtitle="Manage bandwidth profiles, PPPoE tiers, hotspot cards, and billing rates"
         badge={`${pagination.total} Plans`}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
               onClick={() => loadPackages(pagination.page)}
@@ -702,11 +1196,19 @@ export default function PackagePlansPage() {
             </button>
             <button
               type="button"
+              onClick={handleOpenImportModal}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium shadow-sm transition-all active:scale-95 cursor-pointer"
+              title="Scan and import bandwidth profiles directly from MikroTik"
+            >
+              <Download className="w-4 h-4" /> Import from MikroTik
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 resetForm();
                 setIsModalOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium shadow-sm transition-colors active:scale-95"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium shadow-sm transition-colors active:scale-95 cursor-pointer"
             >
               <Plus className="w-4 h-4" /> Add Package
             </button>
@@ -769,10 +1271,10 @@ export default function PackagePlansPage() {
               onChange={(e) => setFilters((prev) => ({ ...prev, serverId: e.target.value }))}
               className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
             >
-              <option value="">All Servers</option>
+              <option value="">All Servers & Gateways</option>
               {servers.map((srv) => (
                 <option key={srv.networkDeviceId} value={srv.networkDeviceId}>
-                  {srv.deviceName}
+                  {srv.deviceName} ({srv.managementIp || 'MikroTik'})
                 </option>
               ))}
             </select>
@@ -780,7 +1282,7 @@ export default function PackagePlansPage() {
 
           <div>
             <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">
-              Protocol
+              Protocol Filter
             </label>
             <select
               value={filters.protocol}
@@ -788,7 +1290,7 @@ export default function PackagePlansPage() {
               className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
             >
               {protocolOptions.map((opt) => (
-                <option key={opt.label} value={opt.value}>
+                <option key={opt.value} value={opt.value}>
                   {opt.label}
                 </option>
               ))}
@@ -800,245 +1302,161 @@ export default function PackagePlansPage() {
               Search Plans
             </label>
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
               <input
                 type="text"
-                placeholder="Search plan name or code..."
                 value={filters.search}
                 onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
                 onKeyDown={(e) => e.key === 'Enter' && loadPackages(1)}
-                className="w-full pl-9 pr-9 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
+                placeholder="Search plan name, code..."
+                className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none"
               />
-              {filters.search && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFilters((prev) => ({ ...prev, search: '' }));
-                    loadPackages(1);
-                  }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
             </div>
           </div>
         </div>
       </div>
 
-      {error && (
-        <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-900/30 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-sm font-medium">
-          {error}
-        </div>
-      )}
-
-      {/* Main Table Card */}
+      {/* Main Table */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1000px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wider">SL</th>
-                <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wider">Server</th>
-                <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wider">Protocol</th>
-                <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wider">Plan Name</th>
-                <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wider">Bandwidth</th>
-                <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wider">MikroTik Profile</th>
-                <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wider">Price</th>
-                <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wider">Validity</th>
-                <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wider">Volume</th>
-                <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wider">Users</th>
-                <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wider">Privacy</th>
-                <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wider">Status</th>
-                <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wider text-right">Actions</th>
+          <table className="w-full text-left text-xs sm:text-sm">
+            <thead className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold uppercase tracking-wider text-[11px] sticky top-0 z-10">
+              <tr>
+                <th className="py-3 px-4">Plan Name & Code</th>
+                <th className="py-3 px-4">Router / Server</th>
+                <th className="py-3 px-4">Protocol</th>
+                <th className="py-3 px-4">Speed (DL / UL)</th>
+                <th className="py-3 px-4">Price</th>
+                <th className="py-3 px-4">Validity</th>
+                <th className="py-3 px-4">Subscribers</th>
+                <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
               {loading ? (
                 <tr>
-                  <td colSpan={13} className="py-12 text-center text-slate-500 dark:text-slate-400">
-                    <div className="inline-flex items-center gap-2 text-sm">
-                      <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
-                      Loading package plans...
-                    </div>
+                  <td colSpan={9} className="py-12 text-center text-slate-400">
+                    <RefreshCw className="w-6 h-6 animate-spin mx-auto text-blue-600 mb-2" />
+                    <span>Loading package plans...</span>
                   </td>
                 </tr>
               ) : packages.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="py-12 text-center">
-                    <div className="max-w-sm mx-auto text-center space-y-3">
-                      <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
-                        <Package className="w-6 h-6" />
-                      </div>
-                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">No package plans found</p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        Create bandwidth packages to start provisioning PPPoE or Hotspot subscribers.
-                      </p>
+                  <td colSpan={9} className="py-12 text-center text-slate-400">
+                    <Package className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-600 mb-2" />
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">No package plans found</p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Create a new package manually or import profiles directly from your MikroTik router.
+                    </p>
+                    <div className="flex items-center justify-center gap-2 mt-4">
+                      <button
+                        type="button"
+                        onClick={handleOpenImportModal}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs"
+                      >
+                        <Download className="w-3.5 h-3.5" /> Import from MikroTik
+                      </button>
                       <button
                         type="button"
                         onClick={() => {
                           resetForm();
                           setIsModalOpen(true);
                         }}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium shadow-sm transition-colors"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-xs"
                       >
-                        <Plus className="w-3.5 h-3.5" /> Create First Plan
+                        <Plus className="w-3.5 h-3.5" /> Add Package
                       </button>
                     </div>
                   </td>
                 </tr>
               ) : (
-                packages.map((pkg, idx) => {
+                packages.map((pkg) => {
                   const subscriberCount = pkg.count ?? (pkg as any).activeSubscribers ?? 0;
-                  const color = pkg.color || (pkg as any).colorHex || '#2563EB';
-                  const dlSpeed = pkg.download_speed ?? ((pkg as any).downloadSpeedKbps ? Math.round((pkg as any).downloadSpeedKbps / 1024) : 10);
-                  const ulSpeed = pkg.upload_speed ?? ((pkg as any).uploadSpeedKbps ? Math.round((pkg as any).uploadSpeedKbps / 1024) : 10);
+                  const dlSpeed =
+                    pkg.download_speed ??
+                    ((pkg as any).downloadSpeedKbps ? Math.round((pkg as any).downloadSpeedKbps / 1024) : 10);
+                  const ulSpeed =
+                    pkg.upload_speed ??
+                    ((pkg as any).uploadSpeedKbps ? Math.round((pkg as any).uploadSpeedKbps / 1024) : 10);
                   const validityDays = pkg.validity?.days ?? (pkg as any).validityDays ?? 30;
-                  const validityHours = pkg.validity?.hours ?? (pkg as any).validityHours ?? 0;
-                  const volType = pkg.volume?.type ?? (pkg as any).volumeType ?? (pkg as any).dataVolumeType ?? 'unlimited';
-                  const volGb = pkg.volume?.gb ?? (pkg as any).volumeGb ?? (pkg as any).dataVolumeGb;
 
                   return (
                     <tr
                       key={pkg.id}
-                      className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors"
+                      className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
                     >
-                      {/* SL */}
-                      <td className="py-3 px-4 text-xs text-slate-400 font-mono">
-                        {(pagination.page - 1) * pagination.limit + idx + 1}
-                      </td>
-
-                      {/* Server */}
-                      <td className="py-3 px-4 font-medium text-slate-700 dark:text-slate-300 text-xs">
-                        {pkg.serverName || 'Main Gateway'}
-                      </td>
-
-                      {/* Protocol */}
                       <td className="py-3 px-4">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold uppercase ${
-                            pkg.protocol === 'pppoe'
-                              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800'
-                              : pkg.protocol === 'hotspot'
-                              ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
-                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
-                          }`}
-                        >
-                          {pkg.protocol}
-                        </span>
-                      </td>
-
-                      {/* Color & Plan Name */}
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2.5">
                           <span
-                            className="w-3.5 h-3.5 rounded-full shrink-0 border border-slate-300 dark:border-slate-600 shadow-2xs"
-                            style={{ backgroundColor: color }}
+                            className="w-3 h-3 rounded-full shrink-0 shadow-2xs"
+                            style={{ backgroundColor: pkg.color || '#2563EB' }}
                           />
                           <div>
-                            <p className="font-semibold text-slate-900 dark:text-slate-100 text-sm">{pkg.name}</p>
-                            {(pkg as any).code && (
-                              <p className="text-[11px] text-slate-400 font-mono">{(pkg as any).code}</p>
-                            )}
+                            <p className="font-bold text-slate-900 dark:text-slate-100">{pkg.name}</p>
+                            <p className="text-xs font-mono text-slate-400">{pkg.code || (pkg as any).profileCode}</p>
                           </div>
                         </div>
                       </td>
 
-                      {/* Bandwidth */}
-                      <td className="py-3 px-4">
-                        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-100/80 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono">
-                          <span className="text-blue-600 dark:text-blue-400 flex items-center font-semibold">
-                            ↓{dlSpeed}M
+                      <td className="py-3 px-4 whitespace-nowrap text-xs text-slate-600 dark:text-slate-400">
+                        {pkg.serverName || 'Default Router'}
+                      </td>
+
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold uppercase bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                          {pkg.protocol || 'pppoe'}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold">
+                          <span className="text-blue-600 dark:text-blue-400 flex items-center">
+                            <ArrowDown className="w-3 h-3 mr-0.5" />
+                            {dlSpeed}M
                           </span>
                           <span className="text-slate-300 dark:text-slate-600">/</span>
-                          <span className="text-indigo-600 dark:text-indigo-400 flex items-center font-semibold">
-                            ↑{ulSpeed}M
+                          <span className="text-indigo-600 dark:text-indigo-400 flex items-center">
+                            <ArrowUp className="w-3 h-3 mr-0.5" />
+                            {ulSpeed}M
                           </span>
                         </div>
                       </td>
 
-                      {/* MikroTik Profile */}
-                      <td className="py-3 px-4">
-                        <span className="font-mono text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                          {pkg.mikrotikProfileName || (pkg as any).mikrotikProfile || '—'}
-                        </span>
+                      <td className="py-3 px-4 whitespace-nowrap font-bold text-slate-900 dark:text-slate-100">
+                        ৳{Number(pkg.price || 0).toLocaleString()}
                       </td>
 
-                      {/* Price */}
-                      <td className="py-3 px-4">
-                        <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">
-                          ৳{pkg.price.toLocaleString()}
-                        </span>
-                        <span className="text-[11px] text-slate-400 block">/ cycle</span>
+                      <td className="py-3 px-4 whitespace-nowrap text-xs text-slate-600 dark:text-slate-400">
+                        {validityDays} Days
                       </td>
 
-                      {/* Validity */}
-                      <td className="py-3 px-4 text-slate-600 dark:text-slate-400 text-xs font-medium">
-                        {validityDays > 0 ? `${validityDays} Days` : ''}
-                        {validityHours > 0 ? ` ${validityHours}h` : ''}
-                        {validityDays === 0 && validityHours === 0 ? 'Unlimited' : ''}
-                      </td>
-
-                      {/* Volume */}
-                      <td className="py-3 px-4 text-slate-600 dark:text-slate-400 text-xs">
-                        {volType === 'unlimited' ? (
-                          <span className="inline-flex items-center text-emerald-600 dark:text-emerald-400 font-medium">
-                            Unlimited
-                          </span>
-                        ) : (
-                          <span className="font-semibold text-slate-700 dark:text-slate-300">
-                            {volGb || 0} GB
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Subscribers */}
-                      <td className="py-3 px-4">
+                      <td className="py-3 px-4 whitespace-nowrap">
                         <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300">
                           <Users className="w-3.5 h-3.5 text-slate-400" />
                           {subscriberCount}
                         </span>
                       </td>
 
-                      {/* Privacy */}
-                      <td className="py-3 px-4">
-                        {pkg.privacy === 'public' ? (
-                          <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                            <Globe className="w-3.5 h-3.5" /> Public
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-xs text-slate-500 font-medium">
-                            <Lock className="w-3.5 h-3.5" /> Private
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Status */}
-                      <td className="py-3 px-4">
+                      <td className="py-3 px-4 whitespace-nowrap">
                         <StatusBadge status={pkg.status === 'enabled' ? 'active' : 'suspended'} />
                       </td>
 
-                      {/* Actions */}
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
+                      <td className="py-3 px-4 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1">
                           <button
                             type="button"
                             onClick={() => openEdit(pkg)}
-                            className="p-1.5 rounded-lg text-blue-600 hover:text-blue-800 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
-                            title="Edit package"
+                            className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                            title="Edit Package"
                           >
                             <Edit className="w-4 h-4" />
                           </button>
                           <button
                             type="button"
                             onClick={() => handleDelete(pkg)}
-                            disabled={subscriberCount > 0}
-                            className="p-1.5 rounded-lg text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                            title={
-                              subscriberCount > 0
-                                ? 'Cannot delete package with active subscribers'
-                                : 'Delete package'
-                            }
+                            className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                            title="Delete Package"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -1092,6 +1510,7 @@ export default function PackagePlansPage() {
       </div>
 
       {renderModal()}
+      {renderImportModal()}
     </div>
   );
 }

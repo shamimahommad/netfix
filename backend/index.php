@@ -383,6 +383,12 @@ if ($method === 'DELETE' && preg_match('#^/resellers/([^/]+)$#', $uri, $m)) {
 if ($method === 'GET' && ($uri === '/access-profiles/dropdown' || $uri === '/network/packages/dropdown')) {
     AccessProfilesController::dropdown();
 }
+if ($method === 'GET' && ($uri === '/access-profiles/mikrotik-preview' || $uri === '/network/packages/mikrotik-preview')) {
+    AccessProfilesController::mikrotikPreview();
+}
+if ($method === 'POST' && ($uri === '/access-profiles/mikrotik-import' || $uri === '/network/packages/mikrotik-import')) {
+    AccessProfilesController::mikrotikImport();
+}
 if ($method === 'GET' && ($uri === '/access-profiles' || $uri === '/network/packages')) {
     AccessProfilesController::index();
 }
@@ -469,7 +475,7 @@ if ($method === 'GET' && ($uri === '/logs/pppoe' || $uri === '/logs/pppoe.php'))
     require __DIR__ . '/api/logs/pppoe.php';
     exit;
 }
-if ($method === 'GET' && ($uri === '/routers/syslog_setup_script.php' || $uri === '/routers/syslog-script' || $uri === '/network/mikrotik/syslog-script')) {
+if (($method === 'GET' || $method === 'POST') && ($uri === '/routers/syslog_setup_script.php' || $uri === '/routers/syslog-script' || $uri === '/routers/syslog-auto-setup' || $uri === '/network/mikrotik/syslog-script')) {
     require __DIR__ . '/api/routers/syslog_setup_script.php';
     exit;
 }

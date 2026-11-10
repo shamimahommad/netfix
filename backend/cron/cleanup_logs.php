@@ -125,3 +125,4 @@ try {
     echo "[ERROR] Log cleanup failed: " . $e->getMessage() . "\n";
     exit(1);
 }
+

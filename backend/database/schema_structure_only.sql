@@ -375,11 +375,13 @@ CREATE TABLE `network_devices` (
   `telemetry` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`telemetry`)),
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `syslog_token` varchar(64) DEFAULT NULL,
   PRIMARY KEY (`network_device_id`),
   UNIQUE KEY `uq_device_code` (`device_code`),
+  UNIQUE KEY `syslog_token` (`syslog_token`),
   KEY `idx_devices_tenant` (`tenant_id`),
   KEY `idx_devices_status` (`status`)
-) ENGINE=InnoDB AUTO_INCREMENT=1000006 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=1000009 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -410,7 +412,7 @@ CREATE TABLE `olt_onus` (
   UNIQUE KEY `uq_olt_onu` (`tenant_id`,`network_device_id`,`mac_address`),
   KEY `idx_olt_mac` (`mac_address`),
   KEY `idx_olt_device` (`network_device_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=8152 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=8749 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -479,6 +481,39 @@ CREATE TABLE `permissions` (
   PRIMARY KEY (`permission_id`),
   UNIQUE KEY `permission_code` (`permission_code`)
 ) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `pppoe_connection_logs`
+--
+
+DROP TABLE IF EXISTS `pppoe_connection_logs`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `pppoe_connection_logs` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) unsigned NOT NULL,
+  `router_id` bigint(20) unsigned NOT NULL DEFAULT 0,
+  `username` varchar(100) NOT NULL,
+  `event_type` enum('connected','disconnected','auth_failed','info') NOT NULL,
+  `assigned_ip` varchar(45) DEFAULT NULL,
+  `caller_mac` varchar(20) DEFAULT NULL,
+  `interface_name` varchar(100) DEFAULT NULL,
+  `session_time_seconds` int(10) unsigned DEFAULT NULL,
+  `bytes_uploaded` bigint(20) unsigned DEFAULT NULL,
+  `bytes_downloaded` bigint(20) unsigned DEFAULT NULL,
+  `disconnect_reason` varchar(255) DEFAULT NULL,
+  `raw_message` varchar(500) DEFAULT NULL,
+  `logged_at` datetime NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`,`logged_at`),
+  KEY `idx_tenant_logged` (`tenant_id`,`logged_at`),
+  KEY `idx_tenant_user_logged` (`tenant_id`,`username`,`logged_at`),
+  KEY `idx_tenant_router_logged` (`tenant_id`,`router_id`,`logged_at`),
+  KEY `idx_tenant_event_logged` (`tenant_id`,`event_type`,`logged_at`),
+  KEY `idx_caller_mac` (`caller_mac`),
+  KEY `idx_assigned_ip` (`assigned_ip`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -960,4 +995,4 @@ CREATE TABLE `wallets` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-11-09  1:54:07
+-- Dump completed on 2026-11-10 15:02:53
