@@ -23,6 +23,7 @@ interface AuthState {
   setUser: (user: LoginResponse['user'] | null) => void;
   setBalance: (balance: number | null) => void;
   setImpersonation: (impersonated: boolean, impersonatedBy: ImpersonationInfo | null) => void;
+  updateBranding: (branding: { tenant_name?: string; tenant_logo?: string | null }) => void;
   refreshMe: () => Promise<void>;
   logout: () => void;
 }
@@ -75,6 +76,22 @@ export const useAuthStore = create<AuthState>()(
       },
       setBalance: (balance) => set({ balance }),
       setImpersonation: (impersonated, impersonatedBy) => set({ impersonated, impersonatedBy }),
+      updateBranding: (branding) => {
+        set((state) => {
+          if (!state.user) return state;
+          const updatedUser: LoginResponse['user'] = {
+            ...state.user,
+            tenant_name: branding.tenant_name !== undefined ? branding.tenant_name : state.user.tenant_name,
+            tenant_logo: branding.tenant_logo !== undefined ? branding.tenant_logo : state.user.tenant_logo,
+          };
+          try {
+            localStorage.setItem('auth_user', JSON.stringify(updatedUser));
+          } catch {
+            /* ignore */
+          }
+          return { user: updatedUser };
+        });
+      },
       refreshMe: async () => {
         const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
         if (!token) {
@@ -90,6 +107,8 @@ export const useAuthStore = create<AuthState>()(
             first_name: me.first_name ?? existing?.first_name ?? '',
             last_name: me.last_name ?? existing?.last_name ?? '',
             tenant_id: me.tenant_id ?? existing?.tenant_id ?? null,
+            tenant_name: me.tenant_name ?? existing?.tenant_name ?? null,
+            tenant_logo: me.tenant_logo ?? existing?.tenant_logo ?? null,
             user_type: me.user_type ?? existing?.user_type ?? 'isp',
             role_code: me.role_code,
           };

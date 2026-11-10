@@ -247,9 +247,24 @@ class AuthController {
         $hRow = $hStmt->fetch(PDO::FETCH_ASSOC);
         $hStmt->closeCursor();
 
+        $tenantId = $user['tenant_id'] ? (string)$user['tenant_id'] : null;
+        $tenantName = null;
+        $tenantLogo = null;
+        if ($tenantId) {
+            $tStmt = $db->prepare("SELECT tenant_name, logo_url FROM tenants WHERE tenant_id = :tid LIMIT 1");
+            $tStmt->execute(['tid' => $tenantId]);
+            $tRow = $tStmt->fetch(PDO::FETCH_ASSOC);
+            if ($tRow) {
+                $tenantName = $tRow['tenant_name'];
+                $tenantLogo = $tRow['logo_url'];
+            }
+        }
+
         Response::json([
             'user_id' => (string)$user['user_id'],
-            'tenant_id' => $user['tenant_id'] ? (string)$user['tenant_id'] : null,
+            'tenant_id' => $tenantId,
+            'tenant_name' => $tenantName,
+            'tenant_logo' => $tenantLogo,
             'user_type' => $userType,
             'role_code' => $user['role'],
             'role' => $user['role'],

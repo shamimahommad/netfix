@@ -36,6 +36,7 @@ require_once __DIR__ . '/controllers/UsersController.php';
 require_once __DIR__ . '/controllers/SearchController.php';
 require_once __DIR__ . '/controllers/TaskLogsController.php';
 require_once __DIR__ . '/controllers/PublicTopupController.php';
+require_once __DIR__ . '/controllers/CompanyProfileController.php';
 
 // Parse Request Path and Method
 $rawUri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
@@ -534,6 +535,37 @@ if ($method === 'POST' && $uri === '/sms/send') {
 }
 if ($method === 'GET' && $uri === '/sms/balance') {
     SmsController::getBalance();
+}
+
+// ---------------------------------------------------------------------
+// COMPANY PROFILE & BRANDING
+// ---------------------------------------------------------------------
+if ($method === 'GET' && ($uri === '/company/profile' || $uri === '/settings/company-profile' || $uri === '/tenants/my/profile' || $uri === '/tenants/my/company')) {
+    CompanyProfileController::show();
+}
+if (($method === 'POST' || $method === 'PUT') && ($uri === '/company/profile' || $uri === '/settings/company-profile' || $uri === '/tenants/my/profile' || $uri === '/tenants/my/company')) {
+    CompanyProfileController::update();
+}
+if ($method === 'GET' && preg_match('#^/uploads/logos/([a-zA-Z0-9_\-\.]+)$#', $uri, $m)) {
+    $filename = basename($m[1]);
+    $filePath = __DIR__ . '/uploads/logos/' . $filename;
+    if (file_exists($filePath)) {
+        $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+        $mimes = [
+            'png' => 'image/png',
+            'jpg' => 'image/jpeg',
+            'jpeg' => 'image/jpeg',
+            'webp' => 'image/webp',
+            'svg' => 'image/svg+xml',
+            'gif' => 'image/gif',
+        ];
+        header('Content-Type: ' . ($mimes[$ext] ?? 'application/octet-stream'));
+        header('Cache-Control: public, max-age=86400');
+        readfile($filePath);
+        exit;
+    }
+    http_response_code(404);
+    exit;
 }
 
 // ---------------------------------------------------------------------

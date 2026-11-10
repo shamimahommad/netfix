@@ -39,11 +39,25 @@ export interface AreaWiseReportRow {
   vip: number;
 }
 
+export interface ServerWiseResellerRow {
+  resellerId: string | number | null;
+  resellerName: string;
+  total: number;
+  active: number;
+  online: number;
+  offline: number;
+  expired: number;
+}
+
 export interface ServerWiseReportRow {
   serverId: string | null;
   serverName: string;
+  serverIp?: string | null;
+  deviceStatus?: string;
   total: number;
   active: number;
+  online?: number;
+  offline?: number;
   expired: number;
   left: number;
   pending: number;
@@ -51,6 +65,7 @@ export interface ServerWiseReportRow {
   hotspot: number;
   free: number;
   vip: number;
+  resellers?: ServerWiseResellerRow[];
 }
 
 export const customersService = {

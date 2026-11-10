@@ -449,13 +449,22 @@ class TenantsController {
         $stmtSms->execute(['tid' => $tenantId]);
         $sms = $stmtSms->fetchAll() ?: [];
 
+        $tStmt = $db->prepare("SELECT tenant_name, logo_url, business_email, business_phone, support_phone, business_address FROM tenants WHERE tenant_id = :tid LIMIT 1");
+        $tStmt->execute(['tid' => $tenantId]);
+        $tInfo = $tStmt->fetch(PDO::FETCH_ASSOC);
+
         Response::json([
             'success' => true,
             'data' => [
                 'settings' => [
                     'currency' => 'BDT',
                     'timezone' => 'Asia/Dhaka',
-                    'companyName' => 'NetFix Broadband',
+                    'companyName' => $tInfo['tenant_name'] ?? 'Star Network',
+                    'logoUrl' => $tInfo['logo_url'] ?? null,
+                    'companyEmail' => $tInfo['business_email'] ?? '',
+                    'ownerPhone' => $tInfo['business_phone'] ?? '',
+                    'supportPhone' => $tInfo['support_phone'] ?? '',
+                    'address' => $tInfo['business_address'] ?? '',
                 ],
                 'paymentGateways' => $pgs,
                 'smsGateways' => $sms,

@@ -230,6 +230,7 @@ export default function TenantLayout() {
         label: 'Settings',
         icon: <SettingsIcon />,
         submenu: [
+          { label: 'Company Profile', path: '/dashboard/settings/company-profile' },
           { label: 'Import', path: '/dashboard/settings/import' },
         ],
       });

@@ -120,6 +120,10 @@ class Database {
                 KEY `idx_assigned_ip` (`assigned_ip`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
+            // Ensure company profile columns on tenants
+            self::ensureColumn($pdo, 'tenants', 'support_phone', 'VARCHAR(50) DEFAULT NULL');
+            self::ensureColumn($pdo, 'tenants', 'logo_url', 'VARCHAR(255) DEFAULT NULL');
+
             // Ensure syslog_token on network_devices
             self::ensureColumn($pdo, 'network_devices', 'syslog_token', 'VARCHAR(64) DEFAULT NULL UNIQUE');
 

@@ -26,7 +26,6 @@ import PackageCopyPage from './pages/PackageCopyPage';
 import PlaceholderPage from './pages/PlaceholderPage';
 import PppoeLogsPage from './pages/PppoeLogsPage';
 import ChangePasswordPage from './pages/ChangePasswordPage';
-import ProfilePage from './pages/ProfilePage';
 import MerchantPaymentsPage from './pages/MerchantPaymentsPage';
 import FeatureGuard from './components/FeatureGuard';
 import PackagePlansPage from './pages/PackagePlansPage';
@@ -49,6 +48,7 @@ import ResellerWiseCustomersPage from './pages/ResellerWiseCustomersPage';
 import MyPackagesPage from './pages/MyPackagesPage';
 import AreaWiseCustomersPage from './pages/AreaWiseCustomersPage';
 import ImportPage from './pages/ImportPage';
+import CompanyProfilePage from './pages/CompanyProfilePage';
 import ServerWiseCustomersPage from './pages/ServerWiseCustomersPage';
 import InvoicesReportPage from './pages/InvoicesReportPage';
 import FinancialLedgerPage from './pages/FinancialLedgerPage';
@@ -269,9 +269,12 @@ function AppContent() {
               <Route path="network" element={<Navigate to="/dashboard/network/mikrotik" replace />} />
               <Route path="service-area/areas" element={<ServiceAreasPage />} />
               <Route path="service-area/sub-areas" element={<SubAreasPage />} />
-              <Route path="settings" element={<Navigate to="/dashboard/settings/import" replace />} />
+              <Route path="settings" element={<Navigate to="/dashboard/settings/company-profile" replace />} />
+              <Route path="settings/company-profile" element={<AdminOnlyGuard><CompanyProfilePage /></AdminOnlyGuard>} />
+              <Route path="settings/company-setup" element={<Navigate to="/dashboard/settings/company-profile" replace />} />
+              <Route path="settings/company" element={<Navigate to="/dashboard/settings/company-profile" replace />} />
               <Route path="settings/import" element={<AdminOnlyGuard><ImportPage /></AdminOnlyGuard>} />
-              <Route path="profile" element={<ProfilePage />} />
+              <Route path="profile" element={<AdminOnlyGuard><CompanyProfilePage /></AdminOnlyGuard>} />
               <Route path="change-password" element={<ChangePasswordPage />} />
               {/* Dashboard catch-all: 404 for unknown paths under /dashboard */}
               <Route path="*" element={<ErrorPage status={404} />} />

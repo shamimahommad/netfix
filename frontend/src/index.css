@@ -680,4 +680,17 @@
   .dark .dashboard-card-progress-fill {
     background: #60a5fa;
   }
+
+  /* Completely hide scrollbars while keeping smooth scroll functionality */
+  .no-scrollbar::-webkit-scrollbar,
+  .custom-scrollbar::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  .no-scrollbar,
+  .custom-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
 }

@@ -865,7 +865,7 @@ export default function TenantDashboard() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-[260px] custom-scrollbar">
+          <div className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-[260px] custom-scrollbar no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             {isLoading ? (
               <div className="space-y-2 py-4">
                 {[1, 2, 3].map((n) => (
@@ -949,7 +949,7 @@ export default function TenantDashboard() {
 
           {!collapsedInvoices && (
             <div className="flex-1 flex flex-col min-h-0">
-              <div className="flex-1 overflow-y-auto max-h-[220px] custom-scrollbar">
+              <div className="flex-1 overflow-y-auto max-h-[250px] custom-scrollbar no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                 {loadingInvoices ? (
                   <p className="text-xs text-slate-400 py-6 text-center">Loading invoices...</p>
                 ) : (
@@ -977,9 +977,10 @@ export default function TenantDashboard() {
                             <button
                               type="button"
                               onClick={() => inv.customerId && navigate(`/dashboard/customers/${inv.customerId}`)}
-                              className="text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 truncate max-w-[80px] block"
+                              className="text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 truncate max-w-[120px] sm:max-w-[140px] block font-medium"
+                              title={inv.username || inv.customerName || inv.customerCode || ''}
                             >
-                              {inv.username ?? '—'}
+                              {inv.username || inv.customerName || inv.customerCode || '—'}
                             </button>
                           </td>
                           <td className="py-1.5 text-right font-semibold text-emerald-600 dark:text-emerald-400">
@@ -1055,7 +1056,7 @@ export default function TenantDashboard() {
 
           {!collapsedUpcoming && (
             <div className="flex-1 flex flex-col min-h-0">
-              <div className="flex-1 overflow-y-auto max-h-[220px] custom-scrollbar">
+              <div className="flex-1 overflow-y-auto max-h-[250px] custom-scrollbar no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                 {loadingUpcoming ? (
                   <p className="text-xs text-slate-400 py-6 text-center">Loading accounts...</p>
                 ) : (
@@ -1151,7 +1152,7 @@ export default function TenantDashboard() {
 
           {!collapsedExpired && (
             <div className="flex-1 flex flex-col min-h-0">
-              <div className="flex-1 overflow-y-auto max-h-[220px] custom-scrollbar">
+              <div className="flex-1 overflow-y-auto max-h-[250px] custom-scrollbar no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                 {loadingExpired ? (
                   <p className="text-xs text-slate-400 py-6 text-center">Loading accounts...</p>
                 ) : (

@@ -410,10 +410,12 @@ class BillingController {
             c.customer_code,
             c.full_name as customer_name,
             c.phone as customer_phone,
+            COALESCE(na.username, c.customer_code, c.full_name) as username,
             ap.profile_name as package_name,
             u.first_name as collected_by_name
             FROM invoices i
             LEFT JOIN customers c ON c.customer_id = i.customer_id
+            LEFT JOIN customer_network_accounts na ON na.customer_id = i.customer_id
             LEFT JOIN customer_services cs ON cs.customer_service_id = i.customer_service_id
             LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
             LEFT JOIN users u ON u.user_id = i.collected_by
@@ -426,6 +428,7 @@ class BillingController {
         $rows = $stmt->fetchAll();
 
         $items = array_map(function($r) {
+            $userVal = !empty($r['username']) ? $r['username'] : (!empty($r['customer_name']) ? $r['customer_name'] : ($r['customer_code'] ?? '—'));
             return [
                 'invoiceId' => (string)$r['invoice_id'],
                 'invoice_id' => (string)$r['invoice_id'],
@@ -435,6 +438,8 @@ class BillingController {
                 'customerCode' => $r['customer_code'],
                 'customerName' => $r['customer_name'],
                 'customerPhone' => $r['customer_phone'],
+                'username' => $userVal,
+                'mobile' => $r['customer_phone'] ?? null,
                 'packageName' => $r['package_name'],
                 'invoiceDate' => $r['invoice_date'],
                 'dueDate' => $r['due_date'],
@@ -467,9 +472,10 @@ class BillingController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT i.*, c.customer_code, c.full_name as customer_name, c.phone as customer_phone, c.installation_address 
+        $stmt = $db->prepare("SELECT i.*, c.customer_code, c.full_name as customer_name, c.phone as customer_phone, c.installation_address, COALESCE(na.username, c.customer_code) as username 
             FROM invoices i 
             LEFT JOIN customers c ON c.customer_id = i.customer_id 
+            LEFT JOIN customer_network_accounts na ON na.customer_id = i.customer_id
             WHERE i.invoice_id = :id AND i.tenant_id = :tid LIMIT 1");
         $stmt->execute(['id' => $id, 'tid' => $tenantId]);
         $inv = $stmt->fetch();
@@ -486,6 +492,7 @@ class BillingController {
                 'customerId' => (string)$inv['customer_id'],
                 'customerCode' => $inv['customer_code'],
                 'customerName' => $inv['customer_name'],
+                'username' => $inv['username'] ?? ($inv['customer_name'] ?? '—'),
                 'customerPhone' => $inv['customer_phone'],
                 'address' => $inv['installation_address'],
                 'invoiceDate' => $inv['invoice_date'],

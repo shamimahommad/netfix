@@ -65,10 +65,16 @@ class CustomersController {
         }
 
         // Filter: serverId (network_device_id)
-        if (!empty($_GET['serverId']) && $_GET['serverId'] !== 'all') {
-            $where[] = "(cs.network_device_id = :srvId OR na.network_device_id = :srvId2)";
-            $params['srvId'] = $_GET['serverId'];
-            $params['srvId2'] = $_GET['serverId'];
+        if (isset($_GET['serverId']) && $_GET['serverId'] !== '' && $_GET['serverId'] !== 'all') {
+            $srvVal = (string)$_GET['serverId'];
+            if ($srvVal === 'unassigned' || $srvVal === '0' || $srvVal === 'none') {
+                $where[] = "(cs.network_device_id IS NULL OR cs.network_device_id = 0 OR cs.network_device_id NOT IN (SELECT network_device_id FROM network_devices WHERE tenant_id = :tid_nd))";
+                $params['tid_nd'] = $tenantId;
+            } else {
+                $where[] = "(cs.network_device_id = :srvId OR na.network_device_id = :srvId2)";
+                $params['srvId'] = $srvVal;
+                $params['srvId2'] = $srvVal;
+            }
         }
 
         // Filter: area
@@ -984,6 +990,22 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         $fields[] = "metadata = :meta";
         $params['meta'] = json_encode($meta, JSON_UNESCAPED_UNICODE);
 
+        if (isset($data['ownerId']) || isset($data['owner_id'])) {
+            $newOwnerId = (int)($data['ownerId'] ?? $data['owner_id']);
+            require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+            $ownerUser = HierarchySecurityService::getUser($newOwnerId);
+            if ($ownerUser) {
+                $fields[] = "owner_id = :oid";
+                $params['oid'] = $newOwnerId;
+                $fields[] = "owner_role = :orole";
+                $params['orole'] = $ownerUser['role'] ?? 'reseller';
+                $fields[] = "owner_role_level = :olevel";
+                $params['olevel'] = $ownerUser['role_level'] ?? 10;
+                $fields[] = "owner_path = :opath";
+                $params['opath'] = $ownerUser['hierarchy_path'] ?? "/{$newOwnerId}/";
+            }
+        }
+
         if (!empty($fields)) {
             $sql = "UPDATE customers SET " . implode(', ', $fields) . " WHERE customer_id = :cid";
             $stmt = $db->prepare($sql);
@@ -1057,6 +1079,67 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         if (!empty($newPlanId)) {
             $stmtPlan = $db->prepare("UPDATE customer_services SET access_profile_id = :pid WHERE customer_id = :cid");
             $stmtPlan->execute(['pid' => $newPlanId, 'cid' => $realCid]);
+        }
+
+        // 4. Handle Server / Router change if passed
+        $newServerId = $data['serverId'] ?? $data['server_id'] ?? $data['network_device_id'] ?? null;
+        if ($newServerId !== null && $newServerId !== '') {
+            $parsedSrvId = ((int)$newServerId > 0) ? (int)$newServerId : null;
+
+            // Update or insert customer_services
+            $chkCs = $db->prepare("SELECT customer_service_id FROM customer_services WHERE customer_id = :cid LIMIT 1");
+            $chkCs->execute(['cid' => $realCid]);
+            $hasCs = $chkCs->fetchColumn();
+
+            if ($hasCs) {
+                $stmtSrv = $db->prepare("UPDATE customer_services SET network_device_id = :did WHERE customer_id = :cid");
+                $stmtSrv->execute(['did' => $parsedSrvId, 'cid' => $realCid]);
+            } else {
+                $stmtSrv = $db->prepare("INSERT INTO customer_services 
+                    (tenant_id, customer_id, network_device_id, protocol, billing_cycle, status, starts_at, expires_at, created_by)
+                    VALUES (:tid, :cid, :did, 'pppoe', 'monthly', 'active', NOW(), DATE_ADD(NOW(), INTERVAL 30 DAY), :uid)");
+                $stmtSrv->execute([
+                    'tid' => $customerTenantId,
+                    'cid' => $realCid,
+                    'did' => $parsedSrvId,
+                    'uid' => (int)$user['user_id']
+                ]);
+            }
+
+            // Update or insert customer_network_accounts
+            $chkNa = $db->prepare("SELECT network_account_id FROM customer_network_accounts WHERE customer_id = :cid LIMIT 1");
+            $chkNa->execute(['cid' => $realCid]);
+            $hasNa = $chkNa->fetchColumn();
+
+            if ($hasNa) {
+                $stmtNetSrv = $db->prepare("UPDATE customer_network_accounts SET network_device_id = :did WHERE customer_id = :cid");
+                $stmtNetSrv->execute(['did' => $parsedSrvId, 'cid' => $realCid]);
+            } else {
+                $uname = !empty($data['username']) ? trim($data['username']) : ($customer['customer_code'] ?? 'user' . $realCid);
+                $stmtNetSrv = $db->prepare("INSERT INTO customer_network_accounts 
+                    (tenant_id, customer_id, network_device_id, protocol, username, password, status, is_online)
+                    VALUES (:tid, :cid, :did, 'pppoe', :uname, '123456', 'active', 0)");
+                $stmtNetSrv->execute([
+                    'tid' => $customerTenantId,
+                    'cid' => $realCid,
+                    'did' => $parsedSrvId,
+                    'uname' => $uname
+                ]);
+            }
+        }
+
+        // 5. Handle billingCycle if passed
+        if (!empty($data['billingCycle']) || !empty($data['billing_cycle'])) {
+            $bCycle = trim($data['billingCycle'] ?? $data['billing_cycle']);
+            $stmtBc = $db->prepare("UPDATE customer_services SET billing_cycle = :bc WHERE customer_id = :cid");
+            $stmtBc->execute(['bc' => $bCycle, 'cid' => $realCid]);
+        }
+
+        // 6. Handle expiryDate if passed
+        if (!empty($data['expiryDate']) || !empty($data['expiry_date'])) {
+            $expDate = trim($data['expiryDate'] ?? $data['expiry_date']);
+            $stmtExp = $db->prepare("UPDATE customer_services SET expires_at = :exp WHERE customer_id = :cid");
+            $stmtExp->execute(['exp' => $expDate, 'cid' => $realCid]);
         }
 
         Response::json([
@@ -1222,14 +1305,31 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
 
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT 
-            nd.network_device_id as serverId,
-            COALESCE(nd.device_name, 'Default Router') as serverName,
+        // 1. Fetch all router devices registered for this tenant
+        $routerStmt = $db->prepare("SELECT 
+            network_device_id as serverId,
+            device_name as serverName,
+            management_ip as serverIp,
+            status as deviceStatus
+            FROM network_devices 
+            WHERE tenant_id = :tid AND device_type = 'router'
+            ORDER BY device_name ASC");
+        $routerStmt->execute(['tid' => $tenantId]);
+        $routers = $routerStmt->fetchAll() ?: [];
+
+        // 2. Fetch customer metrics aggregated per server/router
+        $custStmt = $db->prepare("SELECT 
+            COALESCE(cs.network_device_id, 0) as serverId,
+            COALESCE(nd.device_name, 'Direct / Unassigned') as serverName,
+            nd.management_ip as serverIp,
+            nd.status as deviceStatus,
             COUNT(c.customer_id) as total,
             SUM(CASE WHEN c.status = 'active' THEN 1 ELSE 0 END) as active,
-            SUM(CASE WHEN c.billing_status = 'Expired' THEN 1 ELSE 0 END) as expired,
-            SUM(CASE WHEN c.status = 'cancelled' THEN 1 ELSE 0 END) as `left`,
-            SUM(CASE WHEN c.status = 'pending_activation' THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN c.status = 'active' AND na.is_online = 1 THEN 1 ELSE 0 END) as online_cnt,
+            SUM(CASE WHEN c.status = 'active' AND (na.is_online = 0 OR na.is_online IS NULL) THEN 1 ELSE 0 END) as offline_cnt,
+            SUM(CASE WHEN c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW() AND c.status = 'active') THEN 1 ELSE 0 END) as expired_cnt,
+            SUM(CASE WHEN c.status IN ('cancelled', 'terminated', 'left') OR c.billing_status = 'Left' THEN 1 ELSE 0 END) as left_cnt,
+            SUM(CASE WHEN c.status = 'pending_activation' OR c.billing_status = 'Pending' THEN 1 ELSE 0 END) as pending_cnt,
             COUNT(c.customer_id) as pppoe,
             0 as hotspot,
             0 as free,
@@ -1237,12 +1337,126 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             FROM customers c
             LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id
             LEFT JOIN network_devices nd ON nd.network_device_id = cs.network_device_id
+            LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
             WHERE c.tenant_id = :tid
-            GROUP BY nd.network_device_id, nd.device_name");
-        $stmt->execute(['tid' => $tenantId]);
-        $rows = $stmt->fetchAll();
+            GROUP BY COALESCE(cs.network_device_id, 0), nd.device_name, nd.management_ip, nd.status");
+        $custStmt->execute(['tid' => $tenantId]);
+        $custRows = $custStmt->fetchAll() ?: [];
 
-        Response::json($rows ?: []);
+        // Index server stats by serverId
+        $custMap = [];
+        foreach ($custRows as $cr) {
+            $sId = (string)($cr['serverId'] ?? 0);
+            $custMap[$sId] = $cr;
+        }
+
+        // 3. Fetch reseller / POP breakdown per server
+        $resellerStmt = $db->prepare("SELECT 
+            COALESCE(cs.network_device_id, 0) as serverId,
+            c.owner_id as resellerId,
+            COALESCE(NULLIF(TRIM(CONCAT(u.first_name, ' ', COALESCE(u.last_name, ''))), ''), u.username, 'Direct Office') as resellerName,
+            COUNT(c.customer_id) as total,
+            SUM(CASE WHEN c.status = 'active' THEN 1 ELSE 0 END) as active,
+            SUM(CASE WHEN c.status = 'active' AND na.is_online = 1 THEN 1 ELSE 0 END) as online_cnt,
+            SUM(CASE WHEN c.status = 'active' AND (na.is_online = 0 OR na.is_online IS NULL) THEN 1 ELSE 0 END) as offline_cnt,
+            SUM(CASE WHEN c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW() AND c.status = 'active') THEN 1 ELSE 0 END) as expired_cnt
+            FROM customers c
+            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id
+            LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
+            LEFT JOIN users u ON u.user_id = c.owner_id
+            WHERE c.tenant_id = :tid
+            GROUP BY COALESCE(cs.network_device_id, 0), c.owner_id, u.first_name, u.last_name, u.username
+            ORDER BY active DESC, total DESC");
+        $resellerStmt->execute(['tid' => $tenantId]);
+        $resellerRows = $resellerStmt->fetchAll() ?: [];
+
+        // Group resellers by serverId
+        $resellersByServer = [];
+        foreach ($resellerRows as $rr) {
+            $sId = (string)($rr['serverId'] ?? 0);
+            if (!isset($resellersByServer[$sId])) {
+                $resellersByServer[$sId] = [];
+            }
+            $resellersByServer[$sId][] = [
+                'resellerId' => $rr['resellerId'],
+                'resellerName' => $rr['resellerName'],
+                'total' => (int)($rr['total'] ?? 0),
+                'active' => (int)($rr['active'] ?? 0),
+                'online' => (int)($rr['online_cnt'] ?? 0),
+                'offline' => (int)($rr['offline_cnt'] ?? 0),
+                'expired' => (int)($rr['expired_cnt'] ?? 0),
+            ];
+        }
+
+        // 4. Build consolidated response
+        $result = [];
+        $handledServerIds = [];
+
+        // First, add all defined routers
+        foreach ($routers as $r) {
+            $sId = (string)$r['serverId'];
+            $handledServerIds[$sId] = true;
+            $stats = $custMap[$sId] ?? null;
+
+            $total = (int)($stats['total'] ?? 0);
+            $active = (int)($stats['active'] ?? 0);
+            $online = (int)($stats['online_cnt'] ?? 0);
+            $offline = (int)($stats['offline_cnt'] ?? 0);
+            $expired = (int)($stats['expired_cnt'] ?? 0);
+            $left = (int)($stats['left_cnt'] ?? 0);
+            $pending = (int)($stats['pending_cnt'] ?? 0);
+
+            $result[] = [
+                'serverId' => $sId,
+                'serverName' => $r['serverName'] ?: 'Router #' . $sId,
+                'serverIp' => $r['serverIp'] ?? null,
+                'deviceStatus' => $r['deviceStatus'] ?? 'active',
+                'total' => $total,
+                'active' => $active,
+                'online' => $online,
+                'offline' => $offline,
+                'expired' => $expired,
+                'left' => $left,
+                'pending' => $pending,
+                'pppoe' => (int)($stats['pppoe'] ?? $total),
+                'hotspot' => 0,
+                'free' => 0,
+                'vip' => 0,
+                'resellers' => $resellersByServer[$sId] ?? [],
+            ];
+        }
+
+        // Next, check for any customers on unassigned/other servers not already handled
+        foreach ($custMap as $sId => $stats) {
+            if (!isset($handledServerIds[$sId]) && (int)($stats['total'] ?? 0) > 0) {
+                $total = (int)($stats['total'] ?? 0);
+                $active = (int)($stats['active'] ?? 0);
+                $online = (int)($stats['online_cnt'] ?? 0);
+                $offline = (int)($stats['offline_cnt'] ?? 0);
+                $expired = (int)($stats['expired_cnt'] ?? 0);
+
+                $result[] = [
+                    'serverId' => $sId === '0' ? null : $sId,
+                    'serverName' => $stats['serverName'] ?: 'Other / Unassigned',
+                    'serverIp' => $stats['serverIp'] ?? null,
+                    'deviceStatus' => $stats['deviceStatus'] ?? 'active',
+                    'total' => $total,
+                    'active' => $active,
+                    'online' => $online,
+                    'offline' => $offline,
+                    'expired' => $expired,
+                    'left' => (int)($stats['left_cnt'] ?? 0),
+                    'pending' => (int)($stats['pending_cnt'] ?? 0),
+                    'pppoe' => (int)($stats['pppoe'] ?? $total),
+                    'hotspot' => 0,
+                    'free' => 0,
+                    'vip' => 0,
+                    'resellers' => $resellersByServer[$sId] ?? [],
+                ];
+            }
+        }
+
+        Response::json($result);
     }
 
     private static function getRealCustomerId(PDO $db, string $id, ?string $tenantId, bool $isSaas): ?string {

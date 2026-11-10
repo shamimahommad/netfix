@@ -91,4 +91,10 @@ CREATE TABLE IF NOT EXISTS `pppoe_connection_logs` (
     KEY `idx_assigned_ip` (`assigned_ip`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 7. Ensure support_phone and logo_url in tenants
+ALTER TABLE `tenants`
+    ADD COLUMN IF NOT EXISTS `support_phone` VARCHAR(50) DEFAULT NULL AFTER `business_phone`,
+    ADD COLUMN IF NOT EXISTS `logo_url` VARCHAR(255) DEFAULT NULL AFTER `business_address`;
+
+
 

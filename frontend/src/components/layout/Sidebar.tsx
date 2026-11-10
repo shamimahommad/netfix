@@ -2,6 +2,18 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useState, useEffect, useCallback } from 'react';
 import { SidebarItem } from './AppLayout';
 import { XIcon } from '../icons/Icons';
+import { useAuthStore } from '@/stores/authStore';
+
+function resolveLogoUrl(url?: string | null): string | null {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url;
+  }
+  if (url.startsWith('/')) {
+    return url;
+  }
+  return `/api/v1/${url}`;
+}
 
 interface SidebarProps {
   items: SidebarItem[];
@@ -187,13 +199,48 @@ export default function Sidebar({ items, isOpen, onClose }: SidebarProps) {
     setOpenMenuLabel(prev => (prev === label ? null : label));
   };
 
+  const user = useAuthStore((s) => s.user);
+  const companyName = user?.tenant_name || 'ISP SaaS';
+  const logoUrl = resolveLogoUrl(user?.tenant_logo);
+  const [logoFailed, setLogoFailed] = useState(false);
+
+  useEffect(() => {
+    setLogoFailed(false);
+  }, [logoUrl]);
+
+  const renderLogo = () => {
+    if (logoUrl && !logoFailed) {
+      return (
+        <div className="flex items-center h-full max-h-12 w-auto overflow-hidden">
+          <img
+            src={logoUrl}
+            alt={companyName}
+            className="h-9 max-h-11 w-auto max-w-[170px] object-contain transition-all"
+            onError={() => setLogoFailed(true)}
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex items-center gap-2.5 min-w-0">
+        <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-blue-700 text-white font-black text-sm flex items-center justify-center shadow-sm shrink-0">
+          {(companyName || 'I')[0].toUpperCase()}
+        </span>
+        <h1 className="text-lg font-bold text-text-primary tracking-tight truncate" title={companyName}>
+          {companyName || 'ISP SaaS'}
+        </h1>
+      </div>
+    );
+  };
+
   return (
     <>
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex lg:flex-col lg:fixed lg:inset-y-0 lg:left-0 lg:z-50 lg:w-64 lg:bg-card lg:border-r lg:border-border">
         {/* Logo */}
-        <div className="flex items-center h-16 px-6 border-b border-border">
-          <h1 className="text-xl font-bold text-text-primary">ISP SaaS</h1>
+        <div className="flex items-center h-16 px-5 border-b border-border">
+          {renderLogo()}
         </div>
 
         {/* Navigation */}
@@ -218,8 +265,8 @@ export default function Sidebar({ items, isOpen, onClose }: SidebarProps) {
         aria-label="Main navigation"
       >
         {/* Mobile Header */}
-        <div className="flex items-center justify-between h-16 px-6 border-b border-border">
-          <h1 className="text-xl font-bold text-text-primary">ISP SaaS</h1>
+        <div className="flex items-center justify-between h-16 px-5 border-b border-border">
+          {renderLogo()}
           <button
             onClick={onClose}
             className="p-2 rounded-button text-text-secondary hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-text-primary transition-colors"

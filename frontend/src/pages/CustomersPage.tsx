@@ -378,6 +378,7 @@ export default function CustomersPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const urlOwnerId = searchParams.get('ownerId') || '';
+  const urlServerId = searchParams.get('serverId') || '';
   const urlStatusFromUrl = searchParams.get('status') || '';
   const [statusFilter, setStatusFilter] = useState(urlStatusFromUrl || '');
   const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
@@ -477,7 +478,7 @@ export default function CustomersPage() {
   useEffect(() => {
     if (type === 'add') return;
     loadCustomers();
-  }, [type, statusFilter, urlOwnerId]);
+  }, [type, statusFilter, urlOwnerId, urlServerId]);
 
   // Fallback debounced server search if total records exceed in-memory limit
   useEffect(() => {
@@ -671,6 +672,10 @@ export default function CustomersPage() {
 
       if (urlOwnerId) {
         filters.ownerId = urlOwnerId;
+      }
+
+      if (urlServerId) {
+        filters.serverId = urlServerId;
       }
 
       if (type === 'expiring-soon') {
