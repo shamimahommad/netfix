@@ -45,6 +45,8 @@ import { useAuthStore } from '@/stores/authStore';
 import PageHeader from '@/components/common/PageHeader';
 
 type BillingAccountRow = {
+  customer_id?: number | string;
+  id?: number | string;
   username?: string;
   bill_amount?: number;
   expiry_date?: string;
@@ -88,7 +90,7 @@ export default function TenantDashboard() {
 
   // Invoices Table State
   const [updateInvoices, setUpdateInvoices] = useState<InvoiceDto[]>([]);
-  const [, setInvoicePage] = useState(1);
+  const [invoicePage, setInvoicePage] = useState(1);
   const [invoiceTotal, setInvoiceTotal] = useState(0);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
   const [loadingMoreInvoices, setLoadingMoreInvoices] = useState(false);
@@ -96,7 +98,7 @@ export default function TenantDashboard() {
 
   // Upcoming Expiry Table State
   const [upcomingExpire, setUpcomingExpire] = useState<BillingAccountRow[]>([]);
-  const [, setUpcomingPage] = useState(1);
+  const [upcomingPage, setUpcomingPage] = useState(1);
   const [upcomingTotal, setUpcomingTotal] = useState(0);
   const [loadingUpcoming, setLoadingUpcoming] = useState(false);
   const [loadingMoreUpcoming, setLoadingMoreUpcoming] = useState(false);
@@ -104,7 +106,7 @@ export default function TenantDashboard() {
 
   // Expired Accounts Table State
   const [expiredList, setExpiredList] = useState<BillingAccountRow[]>([]);
-  const [, setExpiredPage] = useState(1);
+  const [expiredPage, setExpiredPage] = useState(1);
   const [expiredTotal, setExpiredTotal] = useState(0);
   const [loadingExpired, setLoadingExpired] = useState(false);
   const [loadingMoreExpired, setLoadingMoreExpired] = useState(false);
@@ -161,26 +163,25 @@ export default function TenantDashboard() {
     if (loadingMoreInvoices || updateInvoices.length >= invoiceTotal) return;
     setLoadingMoreInvoices(true);
     try {
-      const offset = updateInvoices.length;
-      const want = Math.min(LOAD_MORE_PAGE_SIZE, invoiceTotal - offset);
-      const pages: { page: number; limit: number }[] = [];
-      let remaining = want;
-      let skip = offset;
-      while (remaining > 0) {
-        const limit = Math.min(8, remaining);
-        const page = Math.floor(skip / limit) + 1;
-        pages.push({ page, limit });
-        skip += limit;
-        remaining -= limit;
+      const nextPage = invoicePage + 1;
+      const res = await billingService.getTenantInvoices({
+        status: 'paid',
+        limit: INITIAL_PAGE_SIZE,
+        page: nextPage,
+      });
+      const list = res.data ?? [];
+      const total = res.meta?.total ?? invoiceTotal;
+      setInvoicePage(nextPage);
+      if (list.length === 0) {
+        setInvoiceTotal(updateInvoices.length);
+      } else {
+        setUpdateInvoices((prev) => {
+          const existingIds = new Set(prev.map((i) => i.invoiceId));
+          const newItems = list.filter((i) => !existingIds.has(i.invoiceId));
+          return [...prev, ...newItems];
+        });
+        setInvoiceTotal(total);
       }
-      const results = await Promise.all(
-        pages.map(({ page, limit }) => billingService.getTenantInvoices({ status: 'paid', limit, page })),
-      );
-      const list = (results.flatMap((r) => r.data ?? []) as InvoiceDto[]).slice(0, want);
-      const total = results[0]?.meta?.total ?? invoiceTotal;
-      setUpdateInvoices((prev) => [...prev, ...list]);
-      setInvoicePage(Math.floor((offset + want) / 8) + 1);
-      setInvoiceTotal(total);
     } catch {
       // keep existing
     } finally {
@@ -216,26 +217,24 @@ export default function TenantDashboard() {
     if (loadingMoreUpcoming || upcomingExpire.length >= upcomingTotal) return;
     setLoadingMoreUpcoming(true);
     try {
-      const offset = upcomingExpire.length;
-      const want = Math.min(LOAD_MORE_PAGE_SIZE, upcomingTotal - offset);
-      const pages: { page: number; limit: number }[] = [];
-      let remaining = want;
-      let skip = offset;
-      while (remaining > 0) {
-        const limit = Math.min(8, remaining);
-        const page = Math.floor(skip / limit) + 1;
-        pages.push({ page, limit });
-        skip += limit;
-        remaining -= limit;
+      const nextPage = upcomingPage + 1;
+      const res = await billingService.getBillingAccounts('expire-7-days', {
+        limit: INITIAL_PAGE_SIZE,
+        page: nextPage,
+      });
+      const list = (res.data ?? []) as BillingAccountRow[];
+      const total = res.meta?.total ?? upcomingTotal;
+      setUpcomingPage(nextPage);
+      if (list.length === 0) {
+        setUpcomingTotal(upcomingExpire.length);
+      } else {
+        setUpcomingExpire((prev) => {
+          const existingIds = new Set(prev.map((i) => i.customer_id || i.username));
+          const newItems = list.filter((i) => !existingIds.has(i.customer_id || i.username));
+          return [...prev, ...newItems];
+        });
+        setUpcomingTotal(total);
       }
-      const results = await Promise.all(
-        pages.map(({ page, limit }) => billingService.getBillingAccounts('expire-7-days', { limit, page })),
-      );
-      const list = (results.flatMap((r) => r.data ?? []) as BillingAccountRow[]).slice(0, want);
-      const total = results[0]?.meta?.total ?? upcomingTotal;
-      setUpcomingExpire((prev) => [...prev, ...list]);
-      setUpcomingPage(Math.floor((offset + want) / 8) + 1);
-      setUpcomingTotal(total);
     } catch {
       // keep existing
     } finally {
@@ -271,26 +270,24 @@ export default function TenantDashboard() {
     if (loadingMoreExpired || expiredList.length >= expiredTotal) return;
     setLoadingMoreExpired(true);
     try {
-      const offset = expiredList.length;
-      const want = Math.min(LOAD_MORE_PAGE_SIZE, expiredTotal - offset);
-      const pages: { page: number; limit: number }[] = [];
-      let remaining = want;
-      let skip = offset;
-      while (remaining > 0) {
-        const limit = Math.min(8, remaining);
-        const page = Math.floor(skip / limit) + 1;
-        pages.push({ page, limit });
-        skip += limit;
-        remaining -= limit;
+      const nextPage = expiredPage + 1;
+      const res = await billingService.getBillingAccounts('expired', {
+        limit: INITIAL_PAGE_SIZE,
+        page: nextPage,
+      });
+      const list = (res.data ?? []) as BillingAccountRow[];
+      const total = res.meta?.total ?? expiredTotal;
+      setExpiredPage(nextPage);
+      if (list.length === 0) {
+        setExpiredTotal(expiredList.length);
+      } else {
+        setExpiredList((prev) => {
+          const existingIds = new Set(prev.map((i) => i.customer_id || i.username));
+          const newItems = list.filter((i) => !existingIds.has(i.customer_id || i.username));
+          return [...prev, ...newItems];
+        });
+        setExpiredTotal(total);
       }
-      const results = await Promise.all(
-        pages.map(({ page, limit }) => billingService.getBillingAccounts('expired', { limit, page })),
-      );
-      const list = (results.flatMap((r) => r.data ?? []) as BillingAccountRow[]).slice(0, want);
-      const total = results[0]?.meta?.total ?? expiredTotal;
-      setExpiredList((prev) => [...prev, ...list]);
-      setExpiredPage(Math.floor((offset + want) / 8) + 1);
-      setExpiredTotal(total);
     } catch {
       // keep existing
     } finally {
@@ -865,7 +862,10 @@ export default function TenantDashboard() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-[260px] custom-scrollbar no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <div
+            className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-[260px] no-scrollbar scrollbar-hide [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          >
             {isLoading ? (
               <div className="space-y-2 py-4">
                 {[1, 2, 3].map((n) => (
@@ -949,7 +949,10 @@ export default function TenantDashboard() {
 
           {!collapsedInvoices && (
             <div className="flex-1 flex flex-col min-h-0">
-              <div className="flex-1 overflow-y-auto max-h-[250px] custom-scrollbar no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <div
+                className="flex-1 overflow-y-auto max-h-[250px] no-scrollbar scrollbar-hide [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+              >
                 {loadingInvoices ? (
                   <p className="text-xs text-slate-400 py-6 text-center">Loading invoices...</p>
                 ) : (
@@ -967,8 +970,15 @@ export default function TenantDashboard() {
                           <td className="py-1.5">
                             <button
                               type="button"
-                              onClick={() => navigate('/dashboard/report/invoices')}
-                              className="text-blue-600 dark:text-blue-400 font-medium hover:underline truncate max-w-[80px] block"
+                              onClick={() => {
+                                if (inv.customerId) {
+                                  navigate(`/dashboard/customers/view/${inv.customerId}/invoices`, { state: { invoiceId: inv.invoiceId } });
+                                } else {
+                                  navigate('/dashboard/report/invoices');
+                                }
+                              }}
+                              className="text-blue-600 dark:text-blue-400 font-medium hover:underline truncate max-w-[80px] block text-left"
+                              title={`View invoice ${inv.invoiceNumber}`}
                             >
                               {formatInvoiceIdDisplay(inv.invoiceNumber)}
                             </button>
@@ -976,8 +986,12 @@ export default function TenantDashboard() {
                           <td className="py-1.5">
                             <button
                               type="button"
-                              onClick={() => inv.customerId && navigate(`/dashboard/customers/${inv.customerId}`)}
-                              className="text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 truncate max-w-[120px] sm:max-w-[140px] block font-medium"
+                              onClick={() => {
+                                if (inv.customerId) {
+                                  navigate(`/dashboard/customers/view/${inv.customerId}`);
+                                }
+                              }}
+                              className="text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:underline truncate max-w-[120px] sm:max-w-[140px] block font-medium text-left"
                               title={inv.username || inv.customerName || inv.customerCode || ''}
                             >
                               {inv.username || inv.customerName || inv.customerCode || '—'}
@@ -1056,7 +1070,10 @@ export default function TenantDashboard() {
 
           {!collapsedUpcoming && (
             <div className="flex-1 flex flex-col min-h-0">
-              <div className="flex-1 overflow-y-auto max-h-[250px] custom-scrollbar no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <div
+                className="flex-1 overflow-y-auto max-h-[250px] no-scrollbar scrollbar-hide [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+              >
                 {loadingUpcoming ? (
                   <p className="text-xs text-slate-400 py-6 text-center">Loading accounts...</p>
                 ) : (
@@ -1071,8 +1088,19 @@ export default function TenantDashboard() {
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
                       {upcomingExpire.map((row, i) => (
                         <tr key={i} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
-                          <td className="py-1.5 font-medium text-slate-800 dark:text-slate-200 truncate max-w-[80px]">
-                            {row.username ?? '—'}
+                          <td className="py-1.5 font-medium truncate max-w-[120px]">
+                            {row.customer_id ? (
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/dashboard/customers/view/${row.customer_id}`)}
+                                className="text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline truncate block text-left"
+                                title={row.username ?? ''}
+                              >
+                                {row.username ?? '—'}
+                              </button>
+                            ) : (
+                              <span className="text-slate-800 dark:text-slate-200">{row.username ?? '—'}</span>
+                            )}
                           </td>
                           <td className="py-1.5 text-slate-600 dark:text-slate-400">
                             {fmtMoney(row.bill_amount)}
@@ -1152,7 +1180,10 @@ export default function TenantDashboard() {
 
           {!collapsedExpired && (
             <div className="flex-1 flex flex-col min-h-0">
-              <div className="flex-1 overflow-y-auto max-h-[250px] custom-scrollbar no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <div
+                className="flex-1 overflow-y-auto max-h-[250px] no-scrollbar scrollbar-hide [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+              >
                 {loadingExpired ? (
                   <p className="text-xs text-slate-400 py-6 text-center">Loading accounts...</p>
                 ) : (
@@ -1167,8 +1198,19 @@ export default function TenantDashboard() {
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
                       {expiredList.map((row, i) => (
                         <tr key={i} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
-                          <td className="py-1.5 font-medium text-slate-800 dark:text-slate-200 truncate max-w-[80px]">
-                            {row.username ?? '—'}
+                          <td className="py-1.5 font-medium truncate max-w-[120px]">
+                            {row.customer_id ? (
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/dashboard/customers/view/${row.customer_id}`)}
+                                className="text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:underline truncate block text-left"
+                                title={row.username ?? ''}
+                              >
+                                {row.username ?? '—'}
+                              </button>
+                            ) : (
+                              <span className="text-slate-800 dark:text-slate-200">{row.username ?? '—'}</span>
+                            )}
                           </td>
                           <td className="py-1.5 text-slate-600 dark:text-slate-400">
                             {fmtMoney(row.bill_amount)}
