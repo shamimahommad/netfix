@@ -42,6 +42,17 @@ export interface Customer {
   fullName?: string;
   connectionDate?: string | null;
   createdAt?: string;
+  // Downward hierarchy ownership & role fields
+  owner_id?: string | number | null;
+  ownerId?: string | number | null;
+  owner_name?: string | null;
+  ownerName?: string | null;
+  owner_role?: string | null;
+  ownerRole?: string | null;
+  owner_path?: string | null;
+  ownerPath?: string | null;
+  is_direct?: boolean;
+  isDirect?: boolean;
 }
 
 export interface CustomerDetail {
@@ -118,6 +129,9 @@ export interface CustomerDetailResponse {
       expiryDate: string | null;
       lastPaymentDate: string | null;
       connectedBy: string | null;
+      connectedByRole?: string | null;
+      connectedById?: string | null;
+      connectedByUsername?: string | null;
       location: string | null;
     };
     onu: {

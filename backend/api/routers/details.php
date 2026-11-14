@@ -81,6 +81,17 @@ if (!is_dir($cacheDir)) {
 $touchFile = $cacheDir . '/router_' . $routerId . '_touch.json';
 $cacheFile = $cacheDir . '/router_' . $routerId . '_live.json';
 $hbFile    = $cacheDir . '/router_' . $routerId . '_worker_hb.txt';
+$errFile   = $cacheDir . '/router_' . $routerId . '_error.json';
+
+// 0. If recent connection error was cached (< 15 seconds), return instantly without stalling
+if (file_exists($errFile) && (time() - filemtime($errFile) <= 15)) {
+    $errContent = @file_get_contents($errFile);
+    if (!empty($errContent)) {
+        header('X-MikroTik-Session: Error-Cached');
+        echo $errContent;
+        exit;
+    }
+}
 
 // 1. Record frontend heartbeat touch
 file_put_contents($touchFile, json_encode([
@@ -112,8 +123,8 @@ if (file_exists($cacheFile) && (time() - filemtime($cacheFile) <= 4)) {
     }
 }
 
-// 4. If worker just spawned, wait briefly (up to 800ms) for first live frame
-for ($i = 0; $i < 8; $i++) {
+// 4. If worker just spawned, wait briefly (up to 200ms) for first live frame
+for ($i = 0; $i < 2; $i++) {
     usleep(100000); // 100ms
     if (file_exists($cacheFile) && (time() - filemtime($cacheFile) <= 4)) {
         $content = @file_get_contents($cacheFile);
@@ -125,17 +136,19 @@ for ($i = 0; $i < 8; $i++) {
     }
 }
 
-// 5. Fallback: Direct query if worker hasn't written yet
+// 5. Fallback: Fast direct query if worker hasn't written yet (max 2s timeout)
 require_once __DIR__ . '/../../lib/MikrotikSyncService.php';
-$api = MikrotikSyncService::connect($router, 4);
+$api = MikrotikSyncService::connect($router, 2);
 
 if (!$api) {
-    echo json_encode([
+    $offlinePayload = json_encode([
         'success' => false,
         'status'  => 'offline',
         'message' => 'Router unreachable or API disabled',
         'target'  => "{$ip}:{$port}"
     ]);
+    @file_put_contents($errFile, $offlinePayload);
+    echo $offlinePayload;
     exit;
 }
 

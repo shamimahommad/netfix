@@ -319,6 +319,11 @@ export default function ResellerPage() {
     opening_balance: 0,
   });
   const [showAddPassword, setShowAddPassword] = useState(false);
+  const [showEditPassword, setShowEditPassword] = useState(false);
+  const [resetPasswordUser, setResetPasswordUser] = useState<Reseller | null>(null);
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [userPanelUser, setUserPanelUser] = useState<Reseller | null>(null);
   const [addBalanceUserId, setAddBalanceUserId] = useState<string | null>(null);
@@ -416,9 +421,9 @@ export default function ResellerPage() {
     }
     const serverId =
       addForm.role !== 'admin'
-        ? addForm.serverId || (isAdmin ? undefined : servers[0]?.id)
+        ? (isAdmin ? addForm.serverId : (user?.assigned_server_id || servers[0]?.id))
         : undefined;
-    if (addForm.role !== 'admin' && !serverId) {
+    if (isAdmin && addForm.role !== 'admin' && !serverId) {
       toast.error('Server is required for non-Admin roles');
       return;
     }
@@ -457,25 +462,51 @@ export default function ResellerPage() {
     if (!editId) return;
     setSubmitting(true);
     try {
+      const pwd = editForm.password ? editForm.password.trim() : undefined;
       await resellerService.update(editId, {
-        name: editForm.name,
-        username: editForm.username,
-        password: editForm.password,
-        phone: editForm.phone,
+        name: editForm.name?.trim(),
+        username: editForm.username?.trim(),
+        password: pwd || undefined,
+        phone: editForm.phone?.trim(),
         serverId: editForm.serverId,
         role: editForm.role,
         status: editForm.status as 'active' | 'suspended' | undefined,
         credit_limit: editForm.credit_limit,
       });
-      toast.success('User updated');
+      toast.success(pwd ? 'User & password updated successfully' : 'User updated successfully');
       setEditId(null);
       setEditForm({});
+      setShowEditPassword(false);
       setUserPanelUser(null);
       loadList();
     } catch (e: any) {
       toast.error(e?.message || 'Update failed');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDirectResetPassword = async () => {
+    if (!resetPasswordUser || !resetNewPassword.trim()) {
+      toast.error('Please enter a new password');
+      return;
+    }
+    if (resetNewPassword.trim().length < 4) {
+      toast.error('Password must be at least 4 characters');
+      return;
+    }
+    setIsResettingPassword(true);
+    try {
+      const res = await resellerService.resetPassword(resetPasswordUser.userId, resetNewPassword.trim());
+      toast.success(res.message || `Password reset successfully for ${resetPasswordUser.username}`);
+      setResetPasswordUser(null);
+      setResetNewPassword('');
+      setShowResetPassword(false);
+      loadList();
+    } catch (e: any) {
+      toast.error(e?.message || 'Password reset failed');
+    } finally {
+      setIsResettingPassword(false);
     }
   };
 
@@ -1031,6 +1062,21 @@ export default function ResellerPage() {
               </button>
               <button
                 type="button"
+                onClick={() => {
+                  setResetPasswordUser(userPanelUser);
+                  setResetNewPassword('');
+                  setShowResetPassword(false);
+                  setUserPanelUser(null);
+                }}
+                disabled={impersonated}
+                title={impersonated ? 'Disabled during impersonation' : undefined}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium rounded-xl bg-white dark:bg-slate-800/80 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 border-l-4 border-amber-400 dark:border-amber-500 shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400"><Lock className="w-4 h-4" /></span>
+                Reset Password
+              </button>
+              <button
+                type="button"
                 onClick={() => { handleDelete(userPanelUser.userId); setUserPanelUser(null); }}
                 disabled={impersonated}
                 title={impersonated ? 'Disabled during impersonation' : undefined}
@@ -1441,27 +1487,51 @@ export default function ResellerPage() {
                   {/* Server (POP) */}
                   <div className="sm:col-span-2">
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      Server (POP Router) {addForm.role !== 'admin' ? <span className="text-rose-500">*</span> : <span className="text-slate-400 text-[11px] font-normal">(Optional for Admin)</span>}
+                      Server (POP Router) {isAdmin ? (addForm.role !== 'admin' ? <span className="text-rose-500">*</span> : <span className="text-slate-400 text-[11px] font-normal">(Optional for Admin)</span>) : null}
                     </label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                        <Server className="w-4 h-4" />
-                      </span>
-                      <select
-                        value={addForm.serverId ?? ''}
-                        onChange={(e) => setAddForm((f) => ({ ...f, serverId: e.target.value || undefined }))}
-                        className="w-full pl-9 pr-8 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/60 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
-                      >
-                        <option value="">{addForm.role === 'admin' ? '— All Routers / Global Access —' : '— Select Assigned MikroTik / POP Router —'}</option>
-                        {servers.map((s) => (
-                          <option key={s.id} value={s.id}>{s.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    {addForm.role !== 'admin' && (
-                      <span className="text-[11px] text-amber-600 dark:text-amber-400 mt-1 block">
-                        Assigned router controls customer creation & PPPoE authentication for this reseller.
-                      </span>
+                    {isAdmin ? (
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                          <Server className="w-4 h-4" />
+                        </span>
+                        <select
+                          value={addForm.serverId ?? ''}
+                          onChange={(e) => setAddForm((f) => ({ ...f, serverId: e.target.value || undefined }))}
+                          className="w-full pl-9 pr-8 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/60 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                        >
+                          <option value="">{addForm.role === 'admin' ? '— All Routers / Global Access —' : '— Select Assigned MikroTik / POP Router —'}</option>
+                          {servers.map((s) => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                        {addForm.role !== 'admin' && (
+                          <span className="text-[11px] text-amber-600 dark:text-amber-400 mt-1 block">
+                            Assigned router controls customer creation & PPPoE authentication for this reseller.
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <div className="relative flex items-center">
+                          <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-blue-600 dark:text-blue-400">
+                            <Server className="w-4 h-4" />
+                          </span>
+                          <input
+                            type="text"
+                            readOnly
+                            disabled
+                            value={user?.assigned_server_name || servers[0]?.name || 'Inherited Assigned Server'}
+                            className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100/70 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 cursor-not-allowed font-medium text-sm"
+                          />
+                          <span className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-amber-500">
+                            <Lock className="w-4 h-4" />
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                          <Lock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                          <span>Server selection is locked to your parent reseller's assigned server. Downlines automatically operate under this server.</span>
+                        </p>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1611,13 +1681,22 @@ export default function ResellerPage() {
               </div>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Password (leave blank to keep)</label>
-                <input
-                  type="password"
-                  value={editForm.password ?? ''}
-                  onChange={(e) => setEditForm((f) => ({ ...f, password: e.target.value }))}
-                  placeholder="New password"
-                  className="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-4 py-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-400/60 focus:border-sky-400 dark:focus:ring-sky-500/50 dark:focus:border-sky-500 transition-all placeholder-slate-400"
-                />
+                <div className="relative">
+                  <input
+                    type={showEditPassword ? 'text' : 'password'}
+                    value={editForm.password ?? ''}
+                    onChange={(e) => setEditForm((f) => ({ ...f, password: e.target.value }))}
+                    placeholder="New password (leave blank to keep)"
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 pl-4 pr-10 py-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-400/60 focus:border-sky-400 dark:focus:ring-sky-500/50 dark:focus:border-sky-500 transition-all placeholder-slate-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowEditPassword((v) => !v)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                  >
+                    {showEditPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Phone</label>
@@ -1629,16 +1708,31 @@ export default function ResellerPage() {
               </div>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Server (POP)</label>
-                <select
-                  value={editForm.serverId ?? ''}
-                  onChange={(e) => setEditForm((f) => ({ ...f, serverId: e.target.value || undefined }))}
-                  className="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-4 py-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-400/60 focus:border-sky-400 dark:focus:ring-sky-500/50 dark:focus:border-sky-500 transition-all"
-                >
-                  <option value="">— None —</option>
-                  {servers.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
+                {isAdmin ? (
+                  <select
+                    value={editForm.serverId ?? ''}
+                    onChange={(e) => setEditForm((f) => ({ ...f, serverId: e.target.value || undefined }))}
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-4 py-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-400/60 focus:border-sky-400 dark:focus:ring-sky-500/50 dark:focus:border-sky-500 transition-all"
+                  >
+                    <option value="">— None —</option>
+                    {servers.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="relative flex items-center">
+                    <input
+                      type="text"
+                      readOnly
+                      disabled
+                      value={servers.find((s) => s.id === editForm.serverId)?.name || 'Assigned Server (Locked)'}
+                      className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100/70 dark:bg-slate-800/50 px-4 py-2.5 text-slate-600 dark:text-slate-400 cursor-not-allowed text-sm font-medium pr-10"
+                    />
+                    <span className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-amber-500">
+                      <Lock className="w-4 h-4" />
+                    </span>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Role</label>
@@ -1698,6 +1792,120 @@ export default function ResellerPage() {
                     Update
                   </span>
                 ) : 'Update'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dedicated Reset Password Modal */}
+      {resetPasswordUser && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40 backdrop-blur-md"
+          onClick={() => !isResettingPassword && setResetPasswordUser(null)}
+        >
+          <div
+            className="bg-white dark:bg-slate-800/95 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col border border-white/20 dark:border-slate-600/50"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800 dark:text-white">Reset Password</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{resetPasswordUser.name} ({resetPasswordUser.username})</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isResettingPassword && setResetPasswordUser(null)}
+                className="p-2 rounded-xl text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-700/60 transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 bg-slate-50/20 dark:bg-slate-900/20">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">Username (Login ID)</label>
+                <div className="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100/70 dark:bg-slate-800/50 font-mono text-sm text-slate-800 dark:text-slate-200 font-semibold select-all">
+                  {resetPasswordUser.username}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    New Password <span className="text-rose-500">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const gen = 'NetFix@' + Math.floor(1000 + Math.random() * 9000);
+                      setResetNewPassword(gen);
+                      setShowResetPassword(true);
+                    }}
+                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                  >
+                    Generate Random
+                  </button>
+                </div>
+                <div className="relative">
+                  <input
+                    type={showResetPassword ? 'text' : 'password'}
+                    value={resetNewPassword}
+                    onChange={(e) => setResetNewPassword(e.target.value)}
+                    placeholder="Enter new login password"
+                    className="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 pl-4 pr-10 py-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-400/60 focus:border-sky-400 dark:focus:ring-sky-500/50 dark:focus:border-sky-500 transition-all placeholder-slate-400 font-mono text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetPassword((v) => !v)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                  >
+                    {showResetPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {resetNewPassword && (
+                <div className="p-3 rounded-xl bg-blue-50/70 dark:bg-blue-900/20 border border-blue-200/60 dark:border-blue-800/40 flex items-center justify-between">
+                  <div className="text-xs text-blue-800 dark:text-blue-200">
+                    <span className="font-semibold">Credentials:</span> {resetPasswordUser.username} / {resetNewPassword}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`Username: ${resetPasswordUser.username}\nPassword: ${resetNewPassword}`);
+                      toast.success('Credentials copied to clipboard');
+                    }}
+                    className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                  >
+                    Copy
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-slate-200 dark:border-slate-700 shrink-0 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setResetPasswordUser(null)}
+                disabled={isResettingPassword}
+                className="flex-1 py-2.5 rounded-xl font-semibold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDirectResetPassword}
+                disabled={isResettingPassword || !resetNewPassword.trim()}
+                className="flex-1 py-2.5 rounded-xl font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors disabled:opacity-50 shadow-sm"
+              >
+                {isResettingPassword ? 'Saving...' : 'Save Password'}
               </button>
             </div>
           </div>

@@ -19,6 +19,7 @@ import { openChangeExpiryDateModal } from '@/lib/changeExpiryDateModal';
 import { openLeftCustomerModal } from '@/lib/leftCustomerModal';
 import { openDeleteCustomerModal } from '@/lib/deleteCustomerModal';
 import ModernCheckbox from '@/components/common/ModernCheckbox';
+import { useAuthStore } from '@/stores/authStore';
 
 const statusOptions = [
   { value: '', label: 'All Status' },
@@ -84,6 +85,8 @@ export default function CustomersListPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const toast = useToastContext();
+  const { user } = useAuthStore();
+  const isAdmin = user?.role_code === 'admin' || user?.role_code === 'isp_admin';
   const { selectedTenant } = useTenantStore();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
@@ -248,7 +251,7 @@ export default function CustomersListPage() {
     'Change Area',
     'Change Customer Type',
     'Change Billing Type',
-    'Change Server',
+    ...(isAdmin ? ['Change Server'] : []),
     'Change Package',
     'Advance Renew',
     'Change Expiry Date',
@@ -392,6 +395,10 @@ export default function CustomersListPage() {
     }
 
     if (action === 'Change Server') {
+      if (!isAdmin) {
+        toast.error('Only ISP Administrators can change customer server assignment.');
+        return;
+      }
       const serverId = await openChangeServerModal();
       if (!serverId) return;
       const ids = Array.from(selectedCustomers);

@@ -1,4 +1,5 @@
 import AppLayout, { SidebarItem } from './AppLayout';
+import { Package } from 'lucide-react';
 import {
   DashboardIcon,
   UsersIcon,
@@ -20,14 +21,19 @@ const sidebarItems: SidebarItem[] = [
     path: '/saas/tenants',
   },
   {
-    label: 'Customers',
-    icon: <CustomersIcon />,
-    path: '/saas/customers',
+    label: 'Packages',
+    icon: <Package className="w-5 h-5 stroke-[1.8]" />,
+    path: '/saas/packages',
   },
   {
     label: 'Billing',
     icon: <BillingIcon />,
     path: '/saas/billing',
+  },
+  {
+    label: 'Customers',
+    icon: <CustomersIcon />,
+    path: '/saas/customers',
   },
   {
     label: 'Network',

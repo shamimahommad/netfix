@@ -46,9 +46,79 @@ export interface DashboardCharts {
   ticketSolved: number;
 }
 
+export interface SaaSDashboardOverview {
+  totalTenants: number;
+  activeTenants: number;
+  trialTenants: number;
+  suspendedTenants: number;
+  expiredTenants: number;
+  newTenantsThisMonth: number;
+  totalSubscribers: number;
+  activeSubscribers: number;
+  suspendedSubscribers: number;
+  expiredSubscribers: number;
+  newSubscribersThisMonth: number;
+  totalRouters: number;
+  totalOlts: number;
+  totalDevices: number;
+  activeDevices: number;
+  revenueThisMonth: number;
+  revenueLastMonth: number;
+  totalTransactions: number;
+  totalWalletBalance: number;
+}
+
+export interface SaaSTenantItem {
+  tenantId: string;
+  tenantCode: string;
+  tenantName: string;
+  status: 'active' | 'suspended' | 'trial' | 'expired' | 'terminated';
+  countryCode: string;
+  businessEmail: string;
+  businessPhone: string | null;
+  createdAt: string;
+  totalCustomers: number;
+  totalRouters: number;
+  totalOlts: number;
+  maxCustomers: number;
+  maxRouters: number;
+  maxOlts: number;
+  walletBalance: number;
+}
+
+export interface SaaSPlatformHealth {
+  phpVersion: string;
+  memoryUsage: string;
+  serverTime: string;
+  apiPort: number;
+  dbStatus: string;
+  telemetryStatus: string;
+}
+
+export interface SaaSDashboardResponse {
+  success: boolean;
+  overview: SaaSDashboardOverview;
+  tenants: SaaSTenantItem[];
+  recentLogs: Array<{
+    logId: number;
+    username: string;
+    email: string;
+    ip: string;
+    browser: string;
+    os: string;
+    createdAt: string;
+  }>;
+  health: SaaSPlatformHealth;
+}
+
 export const dashboardService = {
   async getStats(): Promise<DashboardStats> {
     const response = await api.get<DashboardStats>('/dashboard/stats');
+    return response.data;
+  },
+
+  async getSaaSStats(): Promise<SaaSDashboardResponse> {
+    const response = await api.get<SaaSDashboardResponse>('/dashboard/saas');
     return response.data;
   },
 

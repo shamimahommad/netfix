@@ -43,6 +43,7 @@ Thumbs.db
 # Temporary cache
 .eslintcache
 .turbo/
+cache/
 
 # Uploads
 backend/uploads/logos/*

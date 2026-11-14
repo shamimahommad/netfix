@@ -58,10 +58,14 @@ class CustomersController {
             $params['s4'] = $search;
         }
 
-        // Filter: ownerId (Reseller / Agent filter)
+        // Filter: ownerId (Reseller / Agent filter) with IDOR Protection
         if (!empty($_GET['ownerId'])) {
+            $targetOwnerId = (int)$_GET['ownerId'];
+            if (!HierarchySecurityService::canAccessUser((int)$user['user_id'], $targetOwnerId)) {
+                Response::error("Access Denied: You do not have permission to filter by user #{$targetOwnerId}", 403);
+            }
             $where[] = "c.owner_id = :ownerId";
-            $params['ownerId'] = $_GET['ownerId'];
+            $params['ownerId'] = $targetOwnerId;
         }
 
         // Filter: serverId (network_device_id)
@@ -84,13 +88,11 @@ class CustomersController {
         }
 
         // Strict Downward-Only Access Control via Materialized Path
-        $callerRole = strtolower($user['role'] ?? '');
-        $isLevel0 = in_array($callerRole, ['admin', 'isp_admin', 'manager', 'tenant_admin', 'saas_admin', 'super_admin'], true);
-        if (!$isLevel0) {
-            $userPath = $user['hierarchy_path'] ?? "/{$user['user_id']}/";
-            $where[] = "(c.owner_id = :user_owner_id OR c.owner_path LIKE :user_path_like)";
-            $params['user_owner_id'] = $user['user_id'];
-            $params['user_path_like'] = rtrim($userPath, '/') . '/%';
+        $callerId = (int)$user['user_id'];
+        $scope = HierarchySecurityService::getDownwardScopeClause($callerId, null, 'c', 'u');
+        if (!empty($scope['whereSql'])) {
+            $where[] = $scope['whereSql'];
+            $params = array_merge($params, $scope['params']);
         }
 
         $whereSql = implode(' AND ', $where);
@@ -98,6 +100,7 @@ class CustomersController {
         // Count total
         $countStmt = $db->prepare("SELECT COUNT(DISTINCT c.customer_id) as total 
             FROM customers c 
+            LEFT JOIN users u ON u.user_id = c.owner_id
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id 
             LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status = 'active'
             WHERE {$whereSql}");
@@ -116,6 +119,8 @@ class CustomersController {
             c.installation_address,
             c.connection_date,
             c.created_at,
+            c.owner_id,
+            c.owner_path,
             na.username,
             na.password,
             COALESCE(cs.protocol, na.protocol, ap.protocol, 'pppoe') as protocol,
@@ -141,8 +146,10 @@ class CustomersController {
             nd.device_name as server_name,
             sa.name as area_name,
             sub.name as sub_area_name,
-            u.first_name as owner_name,
-            u.role as owner_role
+            u.username as owner_username,
+            u.first_name as owner_first_name,
+            u.last_name as owner_last_name,
+            COALESCE(u.role, c.owner_role, 'isp_admin') as owner_role
             FROM customers c
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
             LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status = 'active'
@@ -216,7 +223,7 @@ class CustomersController {
         }
 
         $now = time();
-        $formatted = array_map(function($row) use ($now) {
+        $formatted = array_map(function($row) use ($now, $callerId) {
             $expiresAtTs = !empty($row['expiry_date']) ? strtotime($row['expiry_date']) : null;
             $dueAmount = (float)($row['balance_due'] ?? 0);
 
@@ -243,6 +250,9 @@ class CustomersController {
             }
 
             $balance = $dueAmount > 0 ? -$dueAmount : 0.0;
+            $ownerFullName = trim(($row['owner_first_name'] ?? '') . ' ' . ($row['owner_last_name'] ?? ''));
+            $ownerDisplayName = $ownerFullName ?: ($row['owner_username'] ?? 'ISP Admin');
+            $isDirect = ((int)($row['owner_id'] ?? 0) === $callerId);
 
             return [
                 'customer_id' => (string)$row['customer_id'],
@@ -292,7 +302,16 @@ class CustomersController {
                 'server_name' => $row['server_name'],
                 'area_name' => $row['area_name'],
                 'sub_area_name' => $row['sub_area_name'],
-                'owner_name' => $row['owner_name'],
+                'owner_id' => $row['owner_id'] ? (string)$row['owner_id'] : null,
+                'ownerId' => $row['owner_id'] ? (string)$row['owner_id'] : null,
+                'owner_name' => $ownerDisplayName,
+                'ownerName' => $ownerDisplayName,
+                'owner_role' => $row['owner_role'] ?? 'isp_admin',
+                'ownerRole' => $row['owner_role'] ?? 'isp_admin',
+                'owner_path' => $row['owner_path'] ?? '',
+                'ownerPath' => $row['owner_path'] ?? '',
+                'is_direct' => $isDirect,
+                'isDirect' => $isDirect,
                 'created_at' => $row['created_at'],
                 'createdAt' => $row['created_at'],
             ];
@@ -337,10 +356,7 @@ class CustomersController {
         }
 
         // IDOR Protection: Enforce Downward-Only Access
-        if (!HierarchySecurityService::canAccessCustomer((int)$user['user_id'], (int)$customer['customer_id'], (int)$customer['tenant_id'])) {
-            Response::error('Access denied: You do not have permission to view this customer record.', 403);
-            return;
-        }
+        HierarchySecurityService::canViewCustomer((int)$user['user_id'], (int)$customer['customer_id'], (int)$customer['tenant_id']);
 
         $realCid = $customer['customer_id'];
         $customerTenantId = $customer['tenant_id'];
@@ -468,17 +484,66 @@ class CustomersController {
             $onuData['onuVendor'] = MacVendorService::resolveVendor($onuData['onuMac'], $db);
         }
 
-        // Resolve Connected By / Creator User Name
-        $connectedByName = 'Admin';
-        $creatorId = $customer['created_by'] ?? $customer['owner_id'] ?? null;
-        if (!empty($creatorId)) {
-            $stmtCreator = $db->prepare("SELECT first_name, last_name, username, role FROM users WHERE user_id = :uid LIMIT 1");
-            $stmtCreator->execute(['uid' => $creatorId]);
-            $creator = $stmtCreator->fetch();
-            if ($creator) {
-                $creatorFullName = trim(($creator['first_name'] ?? '') . ' ' . ($creator['last_name'] ?? ''));
-                $connectedByName = $creatorFullName ?: ($creator['username'] ?: 'Admin');
+        // Resolve Connected By: Strictly show the lowest/last reseller or agent under whom this customer is
+        $targetConnectedUser = null;
+
+        // 1. Check direct owner_id first if owner is a reseller/agent
+        $candidateOwnerId = !empty($customer['owner_id']) ? (int)$customer['owner_id'] : null;
+        if ($candidateOwnerId) {
+            $stmtOwner = $db->prepare("SELECT user_id, first_name, last_name, username, role FROM users WHERE user_id = :uid LIMIT 1");
+            $stmtOwner->execute(['uid' => $candidateOwnerId]);
+            $ownerRow = $stmtOwner->fetch(PDO::FETCH_ASSOC);
+            if ($ownerRow && in_array(strtolower($ownerRow['role']), ['agent', 'dealer', 'sub_reseller', 'reseller'], true)) {
+                $targetConnectedUser = $ownerRow;
             }
+        }
+
+        // 2. If direct owner is not a reseller/agent, inspect owner_path from right to left (deepest / leaf downline first)
+        if (!$targetConnectedUser && !empty($customer['owner_path'])) {
+            $pathIds = array_filter(array_map('intval', explode('/', trim($customer['owner_path'], '/'))));
+            $pathIdsReversed = array_reverse($pathIds);
+            foreach ($pathIdsReversed as $pUid) {
+                $stmtPath = $db->prepare("SELECT user_id, first_name, last_name, username, role FROM users WHERE user_id = :uid LIMIT 1");
+                $stmtPath->execute(['uid' => $pUid]);
+                $pathRow = $stmtPath->fetch(PDO::FETCH_ASSOC);
+                if ($pathRow && in_array(strtolower($pathRow['role']), ['agent', 'dealer', 'sub_reseller', 'reseller'], true)) {
+                    $targetConnectedUser = $pathRow;
+                    break;
+                }
+            }
+        }
+
+        // 3. Fallback to created_by if created by a reseller/agent
+        if (!$targetConnectedUser && !empty($customer['created_by'])) {
+            $stmtCreated = $db->prepare("SELECT user_id, first_name, last_name, username, role FROM users WHERE user_id = :uid LIMIT 1");
+            $stmtCreated->execute(['uid' => (int)$customer['created_by']]);
+            $createdRow = $stmtCreated->fetch(PDO::FETCH_ASSOC);
+            if ($createdRow && in_array(strtolower($createdRow['role']), ['agent', 'dealer', 'sub_reseller', 'reseller'], true)) {
+                $targetConnectedUser = $createdRow;
+            }
+        }
+
+        // 4. If still no reseller or agent is found, fall back to owner or creator (direct office / admin)
+        if (!$targetConnectedUser) {
+            $fallbackUid = !empty($customer['owner_id']) ? (int)$customer['owner_id'] : (!empty($customer['created_by']) ? (int)$customer['created_by'] : null);
+            if ($fallbackUid) {
+                $stmtFb = $db->prepare("SELECT user_id, first_name, last_name, username, role FROM users WHERE user_id = :uid LIMIT 1");
+                $stmtFb->execute(['uid' => $fallbackUid]);
+                $targetConnectedUser = $stmtFb->fetch(PDO::FETCH_ASSOC) ?: null;
+            }
+        }
+
+        if ($targetConnectedUser && in_array(strtolower($targetConnectedUser['role'] ?? ''), ['agent', 'dealer', 'sub_reseller', 'reseller'], true)) {
+            $connectedFullName = trim(($targetConnectedUser['first_name'] ?? '') . ' ' . ($targetConnectedUser['last_name'] ?? ''));
+            $connectedByName = $connectedFullName ?: ($targetConnectedUser['username'] ?: 'Reseller');
+            $connectedByRole = $targetConnectedUser['role'];
+            $connectedById = (string)$targetConnectedUser['user_id'];
+            $connectedByUsername = $targetConnectedUser['username'] ?? '';
+        } else {
+            $connectedByName = 'Admin';
+            $connectedByRole = 'admin';
+            $connectedById = !empty($targetConnectedUser['user_id']) ? (string)$targetConnectedUser['user_id'] : null;
+            $connectedByUsername = $targetConnectedUser['username'] ?? 'admin';
         }
 
         Response::json([
@@ -554,7 +619,9 @@ class CustomersController {
                     'expiryDate' => $service['expires_at'] ?? null,
                     'lastPaymentDate' => $inv['invoice_date'] ?? null,
                     'connectedBy' => $connectedByName,
-                    'connectedById' => $customer['created_by'] ?? null,
+                    'connectedById' => $connectedById,
+                    'connectedByRole' => $connectedByRole,
+                    'connectedByUsername' => $connectedByUsername,
                     'location' => $customer['installation_address'] ?? '',
                 ],
                 'onu' => $onuData,
@@ -665,8 +732,17 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             }
 
             $ownerId = (int)($data['ownerId'] ?? $user['user_id']);
+            if ($ownerId !== (int)$user['user_id']) {
+                if (!HierarchySecurityService::canAccessUser((int)$user['user_id'], $ownerId)) {
+                    $db->rollBack();
+                    Response::error("Access Denied: You cannot assign customers to unauthorized user #{$ownerId}.", 403);
+                    return;
+                }
+            }
             $ownerUser = HierarchySecurityService::getUser($ownerId);
             $ownerPath = $ownerUser['hierarchy_path'] ?? "/{$ownerId}/";
+            $ownerRole = $ownerUser['role'] ?? ($user['role'] ?? 'admin');
+            $ownerLevel = $ownerUser['role_level'] ?? ($user['role_level'] ?? 100);
 
             $stmt = $db->prepare("INSERT INTO customers 
                 (tenant_id, customer_code, customer_type, full_name, email, phone, installation_address, status, billing_status, connection_date, owner_id, owner_role, owner_role_level, owner_path, created_by)
@@ -680,8 +756,8 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                 'phone' => $phone,
                 'addr' => $address,
                 'oid' => $ownerId,
-                'orole' => $user['role'] ?? 'admin',
-                'olevel' => $user['role_level'] ?? 100,
+                'orole' => $ownerRole,
+                'olevel' => $ownerLevel,
                 'opath' => $ownerPath,
                 'created_by' => $user['user_id'],
             ]);
@@ -732,6 +808,34 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             $password = trim($data['password'] ?? 'pass123');
             $packageId = $data['packageId'] ?? $data['access_profile_id'] ?? null;
             $deviceId = $data['serverId'] ?? $data['network_device_id'] ?? null;
+
+            require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+            $callerRole = strtolower($user['role'] ?? '');
+            $callerLevel = HierarchySecurityService::getHierarchyLevel($callerRole);
+            $isLevel0 = ($callerLevel === 0 || $callerRole === 'saas_admin');
+
+            $ownerId = (int)($data['ownerId'] ?? $user['user_id']);
+            $ownerUser = HierarchySecurityService::getUser($ownerId);
+            $ownerRole = $ownerUser['role'] ?? $callerRole;
+            $ownerLevel = HierarchySecurityService::getHierarchyLevel($ownerRole);
+
+            // Server Assignment Rule: Reseller or Agent can NEVER pick or change server.
+            // If caller is not ISP Admin, force server to caller's assigned server.
+            if (!$isLevel0) {
+                $assignedServerId = HierarchySecurityService::getAssignedServerId((int)$user['user_id']);
+                if (!$assignedServerId) {
+                    $db->rollBack();
+                    Response::error('Server Assignment Required: No server has been assigned to your reseller account by ISP Admin. Please contact ISP Admin.', 400);
+                    return;
+                }
+                $deviceId = $assignedServerId;
+            } elseif ($ownerLevel > 0) {
+                // If ISP Admin is onboarding on behalf of a reseller/agent, lock to that reseller's assigned server
+                $ownerServerId = HierarchySecurityService::getAssignedServerId($ownerId);
+                if ($ownerServerId) {
+                    $deviceId = $ownerServerId;
+                }
+            }
 
             if (empty($fullName) || empty($phone) || empty($username)) {
                 $db->rollBack();
@@ -905,10 +1009,7 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         }
 
         // IDOR Protection: Enforce Downward-Only Access
-        if (!HierarchySecurityService::canAccessCustomer((int)$user['user_id'], (int)$customer['customer_id'], (int)$customer['tenant_id'])) {
-            Response::error('Access denied: You do not have permission to view this customer record.', 403);
-            return;
-        }
+        HierarchySecurityService::canViewCustomer((int)$user['user_id'], (int)$customer['customer_id'], (int)$customer['tenant_id']);
         $realCid = (int)$customer['customer_id'];
         $customerTenantId = (int)$customer['tenant_id'];
 
@@ -1081,9 +1182,12 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             $stmtPlan->execute(['pid' => $newPlanId, 'cid' => $realCid]);
         }
 
-        // 4. Handle Server / Router change if passed
+        // 4. Handle Server / Router change if passed (ONLY ISP Admin / Level 0 can change server!)
+        $callerRole = strtolower($user['role'] ?? '');
+        $isLevel0 = (HierarchySecurityService::getHierarchyLevel($callerRole) === 0 || $callerRole === 'saas_admin');
+
         $newServerId = $data['serverId'] ?? $data['server_id'] ?? $data['network_device_id'] ?? null;
-        if ($newServerId !== null && $newServerId !== '') {
+        if ($isLevel0 && $newServerId !== null && $newServerId !== '') {
             $parsedSrvId = ((int)$newServerId > 0) ? (int)$newServerId : null;
 
             // Update or insert customer_services
@@ -1153,8 +1257,12 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
+        HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_delete_customer');
+        $cid = is_numeric($id) ? (int)$id : (int)self::getRealCustomerId($db, $id, $tenantId, false);
+        HierarchySecurityService::canViewCustomer((int)$user['user_id'], $cid, $tenantId ? (int)$tenantId : null);
+
         $stmt = $db->prepare("UPDATE customers SET status = 'cancelled' WHERE customer_id = :id AND tenant_id = :tid");
-        $stmt->execute(['id' => $id, 'tid' => $tenantId]);
+        $stmt->execute(['id' => $cid, 'tid' => $tenantId]);
 
         Response::json([
             'success' => true,
@@ -1167,13 +1275,16 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
+        $cid = is_numeric($id) ? (int)$id : (int)self::getRealCustomerId($db, $id, $tenantId, false);
+        HierarchySecurityService::canViewCustomer((int)$user['user_id'], $cid, $tenantId ? (int)$tenantId : null);
+
         $stmt = $db->prepare("SELECT cs.*, ap.profile_name, ap.price, nd.device_name 
             FROM customer_services cs
             LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
             LEFT JOIN network_devices nd ON nd.network_device_id = cs.network_device_id
             WHERE cs.customer_id = :cid AND cs.tenant_id = :tid
             ORDER BY cs.customer_service_id DESC");
-        $stmt->execute(['cid' => $id, 'tid' => $tenantId]);
+        $stmt->execute(['cid' => $cid, 'tid' => $tenantId]);
         $rows = $stmt->fetchAll();
 
         Response::json([
@@ -1187,11 +1298,14 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
+        $cid = is_numeric($id) ? (int)$id : (int)self::getRealCustomerId($db, $id, $tenantId, false);
+        HierarchySecurityService::canViewCustomer((int)$user['user_id'], $cid, $tenantId ? (int)$tenantId : null);
+
         $stmt = $db->prepare("SELECT na.*, nd.device_name 
             FROM customer_network_accounts na
             LEFT JOIN network_devices nd ON nd.network_device_id = na.network_device_id
             WHERE na.customer_id = :cid AND na.tenant_id = :tid");
-        $stmt->execute(['cid' => $id, 'tid' => $tenantId]);
+        $stmt->execute(['cid' => $cid, 'tid' => $tenantId]);
         $rows = $stmt->fetchAll();
 
         Response::json([
@@ -1205,12 +1319,15 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
+        $cid = is_numeric($id) ? (int)$id : (int)self::getRealCustomerId($db, $id, $tenantId, false);
+        HierarchySecurityService::canViewCustomer((int)$user['user_id'], $cid, $tenantId ? (int)$tenantId : null);
+
         $stmt = $db->prepare("SELECT 
             COALESCE(SUM(total_amount), 0) as totalBilled,
             COALESCE(SUM(paid_amount), 0) as totalPaid,
             COALESCE(SUM(balance_due), 0) as totalDue
             FROM invoices WHERE customer_id = :cid AND tenant_id = :tid");
-        $stmt->execute(['cid' => $id, 'tid' => $tenantId]);
+        $stmt->execute(['cid' => $cid, 'tid' => $tenantId]);
         $row = $stmt->fetch();
 
         Response::json([
@@ -1228,9 +1345,17 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
+        $scope = HierarchySecurityService::getDownwardScopeClause((int)$user['user_id'], $tenantId ? (int)$tenantId : null, 'c', 'u');
+        $whereSql = !empty($scope['whereSql']) ? $scope['whereSql'] : "c.tenant_id = :tid";
+        $params = $scope['params'];
+        if (empty($params['scope_tenant_id']) && $tenantId) {
+            $params['tid'] = $tenantId;
+        }
+
         $stmt = $db->prepare("SELECT 
             u.user_id as resellerId,
-            COALESCE(u.first_name, 'Direct/Admin') as resellerName,
+            COALESCE(NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), ''), u.username, 'Direct / Admin') as resellerName,
+            u.role as resellerRole,
             COUNT(c.customer_id) as total,
             SUM(CASE WHEN c.status = 'active' THEN 1 ELSE 0 END) as active,
             SUM(CASE WHEN c.billing_status = 'Expired' THEN 1 ELSE 0 END) as expired,
@@ -1242,9 +1367,9 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             0 as vip
             FROM customers c
             LEFT JOIN users u ON u.user_id = c.owner_id
-            WHERE c.tenant_id = :tid
-            GROUP BY u.user_id, u.first_name");
-        $stmt->execute(['tid' => $tenantId]);
+            WHERE {$whereSql}
+            GROUP BY u.user_id, u.first_name, u.last_name, u.username, u.role");
+        $stmt->execute($params);
         $rows = $stmt->fetchAll();
 
         Response::json($rows ?: []);
@@ -1255,8 +1380,15 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
+        $scope = HierarchySecurityService::getDownwardScopeClause((int)$user['user_id'], $tenantId ? (int)$tenantId : null, 'c', 'u');
+        $whereSql = !empty($scope['whereSql']) ? $scope['whereSql'] : "c.tenant_id = :tid";
+        $params = $scope['params'];
+        if (empty($params['scope_tenant_id']) && $tenantId) {
+            $params['tid'] = $tenantId;
+        }
+
         $stmt = $db->prepare("SELECT 
-            COALESCE(sa.name, 'Unassigned Area') as areaName,
+            COALESCE(sa.name, NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.area_name')), ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.area')), ''), 'Unassigned Area') as areaName,
             COUNT(DISTINCT c.customer_id) as total,
             COUNT(DISTINCT CASE WHEN c.status = 'active' AND COALESCE(c.billing_status, '') NOT IN ('Expired', 'Left') THEN c.customer_id END) as active,
             COUNT(DISTINCT CASE WHEN c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW() AND c.status = 'active') THEN c.customer_id END) as expired,
@@ -1275,6 +1407,7 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                     OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.type'))) = 'vip' 
                 THEN c.customer_id END) as vip
             FROM customers c
+            LEFT JOIN users u ON u.user_id = c.owner_id
             LEFT JOIN service_areas sa ON sa.tenant_id = c.tenant_id AND (
                 sa.service_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) AS UNSIGNED)
                 OR sa.name = JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id'))
@@ -1283,9 +1416,9 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             )
             LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status = 'active'
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
-            WHERE c.tenant_id = :tid
-            GROUP BY COALESCE(sa.name, 'Unassigned Area')");
-        $stmt->execute(['tid' => $tenantId]);
+            WHERE {$whereSql}
+            GROUP BY COALESCE(sa.name, NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.area_name')), ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.area')), ''), 'Unassigned Area')");
+        $stmt->execute($params);
         $rows = $stmt->fetchAll();
 
         Response::json($rows ?: []);

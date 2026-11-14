@@ -1,4 +1,4 @@
-import { createContext, useContext, ReactNode } from 'react';
+import { createContext, useContext, ReactNode, useMemo } from 'react';
 import { useToast } from '../hooks/useToast';
 import { ToastContainer } from '../components/ui/ToastContainer';
 
@@ -14,8 +14,13 @@ const ToastContext = createContext<ToastContextType | undefined>(undefined);
 export function ToastProvider({ children }: { children: ReactNode }) {
   const { toasts, removeToast, success, error, warning, info } = useToast();
 
+  const value = useMemo(
+    () => ({ success, error, warning, info }),
+    [success, error, warning, info]
+  );
+
   return (
-    <ToastContext.Provider value={{ success, error, warning, info }}>
+    <ToastContext.Provider value={value}>
       {children}
       <ToastContainer toasts={toasts} onClose={removeToast} />
     </ToastContext.Provider>

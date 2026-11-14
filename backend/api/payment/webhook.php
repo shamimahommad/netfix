@@ -57,7 +57,46 @@ try {
         $stmtIntent->closeCursor();
     }
 
-    $tenantId = $intent ? (int)$intent['tenant_id'] : 2;
+    // 4. Resolve ISP / Tenant by Unique ISP ID Number (tenant_code, tenant_id, or URL parameter)
+    $ispIdentifier = trim(
+        $payload['isp_id'] 
+        ?? $payload['tenant_code'] 
+        ?? $payload['isp_code'] 
+        ?? $payload['tenant_id'] 
+        ?? $_GET['isp_id'] 
+        ?? $_GET['tenant_code'] 
+        ?? $_GET['isp'] 
+        ?? ($_SERVER['HTTP_X_ISP_ID'] ?? '')
+    );
+
+    $tenantId = null;
+    if (!empty($ispIdentifier)) {
+        // Priority 1: Check by tenant_code (ISP unique numeric ID)
+        $stmtTenantLookup = $db->prepare("SELECT tenant_id FROM tenants WHERE tenant_code = :code LIMIT 1");
+        $stmtTenantLookup->execute(['code' => $ispIdentifier]);
+        $foundTid = $stmtTenantLookup->fetchColumn();
+
+        // Priority 2: Fallback to internal tenant_id or slug if not found by tenant_code
+        if (!$foundTid) {
+            $stmtTenantFallback = $db->prepare("SELECT tenant_id FROM tenants WHERE tenant_id = :tid OR tenant_slug = :slug LIMIT 1");
+            $stmtTenantFallback->execute([
+                'tid' => is_numeric($ispIdentifier) ? (int)$ispIdentifier : 0,
+                'slug' => $ispIdentifier
+            ]);
+            $foundTid = $stmtTenantFallback->fetchColumn();
+        }
+
+        if ($foundTid) {
+            $tenantId = (int)$foundTid;
+        }
+    }
+
+    if (!$tenantId && $intent) {
+        $tenantId = (int)$intent['tenant_id'];
+    }
+    if (!$tenantId) {
+        $tenantId = 2; // Default fallback
+    }
     $customerId = $intent && $intent['customer_id'] ? (int)$intent['customer_id'] : null;
     $resolvedInvoiceId = $intent && $intent['invoice_id'] ? (int)$intent['invoice_id'] : null;
 

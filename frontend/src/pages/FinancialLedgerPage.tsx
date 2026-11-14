@@ -21,6 +21,7 @@ import {
 import ledgerService, { LedgerEntry, LedgerStatementResponse } from '@/services/ledger.service';
 import resellerService, { Reseller } from '@/services/reseller.service';
 import { useToastContext } from '@/contexts/ToastContext';
+import PageHeader from '@/components/common/PageHeader';
 
 export default function FinancialLedgerPage() {
   const toast = useToastContext();
@@ -187,73 +188,59 @@ export default function FinancialLedgerPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="w-full min-w-0 space-y-6">
       {/* Header Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg backdrop-blur-md">
-        <div>
+      <PageHeader
+        icon={<Receipt className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
+        title="Financial Statement & Double-Entry Ledger"
+        subtitle="Real-time transaction settlements, retail bill splits, upstream pass-through margins, and running balance"
+        badge="Immutable Audit Trail"
+        actions={
           <div className="flex items-center gap-2.5">
-            <div className="p-2.5 rounded-xl bg-blue-600/10 text-blue-400 border border-blue-500/20">
-              <Receipt className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-                Financial Statement & Double-Entry Ledger
-                <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5" /> Immutable Audit Trail
-                </span>
-              </h1>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Real-time transaction settlements, retail bill splits, upstream pass-through margins, and running balance
-              </p>
-            </div>
+            <button
+              onClick={fetchStatement}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 shadow-xs transition-colors disabled:opacity-50"
+              title="Reload data"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-blue-600 dark:text-blue-400' : 'text-slate-400'}`} />
+              <span>Refresh</span>
+            </button>
+            <button
+              onClick={handleExportCSV}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 shadow-xs transition-colors"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Export CSV</span>
+            </button>
+            <button
+              onClick={() => window.print()}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 shadow-xs transition-colors"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>Print / PDF</span>
+            </button>
           </div>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={fetchStatement}
-            disabled={loading}
-            className="px-3.5 py-2 text-xs font-medium rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-colors disabled:opacity-50"
-            title="Reload data"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-          <button
-            onClick={handleExportCSV}
-            className="px-3.5 py-2 text-xs font-medium rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5 transition-colors"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            Export CSV
-          </button>
-          <button
-            onClick={() => window.print()}
-            className="px-3.5 py-2 text-xs font-medium rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 flex items-center gap-1.5 transition-colors"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            Print / PDF
-          </button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Card 1: Total Credits (Earning / Margin) */}
-        <div className="relative overflow-hidden bg-slate-900/80 border border-emerald-500/20 rounded-2xl p-5 shadow-lg">
+        <div className="relative overflow-hidden bg-white dark:bg-slate-900 border border-emerald-200/80 dark:border-emerald-500/20 rounded-2xl p-5 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-              <ArrowDownLeft className="w-4 h-4 text-emerald-400" /> Total Credit / Margin Earning
+            <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+              <ArrowDownLeft className="w-4 h-4 text-emerald-500 dark:text-emerald-400" /> Total Credit / Margin Earning
             </span>
-            <span className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+            <span className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
               <TrendingUp className="w-4 h-4" />
             </span>
           </div>
           <div className="mt-3">
-            <div className="text-2xl font-black text-white">
+            <div className="text-2xl font-black text-slate-900 dark:text-white">
               {formatBDT(statement?.summary.total_credit || 0)}
             </div>
-            <div className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
+            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1.5">
               <span>Customer payments + upstream cascading commissions</span>
             </div>
           </div>
@@ -261,20 +248,20 @@ export default function FinancialLedgerPage() {
         </div>
 
         {/* Card 2: Total Debits (Deductions / Recharges) */}
-        <div className="relative overflow-hidden bg-slate-900/80 border border-rose-500/20 rounded-2xl p-5 shadow-lg">
+        <div className="relative overflow-hidden bg-white dark:bg-slate-900 border border-rose-200/80 dark:border-rose-500/20 rounded-2xl p-5 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
-              <ArrowUpRight className="w-4 h-4 text-rose-400" /> Total Debit / Recharges
+            <span className="text-xs font-semibold text-rose-600 dark:text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
+              <ArrowUpRight className="w-4 h-4 text-rose-500 dark:text-rose-400" /> Total Debit / Recharges
             </span>
-            <span className="p-2 rounded-xl bg-rose-500/10 text-rose-400">
+            <span className="p-2 rounded-xl bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400">
               <DollarSign className="w-4 h-4" />
             </span>
           </div>
           <div className="mt-3">
-            <div className="text-2xl font-black text-white">
+            <div className="text-2xl font-black text-slate-900 dark:text-white">
               {formatBDT(statement?.summary.total_debit || 0)}
             </div>
-            <div className="text-xs text-slate-400 mt-1">
+            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               <span>Subscriber recharges and wallet balance transfers</span>
             </div>
           </div>
@@ -282,21 +269,21 @@ export default function FinancialLedgerPage() {
         </div>
 
         {/* Card 3: Current SaaS Wallet Balance */}
-        <div className="relative overflow-hidden bg-slate-900/80 border border-blue-500/20 rounded-2xl p-5 shadow-lg">
+        <div className="relative overflow-hidden bg-white dark:bg-slate-900 border border-blue-200/80 dark:border-blue-500/20 rounded-2xl p-5 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
-              <Wallet className="w-4 h-4 text-blue-400" /> Current Wallet Balance
+            <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Wallet className="w-4 h-4 text-blue-500 dark:text-blue-400" /> Current Wallet Balance
             </span>
-            <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
+            <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-200/80 dark:border-blue-500/20">
               {statement?.wallet.status || 'Active'}
             </span>
           </div>
           <div className="mt-3">
-            <div className="text-2xl font-black text-white">
+            <div className="text-2xl font-black text-slate-900 dark:text-white">
               {formatBDT(statement?.wallet.balance || 0)}
             </div>
-            <div className="text-xs text-slate-400 mt-1 flex items-center gap-2">
-              <span className="text-emerald-400 font-medium">Net Margin: {formatBDT(statement?.summary.net_profit || 0)}</span>
+            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-2">
+              <span className="text-emerald-600 dark:text-emerald-400 font-medium">Net Margin: {formatBDT(statement?.summary.net_profit || 0)}</span>
               <span>•</span>
               <span>Account: {statement?.user.username || 'Self'}</span>
             </div>
@@ -306,18 +293,18 @@ export default function FinancialLedgerPage() {
       </div>
 
       {/* Filter & Search Bar */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-md space-y-3">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           {/* Quick Date Presets */}
-          <div className="flex items-center gap-1.5 bg-slate-950/60 p-1 rounded-xl border border-slate-800/80">
+          <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200/80 dark:border-slate-800/80">
             {['today', 'this_week', 'this_month', 'all'].map((preset) => (
               <button
                 key={preset}
                 onClick={() => applyQuickDate(preset)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-lg capitalize transition-colors ${
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg capitalize transition-colors ${
                   quickDate === preset
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800/50'
                 }`}
               >
                 {preset.replace('_', ' ')}
@@ -333,16 +320,16 @@ export default function FinancialLedgerPage() {
               placeholder="Search by Txn ID, customer, invoice..."
               value={searchKeyword}
               onChange={(e) => setSearchKeyword(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-950 border border-slate-800 rounded-xl text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              className="w-full pl-9 pr-3 py-1.5 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium"
             />
           </div>
         </div>
 
         {/* Secondary Filter Line */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5 pt-2 border-t border-slate-800/60 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800/60 text-xs">
           {/* Start Date */}
           <div>
-            <label className="text-[11px] text-slate-400 font-medium block mb-1">Start Date</label>
+            <label className="text-[11px] text-slate-600 dark:text-slate-400 font-semibold block mb-1">Start Date</label>
             <input
               type="date"
               value={startDate}
@@ -351,13 +338,13 @@ export default function FinancialLedgerPage() {
                 setQuickDate('custom');
                 setPage(1);
               }}
-              className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-blue-500"
+              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium"
             />
           </div>
 
           {/* End Date */}
           <div>
-            <label className="text-[11px] text-slate-400 font-medium block mb-1">End Date</label>
+            <label className="text-[11px] text-slate-600 dark:text-slate-400 font-semibold block mb-1">End Date</label>
             <input
               type="date"
               value={endDate}
@@ -366,20 +353,20 @@ export default function FinancialLedgerPage() {
                 setQuickDate('custom');
                 setPage(1);
               }}
-              className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-blue-500"
+              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium"
             />
           </div>
 
           {/* Downline Beneficiary User Selector */}
           <div>
-            <label className="text-[11px] text-slate-400 font-medium block mb-1">Account / Downline</label>
+            <label className="text-[11px] text-slate-600 dark:text-slate-400 font-semibold block mb-1">Account / Downline</label>
             <select
               value={selectedUserId}
               onChange={(e) => {
                 setSelectedUserId(e.target.value);
                 setPage(1);
               }}
-              className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-blue-500"
+              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium"
             >
               <option value="">My Own Wallet (Self)</option>
               {downlines.map((dl) => (
@@ -392,14 +379,14 @@ export default function FinancialLedgerPage() {
 
           {/* Purpose Filter */}
           <div>
-            <label className="text-[11px] text-slate-400 font-medium block mb-1">Purpose</label>
+            <label className="text-[11px] text-slate-600 dark:text-slate-400 font-semibold block mb-1">Purpose</label>
             <select
               value={purposeFilter}
               onChange={(e) => {
                 setPurposeFilter(e.target.value);
                 setPage(1);
               }}
-              className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-blue-500"
+              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium"
             >
               <option value="all">All Purposes</option>
               <option value="commission_margin">Commission Margin (Profit)</option>
@@ -411,14 +398,14 @@ export default function FinancialLedgerPage() {
 
           {/* Type Filter */}
           <div>
-            <label className="text-[11px] text-slate-400 font-medium block mb-1">Credit / Debit</label>
+            <label className="text-[11px] text-slate-600 dark:text-slate-400 font-semibold block mb-1">Credit / Debit</label>
             <select
               value={typeFilter}
               onChange={(e) => {
                 setTypeFilter(e.target.value);
                 setPage(1);
               }}
-              className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-blue-500"
+              className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium"
             >
               <option value="all">All Movements</option>
               <option value="credit">Credit Only (+)</option>
@@ -429,10 +416,10 @@ export default function FinancialLedgerPage() {
       </div>
 
       {/* Audit-grade DataTable */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-950/80 border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider">
+            <thead className="bg-slate-50/80 dark:bg-slate-950/80 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">
               <tr>
                 <th className="py-3 px-4">Date & Time</th>
                 <th className="py-3 px-4">Txn Group ID</th>
@@ -443,7 +430,7 @@ export default function FinancialLedgerPage() {
                 <th className="py-3 px-4 text-right">Running Balance</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60 text-slate-200">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-slate-700 dark:text-slate-200">
               {loading ? (
                 <tr>
                   <td colSpan={7} className="py-12 text-center text-slate-400">
@@ -454,9 +441,9 @@ export default function FinancialLedgerPage() {
               ) : filteredRows.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-12 text-center text-slate-400">
-                    <Receipt className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-                    <p className="font-medium text-slate-300">No ledger transactions found</p>
-                    <p className="text-xs text-slate-500 mt-1">
+                    <Receipt className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+                    <p className="font-semibold text-slate-700 dark:text-slate-300">No ledger transactions found</p>
+                    <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
                       No records match the selected date bounds or filter criteria.
                     </p>
                   </td>
@@ -467,22 +454,22 @@ export default function FinancialLedgerPage() {
                   return (
                     <tr
                       key={row.id}
-                      className="hover:bg-slate-800/40 transition-colors"
+                      className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors"
                     >
                       {/* Date & Time */}
-                      <td className="py-3 px-4 whitespace-nowrap font-mono text-slate-300">
+                      <td className="py-3 px-4 whitespace-nowrap font-mono text-slate-600 dark:text-slate-300">
                         {row.created_at}
                       </td>
 
                       {/* Txn Group ID */}
                       <td className="py-3 px-4 whitespace-nowrap">
                         <div className="flex items-center gap-1.5">
-                          <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-slate-800 text-blue-300 border border-slate-700">
+                          <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-blue-700 dark:text-blue-300 border border-slate-200 dark:border-slate-700">
                             {row.txn_group_id}
                           </span>
                           <button
                             onClick={() => copyToClipboard(row.txn_group_id)}
-                            className="p-1 text-slate-500 hover:text-slate-300 rounded hover:bg-slate-700/50"
+                            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors"
                             title="Copy Txn Group ID"
                           >
                             <Copy className="w-3 h-3" />
@@ -492,17 +479,17 @@ export default function FinancialLedgerPage() {
 
                       {/* Description / Customer / Invoice */}
                       <td className="py-3 px-4 max-w-sm">
-                        <div className="font-medium text-slate-100 truncate">
+                        <div className="font-semibold text-slate-900 dark:text-slate-100 truncate">
                           {row.description || 'System balance entry'}
                         </div>
-                        <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+                        <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                           {row.customer_username && (
-                            <span className="flex items-center gap-1 text-blue-400">
+                            <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-medium">
                               <User className="w-3 h-3" /> {row.customer_username}
                             </span>
                           )}
                           {row.invoice_number && (
-                            <span className="flex items-center gap-1 text-slate-400">
+                            <span className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
                               <Receipt className="w-3 h-3" /> Inv #{row.invoice_number}
                             </span>
                           )}
@@ -514,12 +501,12 @@ export default function FinancialLedgerPage() {
                         <span
                           className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
                             row.purpose === 'commission_margin'
-                              ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                              ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/20'
                               : row.purpose === 'customer_payment'
-                              ? 'bg-blue-500/10 text-blue-300 border-blue-500/20'
+                              ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20'
                               : row.purpose === 'wallet_recharge'
-                              ? 'bg-amber-500/10 text-amber-300 border-amber-500/20'
-                              : 'bg-rose-500/10 text-rose-300 border-rose-500/20'
+                              ? 'bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/20'
+                              : 'bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-500/20'
                           }`}
                         >
                           {row.purpose === 'commission_margin'
@@ -537,8 +524,8 @@ export default function FinancialLedgerPage() {
                         <span
                           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${
                             isCredit
-                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                              : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                              ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30'
+                              : 'bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-500/30'
                           }`}
                         >
                           {isCredit ? (
@@ -555,13 +542,13 @@ export default function FinancialLedgerPage() {
 
                       {/* Amount */}
                       <td className="py-3 px-4 whitespace-nowrap text-right font-mono font-bold">
-                        <span className={isCredit ? 'text-emerald-400' : 'text-rose-400'}>
+                        <span className={isCredit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>
                           {isCredit ? '+' : '-'}{formatBDT(row.amount)}
                         </span>
                       </td>
 
                       {/* Running Balance */}
-                      <td className="py-3 px-4 whitespace-nowrap text-right font-mono font-semibold text-slate-100">
+                      <td className="py-3 px-4 whitespace-nowrap text-right font-mono font-bold text-slate-900 dark:text-slate-100">
                         {formatBDT(row.closing_balance)}
                       </td>
                     </tr>
@@ -574,7 +561,7 @@ export default function FinancialLedgerPage() {
 
         {/* Pagination Footer */}
         {statement?.pagination && statement.pagination.total_pages > 1 && (
-          <div className="p-4 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+          <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
             <div>
               Showing page {statement.pagination.page} of {statement.pagination.total_pages} ({statement.pagination.total_records} total movements)
             </div>
@@ -582,17 +569,17 @@ export default function FinancialLedgerPage() {
               <button
                 disabled={page <= 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 disabled:opacity-40"
+                className="p-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 disabled:opacity-40 shadow-xs transition-colors"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <span className="px-3 py-1 rounded-lg bg-slate-800 text-slate-200 font-mono">
+              <span className="px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-mono font-semibold border border-slate-200 dark:border-slate-700">
                 {page}
               </span>
               <button
                 disabled={page >= statement.pagination.total_pages}
                 onClick={() => setPage((p) => p + 1)}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 disabled:opacity-40"
+                className="p-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 disabled:opacity-40 shadow-xs transition-colors"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>

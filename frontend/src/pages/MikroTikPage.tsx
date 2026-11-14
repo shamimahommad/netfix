@@ -133,7 +133,7 @@ export default function MikroTikPage() {
         winboxPort: targetForm.winboxPort,
         webPort: targetForm.webPort,
         useSsl: connMode === 'ssl' || targetForm.managementPort === 8729,
-        apiType: connMode === 'rest' || targetForm.managementPort === 50000 ? 'rest' : (connMode === 'ssl' ? 'api-ssl' : 'api'),
+        apiType: connMode === 'rest' ? 'rest' : (connMode === 'ssl' ? 'api-ssl' : 'api'),
       });
       setTestResult({
         type: 'ping',
@@ -175,7 +175,7 @@ export default function MikroTikPage() {
         managementPort: targetForm.managementPort,
         webPort: targetForm.webPort,
         useSsl: connMode === 'ssl' || targetForm.managementPort === 8729,
-        apiType: connMode === 'rest' || targetForm.managementPort === 50000 ? 'rest' : (connMode === 'ssl' ? 'api-ssl' : 'api'),
+        apiType: connMode === 'rest' ? 'rest' : (connMode === 'ssl' ? 'api-ssl' : 'api'),
         apiUsername: targetForm.apiUsername,
         apiPassword: targetForm.apiPassword,
       });
@@ -455,7 +455,7 @@ export default function MikroTikPage() {
 
   const handleEdit = (device: NetworkDevice) => {
     setEditingDevice(device);
-    const isRest = device.managementPort === 50000 || device.webPort === 50000 || device.managementPort === 80;
+    const isRest = device.managementPort === 80 || Boolean(device.webPort && device.webPort > 0 && device.managementPort === device.webPort);
     const isSsl = !isRest && device.managementPort === 8729;
     setConnMode(isRest ? 'rest' : (isSsl ? 'ssl' : 'api'));
     setUseSsl(isSsl);
@@ -975,14 +975,14 @@ export default function MikroTikPage() {
                           onClick={() => {
                             setConnMode('rest');
                             setUseSsl(false);
-                            setFormData((prev) => ({ ...prev, managementPort: 50000, webPort: 50000 }));
+                            setFormData((prev) => ({ ...prev, webPort: prev.webPort || 80 }));
                           }}
                           className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${
                             connMode === 'rest'
                               ? 'bg-blue-600 text-white shadow-xs font-bold'
                               : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
                           }`}
-                          title="RouterOS v7 REST API / WWW (Port 50000 or 80)"
+                          title="RouterOS v7 REST API / WWW (Port 80 or custom Web Port)"
                         >
                           REST
                         </button>
@@ -1001,7 +1001,7 @@ export default function MikroTikPage() {
                         else if (val === 8728) { setConnMode('api'); setUseSsl(false); }
                       }}
                       className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100"
-                      placeholder={connMode === 'rest' ? "50000" : (connMode === 'ssl' ? "8729" : "8728")}
+                      placeholder={connMode === "ssl" ? "8729" : "8728"}
                     />
                   </div>
 
@@ -1308,14 +1308,14 @@ export default function MikroTikPage() {
                           onClick={() => {
                             setConnMode('rest');
                             setUseSsl(false);
-                            setFormData((prev) => ({ ...prev, managementPort: 50000, webPort: 50000 }));
+                            setFormData((prev) => ({ ...prev, webPort: prev.webPort || 80 }));
                           }}
                           className={`px-1.5 py-0.5 rounded transition-all cursor-pointer ${
                             connMode === 'rest'
                               ? 'bg-blue-600 text-white shadow-xs font-bold'
                               : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
                           }`}
-                          title="RouterOS v7 REST API / WWW (Port 50000 or 80)"
+                          title="RouterOS v7 REST API / WWW (Port 80 or custom Web Port)"
                         >
                           REST
                         </button>
@@ -1334,7 +1334,7 @@ export default function MikroTikPage() {
                         else if (val === 8728) { setConnMode('api'); setUseSsl(false); }
                       }}
                       className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100"
-                      placeholder={connMode === 'rest' ? "50000" : (connMode === 'ssl' ? "8729" : "8728")}
+                      placeholder={connMode === "ssl" ? "8729" : "8728"}
                     />
                   </div>
 
@@ -1360,9 +1360,13 @@ export default function MikroTikPage() {
                       type="number"
                       min="1"
                       max="65535"
-                      value={formData.webPort}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, webPort: parseInt(e.target.value) || 80 }))}
+                      value={formData.webPort || ''}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? 0 : parseInt(e.target.value) || 0;
+                        setFormData((prev) => ({ ...prev, webPort: val }));
+                      }}
                       className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-xs outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900 dark:text-slate-100"
+                      placeholder="80"
                     />
                   </div>
                 </div>

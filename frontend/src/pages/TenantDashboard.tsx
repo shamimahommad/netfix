@@ -361,7 +361,19 @@ export default function TenantDashboard() {
     <div className="w-full space-y-6 pb-12 animate-fade-in">
       {/* 1. Header with PageHeader component */}
       <PageHeader
-        title="ISP Dashboard"
+        title={
+          isIspAdmin
+            ? 'ISP Dashboard'
+            : role === 'reseller'
+            ? 'Reseller Dashboard'
+            : role === 'sub_reseller'
+            ? 'Sub Reseller Dashboard'
+            : role === 'dealer'
+            ? 'Dealer Dashboard'
+            : role === 'agent'
+            ? 'Agent Dashboard'
+            : 'Dashboard'
+        }
         icon={<Activity />}
         subtitle={
           <span className="flex items-center gap-2">

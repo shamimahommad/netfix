@@ -20,7 +20,7 @@ class AuthController {
 
         try {
             $db = Database::getConnection();
-            $stmt = $db->prepare("SELECT * FROM users WHERE (email = :login1 OR username = :login2) AND status = 'active' LIMIT 1");
+            $stmt = $db->prepare("SELECT * FROM users WHERE (LOWER(email) = LOWER(:login1) OR LOWER(username) = LOWER(:login2)) LIMIT 1");
             $stmt->execute(['login1' => $login, 'login2' => $login]);
             $user = $stmt->fetch();
         } catch (Throwable $e) {
@@ -31,24 +31,32 @@ class AuthController {
             Response::error('Invalid login credentials', 401);
         }
 
+        // Check account active status
+        if (($user['status'] ?? 'active') !== 'active') {
+            Response::error('This account is ' . htmlspecialchars($user['status']) . '. Please contact your administrator.', 403);
+        }
+
         // Verify password hash or plain match fallback
+        $trimmedPassword = trim($password);
         $passwordMatches = password_verify($password, $user['password_hash']) 
-            || ($password === $user['password_hash']);
+            || ($password === $user['password_hash'])
+            || password_verify($trimmedPassword, $user['password_hash'])
+            || ($trimmedPassword === $user['password_hash']);
 
         // Auto-upgrade plain text passwords to bcrypt
-        if ($passwordMatches && $password === $user['password_hash']) {
+        if ($passwordMatches && ($password === $user['password_hash'] || $trimmedPassword === $user['password_hash'])) {
             try {
                 $newHash = password_hash($password, PASSWORD_BCRYPT);
-                $db->prepare("UPDATE users SET password_hash = :h WHERE user_id = :id")->execute(['h' => $newHash, 'id' => $user['user_id']]);
+                $db->prepare("UPDATE users SET password_hash = :h, password_changed_at = NOW() WHERE user_id = :id")->execute(['h' => $newHash, 'id' => $user['user_id']]);
             } catch (Throwable $e) {}
         }
 
         // Support for unmigrated seed dummy hash ONLY IF user has never changed password yet
-        if (!$passwordMatches && empty($user['password_changed_at']) && $user['password_hash'] === '$2y$10$Kq.9QjFqT6B8WJgWl1Nf8u9c2vK3Wl7Zf6kHqN2uM3dYwG6vJ5eO.' && $password === 'password123') {
+        if (!$passwordMatches && empty($user['password_changed_at']) && $user['password_hash'] === '$2y$10$Kq.9QjFqT6B8WJgWl1Nf8u9c2vK3Wl7Zf6kHqN2uM3dYwG6vJ5eO.' && ($password === 'password123' || $trimmedPassword === 'password123')) {
             $passwordMatches = true;
             try {
                 $newHash = password_hash('password123', PASSWORD_BCRYPT);
-                $db->prepare("UPDATE users SET password_hash = :h WHERE user_id = :id")->execute(['h' => $newHash, 'id' => $user['user_id']]);
+                $db->prepare("UPDATE users SET password_hash = :h, password_changed_at = NOW() WHERE user_id = :id")->execute(['h' => $newHash, 'id' => $user['user_id']]);
             } catch (Throwable $e) {}
         }
 
@@ -104,6 +112,13 @@ class AuthController {
             ]);
         } catch (Throwable $e) {}
 
+        // Resolve assigned server for non-admin downlines
+        $assignedServer = null;
+        if ($userType !== 'saas' && !in_array(strtolower($user['role'] ?? ''), ['admin', 'isp_admin', 'manager', 'saas_admin'], true)) {
+            require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+            $assignedServer = HierarchySecurityService::getAssignedServer((int)$user['user_id']);
+        }
+
         Response::json([
             'access_token' => $token,
             'user' => [
@@ -114,6 +129,8 @@ class AuthController {
                 'tenant_id' => $user['tenant_id'] ? (string)$user['tenant_id'] : null,
                 'user_type' => $userType,
                 'role_code' => $user['role'],
+                'assigned_server_id' => $assignedServer ? $assignedServer['id'] : null,
+                'assigned_server_name' => $assignedServer ? $assignedServer['name'] : null,
             ],
             'redirect_url' => $userType === 'saas' ? '/saas/dashboard' : '/dashboard',
         ]);
@@ -260,6 +277,12 @@ class AuthController {
             }
         }
 
+        // Resolve assigned server for non-admin downlines
+        $assignedServer = null;
+        if ($level > 0) {
+            $assignedServer = HierarchySecurityService::getAssignedServer($uid);
+        }
+
         Response::json([
             'user_id' => (string)$user['user_id'],
             'tenant_id' => $tenantId,
@@ -277,6 +300,8 @@ class AuthController {
             'last_name' => $user['last_name'],
             'email' => $user['email'],
             'username' => $user['username'] ?? '',
+            'assigned_server_id' => $assignedServer ? $assignedServer['id'] : null,
+            'assigned_server_name' => $assignedServer ? $assignedServer['name'] : null,
             'permissions' => $permissions,
             'impersonated' => !empty($user['impersonated']),
             'impersonated_by' => $user['impersonated_by'] ?? null,

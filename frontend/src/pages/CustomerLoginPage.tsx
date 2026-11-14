@@ -22,6 +22,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { authService, AuthError } from '@/services/auth.service';
+import { sanitizeErrorMessage } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 
 export default function CustomerLoginPage() {
@@ -92,7 +93,8 @@ export default function CustomerLoginPage() {
     } catch (err: any) {
       const authError = err as AuthError & { message?: string | string[] };
       const msg = authError?.message || (err?.response?.data?.message) || 'Invalid Customer ID or registered mobile number.';
-      setError(Array.isArray(msg) ? msg[0] : (msg as string));
+      const cleanMsg = Array.isArray(msg) ? msg[0] : (msg as string);
+      setError(sanitizeErrorMessage(cleanMsg));
     } finally {
       setIsLoading(false);
     }

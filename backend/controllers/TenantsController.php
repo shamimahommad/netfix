@@ -57,6 +57,9 @@ class TenantsController {
                 'totalRouters' => (int)($r['total_routers'] ?? 0),
                 'totalOlts' => (int)($r['total_olts'] ?? 0),
                 'totalUsers' => (int)($r['total_users'] ?? 0),
+                'logStorageMode' => $r['log_storage_mode'] ?? 'short_term_redis',
+                'logRetentionDays' => (int)($r['log_retention_days'] ?? 1),
+                'maxLiveLogs' => (int)($r['max_live_logs'] ?? 1000),
                 'limits' => $limits,
 
                 // SnakeCase backward compatibility
@@ -67,6 +70,9 @@ class TenantsController {
                 'business_email' => $r['business_email'],
                 'business_phone' => $r['business_phone'],
                 'business_address' => $r['business_address'],
+                'log_storage_mode' => $r['log_storage_mode'] ?? 'short_term_redis',
+                'log_retention_days' => (int)($r['log_retention_days'] ?? 1),
+                'max_live_logs' => (int)($r['max_live_logs'] ?? 1000),
                 'total_customers' => (int)($r['total_customers'] ?? 0),
                 'total_routers' => (int)($r['total_routers'] ?? 0),
                 'total_olts' => (int)($r['total_olts'] ?? 0),
@@ -134,6 +140,9 @@ class TenantsController {
             'updatedAt' => $tenant['updated_at'] ?? $tenant['created_at'],
             'totalCustomers' => (int)$tenant['total_customers'],
             'totalRouters' => (int)$tenant['total_routers'],
+            'logStorageMode' => $tenant['log_storage_mode'] ?? 'short_term_redis',
+            'logRetentionDays' => (int)($tenant['log_retention_days'] ?? 1),
+            'maxLiveLogs' => (int)($tenant['max_live_logs'] ?? 1000),
             'limits' => $limits,
 
             // SnakeCase
@@ -144,6 +153,9 @@ class TenantsController {
             'business_email' => $tenant['business_email'],
             'business_phone' => $tenant['business_phone'],
             'business_address' => $tenant['business_address'],
+            'log_storage_mode' => $tenant['log_storage_mode'] ?? 'short_term_redis',
+            'log_retention_days' => (int)($tenant['log_retention_days'] ?? 1),
+            'max_live_logs' => (int)($tenant['max_live_logs'] ?? 1000),
         ];
 
         Response::json([
@@ -200,10 +212,16 @@ class TenantsController {
             'updatedAt' => $tenant['updated_at'] ?? $tenant['created_at'],
             'totalCustomers' => (int)$tenant['total_customers'],
             'totalRouters' => (int)$tenant['total_routers'],
+            'logStorageMode' => $tenant['log_storage_mode'] ?? 'short_term_redis',
+            'logRetentionDays' => (int)($tenant['log_retention_days'] ?? 1),
+            'maxLiveLogs' => (int)($tenant['max_live_logs'] ?? 1000),
             'limits' => $limits,
             'tenant_id' => (string)$tenant['tenant_id'],
             'tenant_code' => $tenant['tenant_code'],
             'tenant_name' => $tenant['tenant_name'],
+            'log_storage_mode' => $tenant['log_storage_mode'] ?? 'short_term_redis',
+            'log_retention_days' => (int)($tenant['log_retention_days'] ?? 1),
+            'max_live_logs' => (int)($tenant['max_live_logs'] ?? 1000),
         ];
 
         // Fetch settings from tenant_settings table
@@ -484,6 +502,114 @@ class TenantsController {
         ]);
     }
 
+    public static function generateUniqueTenantCode(PDO $db): string {
+        $stmt = $db->query("SELECT tenant_code FROM tenants ORDER BY tenant_id DESC");
+        $maxNum = 1000;
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $code = $row['tenant_code'] ?? '';
+            if (preg_match('/^[0-9]+$/', $code)) {
+                $num = (int)$code;
+                if ($num > $maxNum) {
+                    $maxNum = $num;
+                }
+            } elseif (preg_match('/([0-9]+)/', $code, $m)) {
+                $num = (int)$m[1];
+                if ($num < 1000) $num += 1000;
+                if ($num > $maxNum) {
+                    $maxNum = $num;
+                }
+            }
+        }
+        $nextNum = max($maxNum + 1, 1001);
+        $candidate = (string)$nextNum;
+
+        // Ensure completely collision-free
+        $chk = $db->prepare("SELECT COUNT(*) FROM tenants WHERE tenant_code = :c");
+        $chk->execute(['c' => $candidate]);
+        while ((int)$chk->fetchColumn() > 0) {
+            $nextNum++;
+            $candidate = (string)$nextNum;
+            $chk->execute(['c' => $candidate]);
+        }
+
+        return $candidate;
+    }
+
+    public static function nextCode(): void {
+        AuthMiddleware::requireAuth();
+        $db = Database::getConnection();
+        $code = self::generateUniqueTenantCode($db);
+        Response::json([
+            'success' => true,
+            'nextCode' => $code,
+            'suggestedCode' => $code
+        ]);
+    }
+
+    public static function lookup(string $codeOrId): void {
+        AuthMiddleware::requireAuth();
+        $db = Database::getConnection();
+        $q = trim($codeOrId);
+
+        // Priority 1: Check by tenant_code (ISP unique ID number)
+        $stmt = $db->prepare("SELECT 
+            t.*,
+            tl.max_customers,
+            tl.max_routers,
+            tl.max_resellers,
+            (SELECT COUNT(*) FROM customers c WHERE c.tenant_id = t.tenant_id) as total_customers,
+            (SELECT COUNT(*) FROM network_devices nd WHERE nd.tenant_id = t.tenant_id AND nd.device_type = 'router') as total_routers,
+            (SELECT COUNT(*) FROM network_devices nd WHERE nd.tenant_id = t.tenant_id AND nd.device_type = 'olt') as total_olts
+            FROM tenants t
+            LEFT JOIN tenant_limits tl ON tl.tenant_id = t.tenant_id
+            WHERE t.tenant_code = :code
+            LIMIT 1");
+        $stmt->execute(['code' => $q]);
+        $tenant = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        // Fallback: check by tenant_id or slug if not found by code
+        if (!$tenant) {
+            $stmtFallback = $db->prepare("SELECT 
+                t.*,
+                tl.max_customers,
+                tl.max_routers,
+                tl.max_resellers,
+                (SELECT COUNT(*) FROM customers c WHERE c.tenant_id = t.tenant_id) as total_customers,
+                (SELECT COUNT(*) FROM network_devices nd WHERE nd.tenant_id = t.tenant_id AND nd.device_type = 'router') as total_routers,
+                (SELECT COUNT(*) FROM network_devices nd WHERE nd.tenant_id = t.tenant_id AND nd.device_type = 'olt') as total_olts
+                FROM tenants t
+                LEFT JOIN tenant_limits tl ON tl.tenant_id = t.tenant_id
+                WHERE t.tenant_id = :tid OR t.tenant_slug = :slug
+                LIMIT 1");
+            $stmtFallback->execute([
+                'tid' => is_numeric($q) ? (int)$q : 0,
+                'slug' => $q
+            ]);
+            $tenant = $stmtFallback->fetch(PDO::FETCH_ASSOC);
+        }
+
+        if (!$tenant) {
+            Response::json(['success' => false, 'message' => "ISP with ID or Code '{$q}' not found"], 404);
+            return;
+        }
+
+        Response::json([
+            'success' => true,
+            'data' => [
+                'tenantId' => (string)$tenant['tenant_id'],
+                'tenantCode' => $tenant['tenant_code'],
+                'tenantName' => $tenant['tenant_name'],
+                'businessEmail' => $tenant['business_email'],
+                'businessPhone' => $tenant['business_phone'],
+                'status' => $tenant['status'],
+                'webhookUrl' => "/api/payment/webhook?isp_id=" . $tenant['tenant_code'],
+                'totalCustomers' => (int)($tenant['total_customers'] ?? 0),
+                'totalRouters' => (int)($tenant['total_routers'] ?? 0),
+                'totalOlts' => (int)($tenant['total_olts'] ?? 0),
+            ]
+        ]);
+    }
+
     public static function create(): void {
         $user = AuthMiddleware::requireAuth();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
@@ -493,11 +619,24 @@ class TenantsController {
 
         if (empty($name) || empty($email)) {
             Response::error('Tenant Name and Business Email are required', 400);
+            return;
         }
 
-        $code = trim($data['tenantCode'] ?? $data['tenant_code'] ?? '');
+        $db = Database::getConnection();
+
+        // Unique ISP ID Number verification & generation (Digits Only)
+        $rawCode = trim($data['tenantCode'] ?? $data['tenant_code'] ?? '');
+        $code = preg_replace('/\D/', '', $rawCode);
         if (empty($code)) {
-            $code = 'ISP' . rand(100, 999);
+            $code = self::generateUniqueTenantCode($db);
+        } else {
+            // Strictly enforce unique ISP ID number
+            $chk = $db->prepare("SELECT COUNT(*) FROM tenants WHERE tenant_code = :c");
+            $chk->execute(['c' => $code]);
+            if ((int)$chk->fetchColumn() > 0) {
+                Response::error("The ISP ID number '{$code}' is already registered. Please choose a different unique ID number.", 400);
+                return;
+            }
         }
 
         $slug = trim($data['tenantSlug'] ?? $data['tenant_slug'] ?? '');
@@ -584,9 +723,25 @@ class TenantsController {
         $address = $data['businessAddress'] ?? $data['business_address'] ?? null;
         $status = $data['status'] ?? null;
         $country = $data['countryCode'] ?? $data['country_code'] ?? null;
+        $rawCode = isset($data['tenantCode']) || isset($data['tenant_code']) ? ($data['tenantCode'] ?? $data['tenant_code']) : null;
+        $code = null;
+        if ($rawCode !== null && trim((string)$rawCode) !== '') {
+            $code = preg_replace('/\D/', '', trim((string)$rawCode));
+        }
 
         $updates = [];
         $params = ['id' => $id];
+
+        if ($code !== null && $code !== '') {
+            $chk = $db->prepare("SELECT COUNT(*) FROM tenants WHERE tenant_code = :c AND tenant_id != :id");
+            $chk->execute(['c' => $code, 'id' => $id]);
+            if ((int)$chk->fetchColumn() > 0) {
+                Response::error("The ISP ID number '{$code}' is already registered to another ISP.", 400);
+                return;
+            }
+            $updates[] = "tenant_code = :code";
+            $params['code'] = $code;
+        }
 
         if ($name !== null) { $updates[] = "tenant_name = :name"; $params['name'] = $name; }
         if ($phone !== null) { $updates[] = "business_phone = :phone"; $params['phone'] = $phone; }
@@ -855,6 +1010,54 @@ class TenantsController {
         }
 
         Response::json(['success' => true, 'message' => 'Admin password has been reset successfully']);
+    }
+
+    public static function updateLogPolicy(string $id): void {
+        $user = AuthMiddleware::requireAuth();
+        $callerRole = strtolower($user['role'] ?? '');
+        $userType = $user['user_type'] ?? '';
+        if ($callerRole !== 'saas_admin' && $userType !== 'saas' && $callerRole !== 'admin') {
+            Response::json(['success' => false, 'message' => 'Unauthorized: SaaS Admin permissions required'], 403);
+            return;
+        }
+
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+        $mode = $data['logStorageMode'] ?? $data['log_storage_mode'] ?? 'short_term_redis';
+        $retentionDays = max(1, min(365, (int)($data['logRetentionDays'] ?? $data['log_retention_days'] ?? 1)));
+        $maxLiveLogs = max(100, min(50000, (int)($data['maxLiveLogs'] ?? $data['max_live_logs'] ?? 1000)));
+
+        $allowedModes = ['short_term_redis', 'long_term_victoria', 'disabled'];
+        if (!in_array($mode, $allowedModes, true)) {
+            Response::json(['success' => false, 'message' => 'Invalid log_storage_mode. Allowed: short_term_redis, long_term_victoria, disabled'], 400);
+            return;
+        }
+
+        $db = Database::getConnection();
+        $realTid = is_numeric($id) ? (int)$id : 0;
+
+        $stmt = $db->prepare("UPDATE tenants 
+                              SET log_storage_mode = :mode, 
+                                  log_retention_days = :retention, 
+                                  max_live_logs = :max_logs, 
+                                  updated_at = NOW() 
+                              WHERE tenant_id = :tid OR tenant_code = :tcode");
+        $stmt->execute([
+            'mode' => $mode,
+            'retention' => $retentionDays,
+            'max_logs' => $maxLiveLogs,
+            'tid' => $realTid,
+            'tcode' => $id,
+        ]);
+
+        Response::json([
+            'success' => true,
+            'message' => 'Log storage policy updated successfully',
+            'data' => [
+                'logStorageMode' => $mode,
+                'logRetentionDays' => $retentionDays,
+                'maxLiveLogs' => $maxLiveLogs,
+            ]
+        ]);
     }
 
     public static function delete(string $id): void {

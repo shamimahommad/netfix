@@ -7,6 +7,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
 require_once __DIR__ . '/../lib/AuthMiddleware.php';
 require_once __DIR__ . '/../lib/TenantSequenceService.php';
+require_once __DIR__ . '/../lib/HierarchySecurityService.php';
 
 class BillingController {
     public static function accounts(string $filterType = 'all'): void {
@@ -18,8 +19,12 @@ class BillingController {
         $limit = isset($_GET['limit']) ? max(1, min(5000, (int)$_GET['limit'])) : 20;
         $offset = ($page - 1) * $limit;
 
-        $where = ["c.tenant_id = :tid"];
-        $params = ['tid' => $tenantId];
+        $scope = HierarchySecurityService::getDownwardScopeClause((int)$user['user_id'], $tenantId ? (int)$tenantId : null, 'c', 'owner_u');
+        $where = [];
+        $params = $scope['params'];
+        if (!empty($scope['whereSql'])) {
+            $where[] = $scope['whereSql'];
+        }
 
         // Apply filterType
         switch ($filterType) {
@@ -59,6 +64,7 @@ class BillingController {
         $whereSql = implode(' AND ', $where);
 
         $countStmt = $db->prepare("SELECT COUNT(DISTINCT c.customer_id) FROM customers c 
+            LEFT JOIN users owner_u ON owner_u.user_id = c.owner_id
             LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id 
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id 
             WHERE {$whereSql}");
@@ -87,6 +93,7 @@ class BillingController {
             COALESCE(last_pay.collector_role, last_tx.tx_role) as last_collector_role,
             last_tx.tx_method
             FROM customers c
+            LEFT JOIN users owner_u ON owner_u.user_id = c.owner_id
             LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status = 'active'
             LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
@@ -361,8 +368,13 @@ class BillingController {
         $limit = isset($_GET['limit']) ? max(1, min(5000, (int)$_GET['limit'])) : 20;
         $offset = ($page - 1) * $limit;
 
+        $callerId = (int)$user['user_id'];
+        $scope = HierarchySecurityService::getDownwardScopeClause($callerId, $tenantId ? (int)$tenantId : null, 'c', 'u');
         $where = ["i.tenant_id = :tid"];
-        $params = ['tid' => $tenantId];
+        $params = array_merge(['tid' => $tenantId], $scope['params']);
+        if (!empty($scope['whereSql'])) {
+            $where[] = $scope['whereSql'];
+        }
 
         if (!empty($_GET['status']) && $_GET['status'] !== 'all') {
             $where[] = "i.status = :status";
@@ -380,9 +392,13 @@ class BillingController {
         }
 
         if (!empty($_GET['ownerId'])) {
-            $where[] = "(c.reseller_id = :owner_id OR i.created_by = :owner_id2)";
-            $params['owner_id'] = $_GET['ownerId'];
-            $params['owner_id2'] = $_GET['ownerId'];
+            $targetOwnerId = (int)$_GET['ownerId'];
+            if (!HierarchySecurityService::canAccessUser($callerId, $targetOwnerId)) {
+                Response::error("Access Denied: You do not have permission to filter by user #{$targetOwnerId}", 403);
+            }
+            $where[] = "(c.owner_id = :target_owner_id OR i.created_by = :target_owner_id2)";
+            $params['target_owner_id'] = $targetOwnerId;
+            $params['target_owner_id2'] = $targetOwnerId;
         }
 
         if (!empty($_GET['search'])) {
@@ -401,6 +417,7 @@ class BillingController {
 
         $countStmt = $db->prepare("SELECT COUNT(*) FROM invoices i 
             LEFT JOIN customers c ON c.customer_id = i.customer_id 
+            LEFT JOIN users u ON u.user_id = c.owner_id
             WHERE {$whereSql}");
         $countStmt->execute($params);
         $total = (int)$countStmt->fetchColumn();
@@ -412,13 +429,14 @@ class BillingController {
             c.phone as customer_phone,
             COALESCE(na.username, c.customer_code, c.full_name) as username,
             ap.profile_name as package_name,
-            u.first_name as collected_by_name
+            COALESCE(u_coll.first_name, u_coll.username) as collected_by_name
             FROM invoices i
             LEFT JOIN customers c ON c.customer_id = i.customer_id
+            LEFT JOIN users u ON u.user_id = c.owner_id
             LEFT JOIN customer_network_accounts na ON na.customer_id = i.customer_id
             LEFT JOIN customer_services cs ON cs.customer_service_id = i.customer_service_id
             LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
-            LEFT JOIN users u ON u.user_id = i.collected_by
+            LEFT JOIN users u_coll ON u_coll.user_id = i.collected_by
             WHERE {$whereSql}
             ORDER BY i.invoice_id DESC
             LIMIT {$limit} OFFSET {$offset}";
@@ -514,12 +532,19 @@ class BillingController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        // 1. Resolve Customer
+        // 1. Resolve Customer & Check IDOR
         $stmtCust = $db->prepare("SELECT customer_id, customer_code, full_name, phone, tenant_id FROM customers WHERE (customer_id = :cid OR customer_code = :ccode) LIMIT 1");
         $stmtCust->execute(['cid' => is_numeric($customerId) ? (int)$customerId : 0, 'ccode' => $customerId]);
         $customer = $stmtCust->fetch();
 
-        $resolvedCid = $customer ? (int)$customer['customer_id'] : (is_numeric($customerId) ? (int)$customerId : 0);
+        if (!$customer) {
+            Response::error('Customer not found', 404);
+            return;
+        }
+
+        // Strict Downward-Only Access Control IDOR Guard
+        HierarchySecurityService::canViewCustomer((int)$user['user_id'], (int)$customer['customer_id'], (int)$customer['tenant_id']);
+        $resolvedCid = (int)$customer['customer_id'];
 
         // 2. Query invoices
         $where = ["(i.customer_id = :cid" . ($customer ? " OR c.customer_code = :ccode" : "") . ")"];

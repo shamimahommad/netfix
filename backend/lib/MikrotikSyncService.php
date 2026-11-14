@@ -90,22 +90,62 @@ class MikrotikSyncService {
     /**
      * Connect to a MikroTik router using RouterosAPI with real validation
      */
-    public static function connect(array $router, int $timeout = 3): ?object {
+    public static function connect(array $router, int $timeout = 2, bool $force = false): ?object {
         $ip = trim($router['management_ip'] ?? '');
         if (empty($ip)) return null;
+
+        $routerId = (int)($router['network_device_id'] ?? $router['id'] ?? 0);
+        $cacheDir = __DIR__ . '/../cache';
+        if (!is_dir($cacheDir)) {
+            @mkdir($cacheDir, 0777, true);
+        }
+        $offlineFile = $cacheDir . '/router_' . $routerId . '_unreachable.txt';
+
+        // 1. Fast path: If recently verified offline (< 15 seconds) and not forced, return immediately
+        if (!$force && $routerId > 0 && file_exists($offlineFile) && (time() - filemtime($offlineFile) < 15)) {
+            return null;
+        }
 
         $user = $router['api_username'] ?: 'admin';
         $pass = $router['api_password'] ?: '';
         $port = (int)($router['management_port'] ?: 8728);
         $webPort = (int)($router['web_port'] ?? 0);
 
+        // 2. Pre-flight Fast TCP Check (max 0.35s socket connect)
+        // If port doesn't complete handshake in 0.35s, device is offline.
+        // Prevents multi-second blocking of the PHP server thread.
+        $portsToTry = array_unique(array_filter([$port, $webPort]));
+        $reachable = false;
+        foreach ($portsToTry as $p) {
+            $fp = @fsockopen($ip, $p, $errno, $errstr, 0.35);
+            if ($fp) {
+                fclose($fp);
+                $reachable = true;
+                break;
+            }
+        }
+
+        if (!$reachable) {
+            if ($routerId > 0) {
+                @file_put_contents($offlineFile, time());
+            }
+            return null;
+        }
+
+        // Router is reachable: clear unreachable marker
+        if ($routerId > 0 && file_exists($offlineFile)) {
+            @unlink($offlineFile);
+        }
+
+        $effectiveTimeout = max(1, min($timeout, 2));
+
         // Check if REST API is requested or indicated by port
-        $isRest = ($port === 50000 || $port === 80 || $port === 443 || ($webPort > 0 && $port === $webPort) || ($router['api_type'] ?? '') === 'rest');
+        $isRest = (($router['api_type'] ?? '') === 'rest' || in_array($port, [80, 443, 8080, 50000]) || in_array($webPort, [80, 443, 8080, 50000]) || ($webPort > 0 && $port === $webPort));
 
         if ($isRest) {
-            $restPort = ($port !== 8728 && $port !== 8729) ? $port : ($webPort ?: 80);
+            $restPort = ($webPort > 0) ? $webPort : (($port !== 8728 && $port !== 8729) ? $port : 80);
             $client = new MikrotikRestClient();
-            $client->timeout = $timeout;
+            $client->timeout = $effectiveTimeout;
             if ($client->connect($ip, $user, $pass, $restPort)) {
                 return $client;
             }
@@ -115,7 +155,7 @@ class MikrotikSyncService {
         $api = new RouterosAPI();
         $api->port = $port;
         $api->ssl = ($port === 8729 || !empty($router['use_ssl']));
-        $api->timeout = $timeout;
+        $api->timeout = $effectiveTimeout;
         $api->attempts = 1;
 
         if ($api->connect($ip, $user, $pass, $port)) {
@@ -125,7 +165,7 @@ class MikrotikSyncService {
         // Fallback: If binary API failed and router has web_port (e.g. 50000 or 80), try REST API!
         if (!$isRest && $webPort > 0) {
             $client = new MikrotikRestClient();
-            $client->timeout = $timeout;
+            $client->timeout = $effectiveTimeout;
             if ($client->connect($ip, $user, $pass, $webPort)) {
                 return $client;
             }
@@ -169,7 +209,12 @@ class MikrotikSyncService {
         $router = self::getRouter($db, $customerId, $tenantId);
         if (!$router) return;
 
-        $api = self::connect($router, 2);
+        // Fast bail-out: If router is known offline in DB, skip live socket check immediately
+        if (($router['status'] ?? '') === 'offline') {
+            return;
+        }
+
+        $api = self::connect($router, 1);
         if (!$api) return;
 
         try {

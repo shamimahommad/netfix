@@ -1,9 +1,13 @@
 <?php
 /**
- * NetFix ISP SaaS - High-Throughput MikroTik PPPoE Syslog Ingestion Daemon
+ * NetFix ISP SaaS - High-Throughput Tiered Syslog Ingestion Daemon
  * Listens on UDP port (default 514 / 5514), parses RouterOS syslog payloads in real time,
- * resolves multi-tenant router mappings via IP / Token, and performs batch insertions
- * every 1 second into MySQL pppoe_connection_logs to avoid primary DB contention.
+ * resolves multi-tenant router mappings via IP / Token, and routes logs according to each
+ * tenant's SaaS-Admin-configured Log Storage Policy:
+ *
+ * 1. 'short_term_redis'   -> Zero disk I/O! LPUSH to Redis list logs:tenant:{id}, LTRIM to max_live_logs, EXPIRE 24h
+ * 2. 'long_term_victoria' -> Buffered NDJSON batch-streamed to VictoriaLogs /insert/jsonline (ultra-compressed)
+ * 3. 'disabled'           -> Dropped immediately with zero compute overhead
  *
  * Usage:
  *   php backend/bin/syslog_collector.php [--port=514] [--flush-interval=1] [--batch-size=500]
@@ -11,11 +15,13 @@
 
 declare(ticks = 1);
 
-// Increase memory limit for continuous streaming
+// Increase memory limit for high-volume streaming
 ini_set('memory_limit', '256M');
 set_time_limit(0);
 
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../lib/RedisClient.php';
+require_once __DIR__ . '/../lib/VictoriaLogsClient.php';
 
 class MikrotikSyslogCollector {
     private int $port;
@@ -24,19 +30,27 @@ class MikrotikSyslogCollector {
     private $socket = null;
     private ?PDO $db = null;
 
-    // In-memory router directory cache: refreshed periodically
+    // Storage Engine Clients
+    private ?RedisClient $redis = null;
+    private ?VictoriaLogsClient $victoria = null;
+
+    // In-memory router directory cache: refreshed periodically (every 60s)
     private array $ipLookup = [];
     private array $tokenLookup = [];
     private float $lastCacheRefresh = 0;
     private int $cacheTtlSeconds = 60;
 
-    // High-throughput batch buffer
-    private array $batchBuffer = [];
+    // High-throughput Buffers
+    private array $redisBuffer = [];    // [tenant_id => [record, record, ...]]
+    private array $victoriaBuffer = []; // [record, record, ...]
+    private array $mysqlFallbackBuffer = []; // Fallback if storage engines fail
     private float $lastFlushTime = 0;
 
     // Telemetry & Metrics
     private int $totalReceived = 0;
-    private int $totalInserted = 0;
+    private int $totalRedisInserted = 0;
+    private int $totalVictoriaInserted = 0;
+    private int $totalMysqlInserted = 0;
     private int $totalDropped = 0;
     private float $startTime = 0;
     private bool $running = true;
@@ -50,11 +64,12 @@ class MikrotikSyslogCollector {
     }
 
     /**
-     * Initialize UDP Server socket and database connection
+     * Initialize UDP Server socket, database, and storage clients
      */
     public function start(): void {
         $this->initSignalHandlers();
         $this->initDatabase();
+        $this->initStorageClients();
         $this->refreshRouterCache(true);
 
         $bindAddress = "udp://0.0.0.0:{$this->port}";
@@ -83,25 +98,24 @@ class MikrotikSyslogCollector {
         stream_set_blocking($this->socket, false);
 
         echo "====================================================================\n";
-        echo "  NetFix ISP SaaS - MikroTik PPPoE Syslog Ingestion Daemon\n";
+        echo "  NetFix ISP SaaS - High-Throughput Tiered Syslog Collector\n";
         echo "====================================================================\n";
-        echo "  [*] Listening on UDP: {$bindAddress}\n";
-        echo "  [*] Batch size limit: {$this->maxBatchSize} items\n";
-        echo "  [*] Flush interval:   {$this->flushInterval} second(s)\n";
-        echo "  [*] Cached Routers:   " . count($this->ipLookup) . " active by IP, " . count($this->tokenLookup) . " by Token\n";
+        echo "  [*] Listening on UDP:       {$bindAddress}\n";
+        echo "  [*] Ingestion Batch Limit:  {$this->maxBatchSize} items\n";
+        echo "  [*] Auto-Flush Interval:    {$this->flushInterval} second(s)\n";
+        echo "  [*] Cached Routers:         " . count($this->ipLookup) . " by IP, " . count($this->tokenLookup) . " by Token\n";
+        echo "  [*] Redis Engine:           " . ($this->redis && $this->redis->isConnected() ? 'ONLINE (' . getenv('REDIS_HOST') . ')' : 'STANDBY/AUTO-CONNECT') . "\n";
+        echo "  [*] VictoriaLogs Engine:    " . ($this->victoria ? $this->victoria->getBaseUrl() : 'NOT CONFIGURED') . "\n";
         echo "  [*] Engine ready. Processing incoming syslog stream...\n";
         echo "====================================================================\n\n";
 
         $this->eventLoop();
     }
 
-    /**
-     * Register OS signals for graceful shutdown
-     */
     private function initSignalHandlers(): void {
         if (function_exists('pcntl_signal')) {
             $shutdownHandler = function ($signo) {
-                echo "\n[INFO] Signal received ({$signo}). Flushing remaining buffer and shutting down gracefully...\n";
+                echo "\n[INFO] Signal received ({$signo}). Flushing remaining buffers and shutting down gracefully...\n";
                 $this->running = false;
             };
             pcntl_signal(SIGINT, $shutdownHandler);
@@ -109,9 +123,6 @@ class MikrotikSyslogCollector {
         }
     }
 
-    /**
-     * Connect / Reconnect to Database
-     */
     private function initDatabase(): void {
         try {
             $this->db = Database::getConnection();
@@ -120,8 +131,22 @@ class MikrotikSyslogCollector {
         }
     }
 
+    private function initStorageClients(): void {
+        try {
+            $this->redis = RedisClient::getInstance();
+        } catch (\Throwable $e) {
+            echo "[WARN] Redis client init warning: " . $e->getMessage() . "\n";
+        }
+
+        try {
+            $this->victoria = VictoriaLogsClient::getInstance();
+        } catch (\Throwable $e) {
+            echo "[WARN] VictoriaLogs client init warning: " . $e->getMessage() . "\n";
+        }
+    }
+
     /**
-     * Refresh in-memory Router Directory cache from MySQL
+     * Refresh in-memory Router Directory cache and Tenant Policy from MySQL
      */
     private function refreshRouterCache(bool $force = false): void {
         $now = microtime(true);
@@ -133,9 +158,15 @@ class MikrotikSyslogCollector {
             if (!$this->db) $this->initDatabase();
             if (!$this->db) return;
 
-            $stmt = $this->db->query("SELECT network_device_id, tenant_id, device_name, management_ip, syslog_token 
-                                      FROM network_devices 
-                                      WHERE device_type = 'router' AND status = 'active'");
+            $sql = "SELECT nd.network_device_id, nd.tenant_id, nd.device_name, nd.management_ip, nd.syslog_token,
+                           COALESCE(t.log_storage_mode, 'short_term_redis') as log_storage_mode,
+                           COALESCE(t.log_retention_days, 1) as log_retention_days,
+                           COALESCE(t.max_live_logs, 1000) as max_live_logs
+                    FROM network_devices nd
+                    LEFT JOIN tenants t ON t.tenant_id = nd.tenant_id
+                    WHERE nd.device_type = 'router' AND nd.status = 'active'";
+
+            $stmt = $this->db->query($sql);
             $routers = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
             $newIp = [];
@@ -188,8 +219,9 @@ class MikrotikSyslogCollector {
                     $this->totalReceived++;
                     $this->handlePacket($packet, $peer);
 
-                    // If batch buffer reaches capacity, flush immediately
-                    if (count($this->batchBuffer) >= $this->maxBatchSize) {
+                    // Check total pending buffer across engines
+                    $totalPending = $this->countPendingBuffer();
+                    if ($totalPending >= $this->maxBatchSize) {
                         $this->flushBuffer();
                     }
                 }
@@ -212,11 +244,18 @@ class MikrotikSyslogCollector {
         echo "[EXIT] Syslog collector daemon stopped cleanly.\n";
     }
 
+    private function countPendingBuffer(): int {
+        $count = count($this->victoriaBuffer) + count($this->mysqlFallbackBuffer);
+        foreach ($this->redisBuffer as $tList) {
+            $count += count($tList);
+        }
+        return $count;
+    }
+
     /**
-     * Process a single raw UDP syslog packet
+     * Process a single raw UDP syslog packet and route according to tenant policy
      */
     private function handlePacket(string $rawPacket, string $peerAddress): void {
-        // Peer address format: "192.168.1.1:51450" or "[::1]:51450"
         $remoteIp = $peerAddress;
         if (preg_match('/^\[?([0-9a-fA-F\.:]+)\]?:[0-9]+$/', $peerAddress, $pm)) {
             $remoteIp = $pm[1];
@@ -225,7 +264,6 @@ class MikrotikSyslogCollector {
         // Parse PPPoE events from packet payload
         $parsed = self::parseMikrotikPayload($rawPacket);
         if (!$parsed) {
-            // Not a PPPoE event (e.g. dhcp, system, firewall)
             $this->totalDropped++;
             return;
         }
@@ -239,15 +277,27 @@ class MikrotikSyslogCollector {
         }
 
         if (!$router) {
-            // Router IP or Token not recognized in NetFix SaaS database
             $this->totalDropped++;
             return;
         }
 
-        // Add to batch buffer
-        $this->batchBuffer[] = [
-            'tenant_id' => (int)$router['tenant_id'],
-            'router_id' => (int)$router['network_device_id'],
+        $tenantId = (int)$router['tenant_id'];
+        $routerId = (int)$router['network_device_id'];
+        $storageMode = $router['log_storage_mode'] ?? 'short_term_redis';
+        $maxLiveLogs = (int)($router['max_live_logs'] ?? 1000);
+
+        // Routing Decision 1: Disabled -> Drop immediately
+        if ($storageMode === 'disabled') {
+            $this->totalDropped++;
+            return;
+        }
+
+        // Construct standard log record
+        $record = [
+            'id' => uniqid('pppoe_', true),
+            'tenant_id' => $tenantId,
+            'router_id' => $routerId,
+            'router_name' => $router['device_name'] ?? "Router #{$routerId}",
             'username' => $parsed['username'],
             'event_type' => $parsed['event_type'],
             'assigned_ip' => $parsed['assigned_ip'],
@@ -260,29 +310,127 @@ class MikrotikSyslogCollector {
             'raw_message' => substr($parsed['raw_message'], 0, 500),
             'logged_at' => date('Y-m-d H:i:s'),
         ];
-    }
 
-    /**
-     * Flush in-memory buffer to MySQL using a single multi-row INSERT query
-     */
-    private function flushBuffer(): void {
-        $count = count($this->batchBuffer);
-        $this->lastFlushTime = microtime(true);
-
-        if ($count === 0) {
+        // Routing Decision 2: Short-Term Live (Redis List)
+        if ($storageMode === 'short_term_redis') {
+            if (!isset($this->redisBuffer[$tenantId])) {
+                $this->redisBuffer[$tenantId] = [];
+            }
+            $record['_max_live'] = $maxLiveLogs;
+            $this->redisBuffer[$tenantId][] = $record;
             return;
         }
 
-        $items = $this->batchBuffer;
-        $this->batchBuffer = [];
+        // Routing Decision 3: Long-Term Enterprise (VictoriaLogs)
+        if ($storageMode === 'long_term_victoria') {
+            $this->victoriaBuffer[] = $record;
+            return;
+        }
+
+        // Fallback to MySQL if unknown mode
+        $this->mysqlFallbackBuffer[] = $record;
+    }
+
+    /**
+     * Flush in-memory buffers to Redis and VictoriaLogs in high-speed batches
+     */
+    private function flushBuffer(): void {
+        $this->lastFlushTime = microtime(true);
+        $flushedCount = 0;
+
+        // 1. Flush Redis Buffer
+        if (!empty($this->redisBuffer)) {
+            $redisItems = $this->redisBuffer;
+            $this->redisBuffer = [];
+
+            if (!$this->redis) {
+                $this->initStorageClients();
+            }
+
+            foreach ($redisItems as $tenantId => $records) {
+                $maxLive = (int)($records[0]['_max_live'] ?? 1000);
+                $jsonList = [];
+                foreach ($records as $r) {
+                    unset($r['_max_live']);
+                    $jsonList[] = json_encode($r, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                }
+
+                $key = "logs:tenant:{$tenantId}";
+                $res = $this->redis ? $this->redis->lpush($key, ...$jsonList) : false;
+
+                if ($res !== false) {
+                    // LTRIM to keep only latest max_live_logs
+                    $this->redis->ltrim($key, 0, $maxLive - 1);
+                    // Keep ephemeral buffer with 24 hours TTL
+                    $this->redis->expire($key, 86400);
+
+                    $this->totalRedisInserted += count($records);
+                    $flushedCount += count($records);
+                } else {
+                    // Redis connection issue -> fallback to MySQL temporarily to prevent data loss
+                    foreach ($records as $r) {
+                        unset($r['_max_live']);
+                        $this->mysqlFallbackBuffer[] = $r;
+                    }
+                }
+            }
+        }
+
+        // 2. Flush VictoriaLogs Buffer
+        if (!empty($this->victoriaBuffer)) {
+            $vicRecords = $this->victoriaBuffer;
+            $this->victoriaBuffer = [];
+
+            if (!$this->victoria) {
+                $this->initStorageClients();
+            }
+
+            $success = $this->victoria ? $this->victoria->insertJsonLines($vicRecords) : false;
+
+            if ($success) {
+                $this->totalVictoriaInserted += count($vicRecords);
+                $flushedCount += count($vicRecords);
+            } else {
+                // If VictoriaLogs is down, preserve records in MySQL fallback buffer
+                $this->mysqlFallbackBuffer = array_slice(array_merge($this->mysqlFallbackBuffer, $vicRecords), 0, 5000);
+            }
+        }
+
+        // 3. Flush MySQL Fallback Buffer (Only if engines fail or fallback is triggered)
+        if (!empty($this->mysqlFallbackBuffer)) {
+            $mysqlRecords = $this->mysqlFallbackBuffer;
+            $this->mysqlFallbackBuffer = [];
+            $this->flushToMySQL($mysqlRecords);
+            $flushedCount += count($mysqlRecords);
+        }
+
+        // Periodic Telemetry Output
+        if ($flushedCount > 0) {
+            $elapsed = round(microtime(true) - $this->startTime, 1);
+            $totalInserted = $this->totalRedisInserted + $this->totalVictoriaInserted + $this->totalMysqlInserted;
+            $rate = ($elapsed > 0) ? round($totalInserted / $elapsed, 1) : $flushedCount;
+
+            echo sprintf("[%s] Flushed: %d | Redis: %d | VictoriaLogs: %d | MySQL Fallback: %d | Dropped: %d | Rate: %s/s\n",
+                date('H:i:s'),
+                $flushedCount,
+                $this->totalRedisInserted,
+                $this->totalVictoriaInserted,
+                $this->totalMysqlInserted,
+                $this->totalDropped,
+                $rate
+            );
+        }
+    }
+
+    /**
+     * Fallback batch insert to MySQL only if primary storage is unreachable
+     */
+    private function flushToMySQL(array $records): void {
+        if (empty($records)) return;
 
         try {
             if (!$this->db) $this->initDatabase();
-            if (!$this->db) {
-                // If DB is unreachable, preserve buffer up to 5000 items to prevent data loss
-                $this->batchBuffer = array_slice(array_merge($items, $this->batchBuffer), 0, 5000);
-                return;
-            }
+            if (!$this->db) return;
 
             $sql = "INSERT INTO pppoe_connection_logs 
                     (tenant_id, router_id, username, event_type, assigned_ip, caller_mac, interface_name, 
@@ -292,7 +440,7 @@ class MikrotikSyslogCollector {
             $placeholders = [];
             $values = [];
 
-            foreach ($items as $item) {
+            foreach ($records as $item) {
                 $placeholders[] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
                 $values[] = $item['tenant_id'];
                 $values[] = $item['router_id'];
@@ -313,18 +461,10 @@ class MikrotikSyslogCollector {
             $stmt = $this->db->prepare($sql);
             $stmt->execute($values);
 
-            $this->totalInserted += $count;
-            $elapsed = round(microtime(true) - $this->startTime, 1);
-            $rate = ($elapsed > 0) ? round($this->totalInserted / $elapsed, 1) : $count;
-
-            echo sprintf("[%s] Flushed %d log(s) | Total Inserted: %d | Dropped: %d | Rate: %s logs/sec\n", 
-                date('H:i:s'), $count, $this->totalInserted, $this->totalDropped, $rate);
-
+            $this->totalMysqlInserted += count($records);
         } catch (\Throwable $e) {
-            echo "[ERROR] Batch flush failed: " . $e->getMessage() . "\n";
-            $this->db = null; // Force reconnect on next cycle
-            // Re-queue items up to memory limit
-            $this->batchBuffer = array_slice(array_merge($items, $this->batchBuffer), 0, 5000);
+            echo "[ERROR] Fallback MySQL flush failed: " . $e->getMessage() . "\n";
+            $this->db = null;
         }
     }
 
@@ -408,7 +548,7 @@ class MikrotikSyslogCollector {
             return null;
         }
 
-        // Extract Caller MAC Address (normalize to uppercase with colons)
+        // Extract Caller MAC Address
         if (preg_match('/(?:caller|from)\s+((?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})/i', $msg, $mcm)) {
             $callerMac = strtoupper(str_replace('-', ':', $mcm[1]));
         } elseif (preg_match('/((?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})/', $msg, $mcm)) {
@@ -455,4 +595,3 @@ foreach ($argv as $arg) {
 
 $daemon = new MikrotikSyslogCollector($port, $batchSize, $flushInterval);
 $daemon->start();
-

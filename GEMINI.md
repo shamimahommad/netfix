@@ -121,6 +121,7 @@ This file serves as the permanent source of truth for all coding and UI design s
   toast.error('Operation failed');
   ```
 - **Zero Conversational Notes in UI**: NEVER put conversational commentary, chat remarks, or subjective instructions in UI banners or cards. The UI must remain 100% clean, professional, and consistent with the standard English SaaS design language.
+- **Strictly Zero Database / SQL Exposure in Frontend**: Under NO circumstance should any database-related terms, SQL queries, SQLSTATE codes, table/column names, PDO exceptions, or database connection strings ever appear in the frontend. All internal server, storage, or connection errors must be strictly intercepted and converted to clean, user-friendly messages (e.g., "Service temporarily unavailable. Please try again later.") on both backend and frontend layers.
 
 ---
 
@@ -128,4 +129,18 @@ This file serves as the permanent source of truth for all coding and UI design s
 - Use `lucide-react` for all page and modal icons.
 - Checkboxes: Use `@/components/common/ModernCheckbox` for all selection checkboxes.
 - Loading states: Use circular animated spinners `w-8 h-8 rounded-full border-2 border-slate-200 border-t-blue-600 animate-spin`.
+
+---
+
+## 7. Instant Dev Server Execution Standard
+- Whenever the user asks to "run project", "start project", "restart", or mentions "offline", **IMMEDIATELY execute**:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File ./run_project.ps1
+  ```
+- **DO NOT** perform manual diagnostic loops, slow exploratory commands, or separate process checks.
+- `./run_project.ps1` boots MariaDB/MySQL (port 3306), PHP REST API (port 4000), and React Vite (port 4001) in under 2 seconds and verifies all ports in a single command.
+- If the user asks for a complete clean restart, execute:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File ./run_project.ps1 -Restart
+  ```
 

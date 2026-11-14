@@ -7,16 +7,48 @@ require_once __DIR__ . '/../lib/PaymentGatewayService.php';
 class PaymentGatewayController {
 
     private static function resolveTenantId(PDO $db, string $id): int {
-        $stmt = $db->prepare("SELECT tenant_id FROM tenants WHERE tenant_id = :id OR tenant_code = :code OR tenant_slug = :slug LIMIT 1");
-        $stmt->execute(['id' => $id, 'code' => $id, 'slug' => $id]);
+        // Priority 1: Check by tenant_code (ISP unique numeric ID)
+        $stmt = $db->prepare("SELECT tenant_id FROM tenants WHERE tenant_code = :code LIMIT 1");
+        $stmt->execute(['code' => $id]);
+        $tid = $stmt->fetchColumn();
+        if ($tid) return (int)$tid;
+
+        // Priority 2: Check by primary key tenant_id or slug
+        $stmt = $db->prepare("SELECT tenant_id FROM tenants WHERE tenant_id = :id OR tenant_slug = :slug LIMIT 1");
+        $stmt->execute(['id' => is_numeric($id) ? (int)$id : 0, 'slug' => $id]);
         $tid = $stmt->fetchColumn();
         return $tid ? (int)$tid : (is_numeric($id) ? (int)$id : 0);
     }
 
     /**
-     * Resolves the frontend URL (handles localhost port 4000 vs 4001 in dev)
+     * Resolves the frontend URL (handles localhost port 4000 vs 4001 in dev and matches browser origin)
      */
     public static function getFrontendBaseUrl(): string {
+        // Priority 1: Check Origin header sent by browser in CORS / Axios requests
+        $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+        if (!empty($origin) && filter_var($origin, FILTER_VALIDATE_URL)) {
+            return rtrim($origin, '/');
+        }
+
+        // Priority 2: Check Referer header
+        $referer = $_SERVER['HTTP_REFERER'] ?? '';
+        if (!empty($referer)) {
+            $parsed = parse_url($referer);
+            if (!empty($parsed['scheme']) && !empty($parsed['host'])) {
+                $port = !empty($parsed['port']) ? (':' . $parsed['port']) : '';
+                return $parsed['scheme'] . '://' . $parsed['host'] . $port;
+            }
+        }
+
+        // Priority 3: Check FRONTEND_URL env configuration
+        if (!empty($_ENV['FRONTEND_URL'])) {
+            return rtrim($_ENV['FRONTEND_URL'], '/');
+        }
+        if (!empty(getenv('FRONTEND_URL'))) {
+            return rtrim(getenv('FRONTEND_URL'), '/');
+        }
+
+        // Priority 4: Host header with dev port rewrite
         $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
         $host = $_SERVER['HTTP_HOST'] ?? 'localhost:4001';
         if (strpos($host, ':4000') !== false) {
@@ -355,7 +387,9 @@ class PaymentGatewayController {
             Response::error('Invalid top-up amount', 400);
         }
 
-        $callbackUrl = self::getFrontendBaseUrl() . "/dashboard/billing/topup-balance";
+        $callbackUrl = !empty($data['callbackURL']) 
+            ? trim($data['callbackURL']) 
+            : (self::getFrontendBaseUrl() . "/dashboard/topup-balance");
 
         $res = PaymentGatewayService::initiatePayment(
             $db,
@@ -569,7 +603,7 @@ class PaymentGatewayController {
             // If balance topup flow, redirect to balance topup page
             $intentMeta = json_decode($intent['metadata'] ?? '{}', true) ?: [];
             if (($intentMeta['flow'] ?? '') === 'balance_topup') {
-                $redirectUrl = self::getFrontendBaseUrl() . "/dashboard/billing/topup-balance?status=success&paymentID=" . urlencode($paymentId) . "&trx_id=" . urlencode($trxId);
+                $redirectUrl = self::getFrontendBaseUrl() . "/dashboard/topup-balance?status=success&paymentID=" . urlencode($paymentId) . "&trx_id=" . urlencode($trxId);
                 header("Location: {$redirectUrl}");
                 exit;
             }
@@ -581,7 +615,7 @@ class PaymentGatewayController {
 
         $intentMeta = json_decode($intent['metadata'] ?? '{}', true) ?: [];
         if (($intentMeta['flow'] ?? '') === 'balance_topup') {
-            $redirectUrl = self::getFrontendBaseUrl() . "/dashboard/billing/topup-balance?status=cancel&paymentID=" . urlencode($paymentId) . "&gateway=" . urlencode($gateway);
+            $redirectUrl = self::getFrontendBaseUrl() . "/dashboard/topup-balance?status=cancel&paymentID=" . urlencode($paymentId) . "&gateway=" . urlencode($gateway);
             header("Location: {$redirectUrl}");
             exit;
         }
@@ -651,7 +685,12 @@ class PaymentGatewayController {
         // Redirect appropriately
         $frontBase = self::getFrontendBaseUrl();
         $redirectStatus = $isSuccess ? 'success' : 'failed';
-        if ($customerId) {
+        $intentMeta = !empty($intent['metadata']) ? json_decode($intent['metadata'], true) : [];
+        $isBalanceTopup = ($intentMeta['flow'] ?? '') === 'balance_topup';
+
+        if ($isBalanceTopup) {
+            header("Location: {$frontBase}/dashboard/topup-balance?status={$redirectStatus}&paymentID=" . urlencode($paymentId) . "&trx_id=" . urlencode($trxId));
+        } else if ($customerId) {
             header("Location: {$frontBase}/customer/payment-callback?status={$redirectStatus}&paymentID={$paymentId}&trx_id={$trxId}");
         } else {
             header("Location: {$frontBase}/saas/tenants/{$tenantId}/payment-callback?status={$redirectStatus}&gateway={$gw}&amount={$amount}&trx_id={$trxId}");

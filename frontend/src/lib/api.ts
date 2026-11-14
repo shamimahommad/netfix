@@ -23,6 +23,20 @@ export const api: AxiosInstance = axios.create({
   withCredentials: true, // For httpOnly cookies
 });
 
+/**
+ * Sanitizes any error message so internal database/SQL/system details NEVER leak to the frontend UI
+ */
+export const sanitizeErrorMessage = (msg: unknown): string => {
+  if (!msg || typeof msg !== 'string') {
+    return 'Service temporarily unavailable. Please try again later.';
+  }
+  const dbPattern = /\b(database|sql|sqlstate|pdo|pdoexception|mysql|mariadb|query|table|column|syntax error|connection refused|actively refused|access denied|foreign key|constraint)\b/i;
+  if (dbPattern.test(msg)) {
+    return 'Service temporarily unavailable. Please try again later.';
+  }
+  return msg;
+};
+
 // Request interceptor to add tenant context and auth token
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
@@ -35,6 +49,9 @@ api.interceptors.request.use(
       const tenantId = useTenantStore.getState().getTenantId();
       if (tenantId && !isPublicTopup) {
         config.params = { ...(config.params || {}), tenant_id: tenantId };
+        if (config.headers) {
+          config.headers['X-Tenant-Id'] = tenantId;
+        }
       }
     } else if (authUser?.tenant_id) {
       // ISP / Tenant user: strictly attach their genuine tenant_id
@@ -68,15 +85,27 @@ api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     if (error.response) {
+      const data = error.response.data as any;
+      if (data && typeof data === 'object') {
+        if (typeof data.message === 'string') {
+          data.message = sanitizeErrorMessage(data.message);
+        } else if (Array.isArray(data.message)) {
+          data.message = data.message.map((m: any) => sanitizeErrorMessage(m));
+        }
+        if (typeof data.error === 'string') {
+          data.error = sanitizeErrorMessage(data.error);
+        }
+      }
+
       // Handle 401 Unauthorized
       if (error.response.status === 401) {
         const url = error.config?.url ?? '';
         const isLoginRequest = url.includes('/auth/login') || url.includes('/auth/customer-login');
-        // For login requests: keep the server message (e.g. "Account is not active", "Invalid credentials")
+        // For login requests: keep the sanitized server message (e.g. "Account is not active", "Invalid credentials")
         if (isLoginRequest) {
-          const data = error.response.data as { message?: string | string[] };
-          const msg = Array.isArray(data?.message) ? data.message[0] : data?.message;
-          return Promise.reject({ message: msg || 'Invalid credentials', statusCode: 401 });
+          const rawMsg = Array.isArray(data?.message) ? data.message[0] : data?.message;
+          const msg = sanitizeErrorMessage(rawMsg || 'Invalid credentials');
+          return Promise.reject({ message: msg, statusCode: 401 });
         }
         // For other requests: session expired – only logout and redirect once
         if (!isHandling401) {
@@ -100,7 +129,7 @@ api.interceptors.response.use(
       }
 
       // Server responded with error
-      return Promise.reject(error.response.data);
+      return Promise.reject(data);
     } else if (error.request) {
       // Request made but no response
       return Promise.reject({ message: 'Network error. Please check your connection.' });

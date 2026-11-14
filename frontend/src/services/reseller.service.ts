@@ -159,6 +159,17 @@ export const resellerService = {
     return res.data;
   },
 
+  async resetPassword(
+    id: string,
+    password: string,
+  ): Promise<{ success: boolean; message: string; username?: string }> {
+    const res = await api.post<{ success: boolean; message: string; username?: string }>(
+      `/resellers/${id}/reset-password`,
+      { password },
+    );
+    return res.data;
+  },
+
   async setStatus(
     id: string,
     status: 'active' | 'suspended',

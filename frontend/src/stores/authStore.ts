@@ -111,6 +111,8 @@ export const useAuthStore = create<AuthState>()(
             tenant_logo: me.tenant_logo ?? existing?.tenant_logo ?? null,
             user_type: me.user_type ?? existing?.user_type ?? 'isp',
             role_code: me.role_code,
+            assigned_server_id: me.assigned_server_id ?? existing?.assigned_server_id ?? null,
+            assigned_server_name: me.assigned_server_name ?? existing?.assigned_server_name ?? null,
           };
           set({
             balance: me.balance,

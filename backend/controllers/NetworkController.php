@@ -172,6 +172,19 @@ class NetworkController {
             $params['dtype'] = $type;
         }
 
+        // Strict Server Isolation: Resellers, Sub-Resellers & Agents can ONLY see their assigned server
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        $callerLevel = HierarchySecurityService::getHierarchyLevel($user['role'] ?? '');
+        if ($callerLevel > 0 && ($type === 'router' || $type === 'mikrotik' || $type === 'all')) {
+            $assignedServerId = HierarchySecurityService::getAssignedServerId((int)$user['user_id']);
+            if ($assignedServerId) {
+                $where[] = "network_device_id = :assigned_did";
+                $params['assigned_did'] = $assignedServerId;
+            } else {
+                $where[] = "1 = 0";
+            }
+        }
+
         $whereSql = !empty($where) ? "WHERE " . implode(' AND ', $where) : "";
         $sql = "SELECT network_device_id as id, device_name as name, device_type as type, vendor, status 
             FROM network_devices {$whereSql} ORDER BY device_name ASC";
@@ -469,7 +482,7 @@ class NetworkController {
 
         $ports = self::getDeviceTargetPorts($device);
         $startTime = microtime(true);
-        $probe = self::probeDevicePort($ip, $ports, 2.5);
+        $probe = self::probeDevicePort($ip, $ports, 0.6);
         $execTime = round(microtime(true) - $startTime, 3);
 
         $status = $probe['status'];
@@ -550,7 +563,7 @@ class NetworkController {
                 if ($managementPort) $ports[] = $managementPort;
                 if ($webPort) $ports[] = $webPort;
                 if ($winboxPort) $ports[] = $winboxPort;
-                if (empty($ports)) $ports = $useSsl ? [8729, 8291, 50000, 80] : [8728, 8729, 50000, 80, 8291];
+                if (empty($ports)) $ports = $useSsl ? [8729, 8291, 443, 80] : [8728, 8729, 80, 8291];
             } else {
                 if ($vendor === 'bdcom') {
                     if ($webPort) $ports[] = $webPort;
@@ -570,7 +583,7 @@ class NetworkController {
                 }
             }
 
-            $probe = self::probeDevicePort($ip, $ports, 2.5);
+            $probe = self::probeDevicePort($ip, $ports, 0.8);
 
             if ($probe['online']) {
                 Response::json([
@@ -605,11 +618,11 @@ class NetworkController {
             try {
                 if ($deviceType === 'router' || $vendor === 'mikrotik') {
                     $apiType = strtolower(trim($input['apiType'] ?? ''));
-                    $isRest = ($apiType === 'rest' || $managementPort === 50000 || $managementPort === 80 || $managementPort === 443 || ($webPort > 0 && ($managementPort === $webPort || $managementPort === 0)));
+                    $isRest = ($apiType === 'rest' || ($webPort > 0 && ($managementPort === $webPort || $managementPort === 0)) || in_array($managementPort, [80, 443, 8080, 50000]));
 
                     if ($isRest) {
                         require_once __DIR__ . '/../lib/MikrotikRestClient.php';
-                        $targetPort = ($managementPort && $managementPort !== 8728 && $managementPort !== 8729) ? $managementPort : ($webPort ?: 80);
+                        $targetPort = ($webPort > 0) ? $webPort : (($managementPort && $managementPort !== 8728 && $managementPort !== 8729) ? $managementPort : 80);
                         $restClient = new MikrotikRestClient();
                         $restClient->timeout = 5;
                         if ($restClient->connect($ip, $username, $password, $targetPort)) {
@@ -1022,6 +1035,25 @@ class NetworkController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
+        $cacheDir = __DIR__ . '/../../cache';
+        if (!is_dir($cacheDir)) {
+            @mkdir($cacheDir, 0777, true);
+        }
+        $cacheKey = 'ping_status_' . ($tenantId ?? 'all');
+        $cacheFile = $cacheDir . '/' . $cacheKey . '.json';
+
+        // Fast path: Return cached status if verified within last 20 seconds
+        if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < 20)) {
+            $cached = @json_decode(file_get_contents($cacheFile), true);
+            if (!empty($cached) && is_array($cached)) {
+                Response::json([
+                    'success' => true,
+                    'data' => $cached,
+                ]);
+                return;
+            }
+        }
+
         if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
             $stmt = $db->prepare("SELECT network_device_id, device_name, device_type, management_ip, management_port, winbox_port, web_port, status FROM network_devices WHERE tenant_id = :tid");
             $stmt->execute(['tid' => $tenantId]);
@@ -1031,11 +1063,15 @@ class NetworkController {
         $devices = $stmt->fetchAll();
 
         $items = [];
+        $sockets = [];
+        $startTimes = [];
+
         foreach ($devices as $d) {
+            $did = (string)$d['network_device_id'];
             $ip = trim($d['management_ip'] ?? '');
             if (empty($ip)) {
-                $items[] = [
-                    'deviceId' => (string)$d['network_device_id'],
+                $items[$did] = [
+                    'deviceId' => $did,
                     'pingStatus' => 'offline',
                     'latencyMs' => null,
                     'portTested' => null,
@@ -1045,35 +1081,80 @@ class NetworkController {
             }
 
             $ports = self::getDeviceTargetPorts($d);
-            // Fast 0.8s TCP socket probe per device (responds in 5-30ms if device port is up)
-            $probe = self::probeDevicePort($ip, $ports, 0.8);
+            $port = (int)($ports[0] ?? 80);
+            $startTimes[$did] = microtime(true);
 
-            $status = $probe['status'];
-            if ($probe['online'] && $d['status'] === 'auth_failed') {
-                $status = 'auth_failed';
+            $ctx = stream_context_create(['socket' => ['connect_timeout' => 0.4]]);
+            $s = @stream_socket_client('tcp://' . $ip . ':' . $port, $errno, $errstr, 0.4, STREAM_CLIENT_ASYNC_CONNECT, $ctx);
+            if ($s) {
+                stream_set_blocking($s, false);
+                $sockets[$did] = ['socket' => $s, 'port' => $port, 'device' => $d];
+            } else {
+                $items[$did] = [
+                    'deviceId' => $did,
+                    'pingStatus' => 'offline',
+                    'latencyMs' => null,
+                    'portTested' => $port,
+                    'lastCheckedAt' => date('c'),
+                ];
             }
-
-            // Keep status in network_devices in sync
-            $newDbStatus = ($status === 'online') ? 'active' : (($status === 'auth_failed') ? 'auth_failed' : 'offline');
-            if ($d['status'] !== $newDbStatus) {
-                try {
-                    $u = $db->prepare("UPDATE network_devices SET status = :st WHERE network_device_id = :did");
-                    $u->execute(['st' => $newDbStatus, 'did' => $d['network_device_id']]);
-                } catch (\Throwable $e) {}
-            }
-
-            $items[] = [
-                'deviceId' => (string)$d['network_device_id'],
-                'pingStatus' => $status,
-                'latencyMs' => $probe['latencyMs'],
-                'portTested' => $probe['port'],
-                'lastCheckedAt' => date('c'),
-            ];
         }
+
+        // Parallel non-blocking socket wait (max 400ms for ALL devices combined)
+        if (!empty($sockets)) {
+            $write = [];
+            foreach ($sockets as $info) {
+                $write[] = $info['socket'];
+            }
+            $read = null;
+            $except = null;
+            @stream_select($read, $write, $except, 0, 400000);
+
+            foreach ($sockets as $did => $info) {
+                $s = $info['socket'];
+                $d = $info['device'];
+                $port = $info['port'];
+
+                $isOnline = false;
+                $lat = null;
+                if (in_array($s, $write, true)) {
+                    $sockName = @stream_socket_get_name($s, true);
+                    if ($sockName !== false) {
+                        $isOnline = true;
+                        $lat = round((microtime(true) - $startTimes[$did]) * 1000, 1);
+                    }
+                }
+                @fclose($s);
+
+                $status = $isOnline ? 'online' : 'offline';
+                if ($isOnline && $d['status'] === 'auth_failed') {
+                    $status = 'auth_failed';
+                }
+
+                $newDbStatus = ($status === 'online') ? 'active' : (($status === 'auth_failed') ? 'auth_failed' : 'offline');
+                if ($d['status'] !== $newDbStatus) {
+                    try {
+                        $u = $db->prepare("UPDATE network_devices SET status = :st WHERE network_device_id = :did");
+                        $u->execute(['st' => $newDbStatus, 'did' => $d['network_device_id']]);
+                    } catch (\Throwable $e) {}
+                }
+
+                $items[$did] = [
+                    'deviceId' => $did,
+                    'pingStatus' => $status,
+                    'latencyMs' => $lat,
+                    'portTested' => $port,
+                    'lastCheckedAt' => date('c'),
+                ];
+            }
+        }
+
+        $data = array_values($items);
+        @file_put_contents($cacheFile, json_encode($data));
 
         Response::json([
             'success' => true,
-            'data' => $items,
+            'data' => $data,
         ]);
     }
 

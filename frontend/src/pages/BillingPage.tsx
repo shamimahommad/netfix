@@ -21,6 +21,7 @@ import { openDeleteCustomerModal } from '@/lib/deleteCustomerModal';
 import { customersService } from '@/services/customers.service';
 import { smsService } from '@/services/sms.service';
 import ModernCheckbox from '@/components/common/ModernCheckbox';
+import { useAuthStore } from '@/stores/authStore';
 // page header and metrics integrated directly
 import { Users, Receipt, CreditCard, AlertCircle } from 'lucide-react';
 
@@ -206,6 +207,8 @@ export default function BillingPage() {
   const navigate = useNavigate();
   const toast = useToastContext();
   const { theme, toggleTheme } = useTheme();
+  const { user } = useAuthStore();
+  const isAdmin = user?.role_code === 'admin' || user?.role_code === 'isp_admin';
   const [customers, setCustomers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -286,7 +289,7 @@ export default function BillingPage() {
     'Change Area',
     'Change Customer Type',
     'Change Billing Type',
-    'Change Server',
+    ...(isAdmin ? ['Change Server'] : []),
     'Change Package',
     'Advance Renew',
     'Change Expiry Date',
@@ -432,6 +435,10 @@ export default function BillingPage() {
     }
 
     if (action === 'Change Server') {
+      if (!isAdmin) {
+        toast.error('Only ISP Administrators can change customer server assignment.');
+        return;
+      }
       const serverId = await openChangeServerModal();
       if (!serverId) return;
       const ids = Array.from(selectedCustomers);

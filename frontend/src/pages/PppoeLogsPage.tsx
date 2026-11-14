@@ -23,7 +23,8 @@ import {
   Zap,
   Settings2,
   Radio,
-  CheckCheck
+  CheckCheck,
+  HardDrive,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { PageHeader, MetricCard, ModernCheckbox } from '@/components/common';
@@ -99,6 +100,14 @@ interface PppoeLogsResponse {
   user_role?: string;
   is_admin?: boolean;
   status_message?: string;
+  tier?: {
+    mode: 'short_term_redis' | 'long_term_victoria' | 'disabled';
+    label: string;
+    badge: string;
+    retention: string;
+    engine: string;
+    max_live_logs?: number;
+  };
 }
 
 interface SyslogSetupScriptResponse {
@@ -148,6 +157,14 @@ export default function PppoeLogsPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [tierInfo, setTierInfo] = useState<{
+    mode: 'short_term_redis' | 'long_term_victoria' | 'disabled';
+    label: string;
+    badge: string;
+    retention: string;
+    engine: string;
+    max_live_logs?: number;
+  } | null>(null);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -263,6 +280,10 @@ export default function PppoeLogsPage() {
             disconnected: response.data.metrics.disconnected || 0,
             auth_failed: response.data.metrics.auth_failed || 0,
           });
+        }
+
+        if (response.data.tier) {
+          setTierInfo(response.data.tier);
         }
       } else {
         setError(response.data.status_message || 'Failed to fetch PPPoE connection logs');
@@ -527,6 +548,29 @@ export default function PppoeLogsPage() {
         badge={`${totalRecords.toLocaleString()} Events`}
         actions={
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* Storage Architecture Tier Badge */}
+            {tierInfo?.badge && (
+              <div
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border ${
+                  tierInfo.mode === 'long_term_victoria'
+                    ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800'
+                    : tierInfo.mode === 'disabled'
+                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                    : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                }`}
+                title={tierInfo.label}
+              >
+                {tierInfo.mode === 'long_term_victoria' ? (
+                  <HardDrive className="w-3.5 h-3.5 text-purple-500" />
+                ) : tierInfo.mode === 'disabled' ? (
+                  <AlertCircle className="w-3.5 h-3.5 text-slate-400" />
+                ) : (
+                  <Zap className="w-3.5 h-3.5 text-amber-500" />
+                )}
+                <span>{tierInfo.badge}</span>
+              </div>
+            )}
+
             {/* Setup Syslog Button */}
             <button
               type="button"

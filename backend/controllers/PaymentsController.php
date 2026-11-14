@@ -6,6 +6,7 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
 require_once __DIR__ . '/../lib/AuthMiddleware.php';
+require_once __DIR__ . '/../lib/HierarchySecurityService.php';
 
 class PaymentsController {
     public static function create(): void {
@@ -104,6 +105,23 @@ class PaymentsController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
+        $callerId = (int)$user['user_id'];
+        $role = strtolower($user['role'] ?? '');
+        $isLevel0 = (HierarchySecurityService::getHierarchyLevel($role) === 0 || $role === 'saas_admin');
+
+        $where = ["t.tenant_id = :tid"];
+        $params = ['tid' => $tenantId];
+
+        if (!$isLevel0) {
+            $rawPath = $user['hierarchy_path'] ?? "/{$callerId}/";
+            $userPath = '/' . trim($rawPath, '/') . '/';
+            $params['scope_uid'] = $callerId;
+            $params['scope_path_wildcard'] = $userPath . '%';
+            $where[] = "(c.owner_id = :scope_uid OR u.hierarchy_path LIKE :scope_path_wildcard OR c.owner_path LIKE :scope_path_wildcard)";
+        }
+
+        $whereSql = implode(' AND ', $where);
+
         $stmt = $db->prepare("SELECT 
             t.transaction_id as paymentIntentId,
             t.transaction_ref as merchantInvoiceNumber,
@@ -121,21 +139,25 @@ class PaymentsController {
             t.created_at as paidAt
             FROM transactions t
             LEFT JOIN customers c ON c.customer_id = t.customer_id
+            LEFT JOIN users u ON u.user_id = c.owner_id
             LEFT JOIN invoices i ON i.customer_id = t.customer_id
-            WHERE t.tenant_id = :tid
+            WHERE {$whereSql}
             ORDER BY t.transaction_id DESC LIMIT 50");
-        $stmt->execute(['tid' => $tenantId]);
+        $stmt->execute($params);
         $items = $stmt->fetchAll();
 
         // Calculate summary
         $stmtSum = $db->prepare("SELECT 
-            SUM(CASE WHEN DATE(created_at) = CURDATE() THEN amount ELSE 0 END) as today,
-            SUM(CASE WHEN DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY) THEN amount ELSE 0 END) as yesterday,
-            SUM(CASE WHEN created_at >= DATE_FORMAT(NOW(), '%Y-%m-01') THEN amount ELSE 0 END) as this_month,
-            SUM(CASE WHEN created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) AND created_at < DATE_FORMAT(NOW(), '%Y-%m-01') THEN amount ELSE 0 END) as last_month,
-            SUM(amount) as filtered_total
-            FROM transactions WHERE tenant_id = :tid");
-        $stmtSum->execute(['tid' => $tenantId]);
+            SUM(CASE WHEN DATE(t.created_at) = CURDATE() THEN t.amount ELSE 0 END) as today,
+            SUM(CASE WHEN DATE(t.created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY) THEN t.amount ELSE 0 END) as yesterday,
+            SUM(CASE WHEN t.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01') THEN t.amount ELSE 0 END) as this_month,
+            SUM(CASE WHEN t.created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) AND t.created_at < DATE_FORMAT(NOW(), '%Y-%m-01') THEN t.amount ELSE 0 END) as last_month,
+            SUM(t.amount) as filtered_total
+            FROM transactions t
+            LEFT JOIN customers c ON c.customer_id = t.customer_id
+            LEFT JOIN users u ON u.user_id = c.owner_id
+            WHERE {$whereSql}");
+        $stmtSum->execute($params);
         $sum = $stmtSum->fetch() ?: [];
 
         Response::json([
@@ -167,6 +189,10 @@ class PaymentsController {
         $limit = max(1, min(100, (int)($_GET['limit'] ?? 25)));
         $offset = ($page - 1) * $limit;
 
+        $callerId = (int)$user['user_id'];
+        $role = strtolower($user['role'] ?? '');
+        $isLevel0 = (HierarchySecurityService::getHierarchyLevel($role) === 0 || $role === 'saas_admin');
+
         $userId = !empty($_GET['userId']) ? (int)$_GET['userId'] : null;
         $createdBy = !empty($_GET['createdBy']) ? (int)$_GET['createdBy'] : (!empty($_GET['pop_in_charge']) ? (int)$_GET['pop_in_charge'] : null);
         $dateFrom = !empty($_GET['dateFrom']) ? trim($_GET['dateFrom']) : null;
@@ -176,6 +202,14 @@ class PaymentsController {
 
         $where = ["t.tenant_id = :tid"];
         $params = ['tid' => $tenantId];
+
+        if (!$isLevel0) {
+            $rawPath = $user['hierarchy_path'] ?? "/{$callerId}/";
+            $userPath = '/' . trim($rawPath, '/') . '/';
+            $params['scope_uid'] = $callerId;
+            $params['scope_path_wildcard'] = $userPath . '%';
+            $where[] = "(c.owner_id = :scope_uid OR u_owner.hierarchy_path LIKE :scope_path_wildcard OR c.owner_path LIKE :scope_path_wildcard OR t.initiator_user_id = :scope_uid OR t.collector_user_id = :scope_uid)";
+        }
 
         if ($userId) {
             $where[] = "t.initiator_user_id = :userId";
@@ -212,6 +246,7 @@ class PaymentsController {
         // Count total matching
         $countStmt = $db->prepare("SELECT COUNT(*) FROM transactions t 
             LEFT JOIN customers c ON c.customer_id = t.customer_id
+            LEFT JOIN users u_owner ON u_owner.user_id = c.owner_id
             LEFT JOIN users u_coll ON u_coll.user_id = t.collector_user_id
             WHERE {$whereSql}");
         $countStmt->execute($params);
@@ -235,6 +270,7 @@ class PaymentsController {
             u_coll.username as collector_username
             FROM transactions t
             LEFT JOIN customers c ON c.customer_id = t.customer_id
+            LEFT JOIN users u_owner ON u_owner.user_id = c.owner_id
             LEFT JOIN users u_init ON u_init.user_id = t.initiator_user_id
             LEFT JOIN users u_coll ON u_coll.user_id = t.collector_user_id
             WHERE {$whereSql}

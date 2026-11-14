@@ -110,58 +110,157 @@ class HierarchySecurityService {
     }
 
     /**
-     * Verify whether a user can access a customer (self-owned or owned by descendant)
-     * IDOR protection for all customer CRUD operations.
+     * IDOR Security Guard: Verify whether a user can view or manage a customer record.
+     * Enforces strict downward-inclusive hierarchy isolation:
+     * - A user can access their OWN direct customers.
+     * - A user can access any DESCENDANT customer belonging to sub-tiers beneath them.
+     * - Returns HTTP 403 Forbidden if unauthorized (when $enforceHttp403 = true).
      */
-    public static function canAccessCustomer(int $currentUserId, int $customerId, ?int $tenantId = null): bool {
+    public static function canViewCustomer(
+        int $currentUserId, 
+        int $customerId, 
+        ?int $tenantId = null, 
+        bool $enforceHttp403 = true
+    ): bool {
         $db = Database::getConnection();
-        $stmt = $db->prepare("SELECT customer_id, tenant_id, owner_id, owner_path FROM customers WHERE customer_id = :cid LIMIT 1");
+        $stmt = $db->prepare("SELECT 
+            c.customer_id, 
+            c.tenant_id, 
+            c.owner_id, 
+            c.owner_path, 
+            u.hierarchy_path as owner_user_hierarchy_path, 
+            u.role as owner_role 
+            FROM customers c 
+            LEFT JOIN users u ON u.user_id = c.owner_id 
+            WHERE c.customer_id = :cid 
+            LIMIT 1");
         $stmt->execute(['cid' => $customerId]);
         $customer = $stmt->fetch(PDO::FETCH_ASSOC);
         $stmt->closeCursor();
 
-        if (!$customer) {
+        $authorized = false;
+
+        if ($customer) {
+            // 1. Cross-tenant isolation check
+            $tenantMismatch = ($tenantId !== null && (int)$customer['tenant_id'] !== (int)$tenantId);
+
+            if (!$tenantMismatch) {
+                $currentUser = self::getUser($currentUserId);
+                if ($currentUser) {
+                    $currentUserRole = $currentUser['role'] ?? '';
+                    $isLevel0 = (self::getHierarchyLevel($currentUserRole) === 0 || $currentUserRole === 'saas_admin');
+
+                    // 2. Level 0 ISP Admin has authority over all customers within their tenant
+                    if ($isLevel0) {
+                        $authorized = true;
+                    } else {
+                        $ownerId = (int)($customer['owner_id'] ?? 0);
+
+                        // 3. Direct Ownership check (user owns this customer directly)
+                        if ($ownerId === $currentUserId) {
+                            $authorized = true;
+                        } else {
+                            $rawUserPath = $currentUser['hierarchy_path'] ?? "/{$currentUserId}/";
+                            $userPath = '/' . trim($rawUserPath, '/') . '/';
+
+                            $ownerPath = (string)($customer['owner_path'] ?? '');
+                            $ownerUserPath = (string)($customer['owner_user_hierarchy_path'] ?? '');
+
+                            // 4. Materialized Path Check: Does customer's owner path start with current user's path?
+                            if (!empty($ownerPath) && $ownerPath !== '/') {
+                                $normOwnerPath = '/' . trim($ownerPath, '/') . '/';
+                                if (str_starts_with($normOwnerPath, $userPath)) {
+                                    $authorized = true;
+                                }
+                            }
+
+                            // 5. Check owner user's hierarchy path
+                            if (!$authorized && !empty($ownerUserPath) && $ownerUserPath !== '/') {
+                                $normOwnerUserPath = '/' . trim($ownerUserPath, '/') . '/';
+                                if (str_starts_with($normOwnerUserPath, $userPath)) {
+                                    $authorized = true;
+                                }
+                            }
+
+                            // 6. Fallback: check if ownerId is a verified descendant user
+                            if (!$authorized && $ownerId > 0) {
+                                $authorized = self::canAccessUser($currentUserId, $ownerId);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!$authorized) {
+            if ($enforceHttp403) {
+                Response::error('Access Denied: You do not have permission to view or manage this customer record.', 403);
+                exit;
+            }
             return false;
         }
 
-        if ($tenantId !== null && (int)$customer['tenant_id'] !== (int)$tenantId) {
-            return false;
-        }
+        return true;
+    }
 
+    /**
+     * Backward-compatible boolean check for customer access.
+     */
+    public static function canAccessCustomer(int $currentUserId, int $customerId, ?int $tenantId = null): bool {
+        return self::canViewCustomer($currentUserId, $customerId, $tenantId, false);
+    }
+
+    /**
+     * Build Downward-Inclusive Hierarchy Scoping SQL Clause
+     * Generates strictly parameterized SQL where clause ensuring zero horizontal leakage.
+     * Pattern:
+     * WHERE c.tenant_id = :scope_tenant_id 
+     *   AND (c.owner_id = :scope_uid OR u.hierarchy_path LIKE :scope_path_wildcard OR c.owner_path LIKE :scope_path_wildcard)
+     */
+    public static function getDownwardScopeClause(
+        int $currentUserId,
+        ?int $tenantId = null,
+        string $customerAlias = 'c',
+        ?string $userAlias = 'u'
+    ): array {
         $currentUser = self::getUser($currentUserId);
-        if (!$currentUser) {
-            return false;
+        $role = $currentUser['role'] ?? '';
+        $isLevel0 = (self::getHierarchyLevel($role) === 0 || $role === 'saas_admin');
+
+        $where = [];
+        $params = [];
+
+        if ($tenantId !== null) {
+            $where[] = "{$customerAlias}.tenant_id = :scope_tenant_id";
+            $params['scope_tenant_id'] = $tenantId;
         }
 
-        // ISP Admin / SaaS Admin has access to all customers in tenant
-        if (self::getHierarchyLevel($currentUser['role']) === 0 || $currentUser['role'] === 'saas_admin') {
-            return true;
+        if (!$isLevel0) {
+            $rawPath = $currentUser['hierarchy_path'] ?? "/{$currentUserId}/";
+            $userPath = '/' . trim($rawPath, '/') . '/';
+            $pathWildcard = $userPath . '%';
+
+            $scopeClauses = ["{$customerAlias}.owner_id = :scope_uid"];
+            if (!empty($userAlias)) {
+                $scopeClauses[] = "{$userAlias}.hierarchy_path LIKE :scope_path_wildcard";
+            }
+            $scopeClauses[] = "{$customerAlias}.owner_path LIKE :scope_path_wildcard";
+
+            $where[] = '(' . implode(' OR ', $scopeClauses) . ')';
+            $params['scope_uid'] = $currentUserId;
+            $params['scope_path_wildcard'] = $pathWildcard;
         }
 
-        $ownerId = (int)($customer['owner_id'] ?? 0);
-        if ($ownerId === $currentUserId) {
-            return true;
-        }
-
-        $ownerPath = (string)($customer['owner_path'] ?? '');
-        $userPath = (string)($currentUser['hierarchy_path'] ?? '');
-
-        if (!empty($ownerPath) && !empty($userPath)) {
-            return str_starts_with($ownerPath, $userPath);
-        }
-
-        // Fallback: check if ownerId is descendant
-        if ($ownerId > 0) {
-            return self::canAccessUser($currentUserId, $ownerId);
-        }
-
-        return false;
+        return [
+            'whereSql' => implode(' AND ', $where),
+            'params' => $params,
+            'user' => $currentUser,
+            'isLevel0' => $isLevel0,
+        ];
     }
 
     /**
      * Enforce downward-only scope SQL snippet for customer queries
-     * Injects strictly parameterized WHERE clause:
-     * WHERE tenant_id = :tenant_id AND (owner_id = :current_user_id OR owner_path LIKE :user_path_wildcard)
      */
     public static function enforceDownwardScope(
         int $currentUserId,
@@ -169,30 +268,8 @@ class HierarchySecurityService {
         string $ownerIdCol = 'c.owner_id',
         string $ownerPathCol = 'c.owner_path'
     ): array {
-        $currentUser = self::getUser($currentUserId);
-        $role = $currentUser['role'] ?? '';
-        $isLevel0 = self::getHierarchyLevel($role) === 0 || $role === 'saas_admin';
-
-        $where = [];
-        $params = [];
-
-        if ($tenantId !== null) {
-            $where[] = "c.tenant_id = :scope_tenant_id";
-            $params['scope_tenant_id'] = $tenantId;
-        }
-
-        // If not Level 0 ISP admin, restrict strictly to self + descendants
-        if (!$isLevel0) {
-            $userPath = $currentUser['hierarchy_path'] ?? "/{$currentUserId}/";
-            $where[] = "({$ownerIdCol} = :scope_uid OR {$ownerPathCol} LIKE :scope_path_wildcard)";
-            $params['scope_uid'] = $currentUserId;
-            $params['scope_path_wildcard'] = rtrim($userPath, '/') . '/%';
-        }
-
-        return [
-            'whereSql' => implode(' AND ', $where),
-            'params' => $params,
-        ];
+        $custAlias = explode('.', $ownerIdCol)[0] ?? 'c';
+        return self::getDownwardScopeClause($currentUserId, $tenantId, $custAlias, 'u');
     }
 
     /**
@@ -368,6 +445,131 @@ class HierarchySecurityService {
         ];
 
         return $buildSubtree($rootNode);
+    }
+
+    /**
+     * Resolve the assigned network device (server/router) ID for any user.
+     * Enforces strict hierarchy inheritance:
+     * - Checks user's direct metadata->network_device_id
+     * - If empty, walks upward along hierarchy_path to find ancestor reseller's assigned server
+     * - Automatically syncs/heals the resolved server into this user's metadata for performance
+     */
+    public static function getAssignedServerId(int $userId): ?string {
+        $db = Database::getConnection();
+        $stmt = $db->prepare("SELECT user_id, tenant_id, role, parent_id, hierarchy_path, metadata FROM users WHERE user_id = :uid LIMIT 1");
+        $stmt->execute(['uid' => $userId]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
+
+        if (!$user) {
+            return null;
+        }
+
+        // 1. Direct check
+        $meta = json_decode($user['metadata'] ?? '{}', true) ?: [];
+        $directServerId = $meta['network_device_id'] ?? $meta['serverId'] ?? null;
+        if (!empty($directServerId) && (string)$directServerId !== '0' && (string)$directServerId !== 'unassigned') {
+            return (string)$directServerId;
+        }
+
+        // 2. Upward hierarchy walk (Sub-resellers and Agents inherit from parent Reseller)
+        $path = trim($user['hierarchy_path'] ?? '', '/');
+        if (!empty($path)) {
+            $ancestorIds = array_filter(array_map('intval', explode('/', $path)));
+            // Exclude self and sort closest ancestor first (reverse order)
+            $ancestorIds = array_values(array_filter($ancestorIds, fn($id) => $id !== (int)$userId));
+            $ancestorIds = array_reverse($ancestorIds);
+
+            foreach ($ancestorIds as $aId) {
+                $aStmt = $db->prepare("SELECT user_id, role, metadata FROM users WHERE user_id = :uid LIMIT 1");
+                $aStmt->execute(['uid' => $aId]);
+                $aUser = $aStmt->fetch(PDO::FETCH_ASSOC);
+                $aStmt->closeCursor();
+
+                if ($aUser) {
+                    $aMeta = json_decode($aUser['metadata'] ?? '{}', true) ?: [];
+                    $aServerId = $aMeta['network_device_id'] ?? $aMeta['serverId'] ?? null;
+                    if (!empty($aServerId) && (string)$aServerId !== '0' && (string)$aServerId !== 'unassigned') {
+                        // Heal child metadata
+                        try {
+                            $meta['network_device_id'] = (string)$aServerId;
+                            $db->prepare("UPDATE users SET metadata = :m WHERE user_id = :uid")
+                               ->execute(['m' => json_encode($meta, JSON_UNESCAPED_UNICODE), 'uid' => $userId]);
+                        } catch (\Throwable $e) {}
+
+                        return (string)$aServerId;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve full details of the assigned server/router for a user.
+     */
+    public static function getAssignedServer(int $userId): ?array {
+        $serverId = self::getAssignedServerId($userId);
+        if (!$serverId) {
+            return null;
+        }
+
+        $db = Database::getConnection();
+        $stmt = $db->prepare("SELECT network_device_id as id, device_name as name, device_type as type, vendor, status, management_ip 
+            FROM network_devices 
+            WHERE network_device_id = :did LIMIT 1");
+        $stmt->execute(['did' => $serverId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
+
+        if (!$row) {
+            return null;
+        }
+
+        return [
+            'id' => (string)$row['id'],
+            'name' => $row['name'],
+            'type' => $row['type'],
+            'vendor' => $row['vendor'],
+            'status' => $row['status'],
+            'management_ip' => $row['management_ip'],
+        ];
+    }
+
+    /**
+     * Cascade server reassignment to all downstream users (sub-resellers, dealers, agents)
+     * when ISP Admin updates a Reseller's server.
+     */
+    public static function cascadeServerToDescendants(int $parentUserId, ?string $newServerId): int {
+        $db = Database::getConnection();
+        $parentUser = self::getUser($parentUserId);
+        if (!$parentUser) {
+            return 0;
+        }
+
+        $parentPath = rtrim($parentUser['hierarchy_path'] ?? "/{$parentUserId}/", '/') . '/';
+        $stmt = $db->prepare("SELECT user_id, metadata FROM users WHERE hierarchy_path LIKE :p_like AND user_id != :pid");
+        $stmt->execute([
+            'p_like' => $parentPath . '%',
+            'pid' => $parentUserId
+        ]);
+        $descendants = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
+
+        $count = 0;
+        $upStmt = $db->prepare("UPDATE users SET metadata = :m WHERE user_id = :uid");
+        foreach ($descendants as $d) {
+            $dMeta = json_decode($d['metadata'] ?? '{}', true) ?: [];
+            $dMeta['network_device_id'] = $newServerId;
+            $upStmt->execute([
+                'm' => json_encode($dMeta, JSON_UNESCAPED_UNICODE),
+                'uid' => $d['user_id']
+            ]);
+            $count++;
+        }
+
+        return $count;
     }
 }
 

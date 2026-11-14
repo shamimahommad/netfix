@@ -32,8 +32,8 @@ class PublicTopupController {
             Response::json($data);
         } catch (\Throwable $e) {
             Response::json([
-                ['tenant_id' => '1', 'tenant_code' => 'ISP001', 'tenant_name' => 'NetFix Cloud Network'],
-                ['tenant_id' => '2', 'tenant_code' => 'ISP002', 'tenant_name' => 'SpeedNet Fiber Broadband'],
+                ['tenant_id' => '1', 'tenant_code' => '1001', 'tenant_name' => 'NetFix Cloud Network'],
+                ['tenant_id' => '2', 'tenant_code' => '1002', 'tenant_name' => 'SpeedNet Fiber Broadband'],
             ]);
         }
     }

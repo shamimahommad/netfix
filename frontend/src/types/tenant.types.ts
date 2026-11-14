@@ -1,5 +1,13 @@
 export type TenantStatus = 'active' | 'suspended' | 'trial' | 'expired' | 'terminated';
 
+export type LogStorageMode = 'short_term_redis' | 'long_term_victoria' | 'disabled';
+
+export interface LogStoragePolicy {
+  logStorageMode: LogStorageMode;
+  logRetentionDays: number;
+  maxLiveLogs: number;
+}
+
 export interface Tenant {
   tenantId: string;
   tenantCode: string;
@@ -21,6 +29,9 @@ export interface Tenant {
   totalRouters?: number;
   totalOlts?: number;
   totalUsers?: number;
+  logStorageMode?: LogStorageMode;
+  logRetentionDays?: number;
+  maxLiveLogs?: number;
 }
 
 export interface TenantsResponse {

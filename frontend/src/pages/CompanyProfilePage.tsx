@@ -319,7 +319,7 @@ export default function CompanyProfilePage() {
                   <StatusBadge role={user?.role_code || 'isp_admin'} />
                 </div>
                 <div className="mt-1 flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
-                  <span>Code: <strong className="text-slate-700 dark:text-slate-300 font-semibold">{companyProfile?.tenant_code || 'ISP002'}</strong></span>
+                  <span>Code: <strong className="text-slate-700 dark:text-slate-300 font-semibold">{companyProfile?.tenant_code || '1002'}</strong></span>
                   <span>•</span>
                   <span>Admin ID: <strong className="text-slate-700 dark:text-slate-300 font-semibold">#{user?.user_id}</strong></span>
                   <span>•</span>

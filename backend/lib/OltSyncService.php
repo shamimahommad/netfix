@@ -76,8 +76,30 @@ class OltSyncService {
         if ($totalPonPorts <= 0) $totalPonPorts = (($isFocuscom || $isBdcom || $isCdata) ? 4 : 8);
         $ponType = strtolower($oltDev['pon_type'] ?? 'epon');
 
-        // Dynamic timeout: 45s for 8+ port OLTs with hundreds of ONUs, 25s for 4-port
-        $timeout = ($totalPonPorts > 4) ? 45 : 25;
+        // Fast Pre-Flight Check: Verify OLT IP:Port responds to TCP socket in 0.5s
+        // If unreachable, avoid 25-45s timeout blocking the entire application
+        $cacheDir = __DIR__ . '/../cache';
+        if (!is_dir($cacheDir)) {
+            @mkdir($cacheDir, 0777, true);
+        }
+        $oltOfflineFile = $cacheDir . '/olt_' . $deviceId . '_unreachable.txt';
+
+        $fp = @fsockopen($ip, $port, $errno, $errstr, 0.5);
+        if (!$fp) {
+            @file_put_contents($oltOfflineFile, time());
+            $local = self::getLocalData($db, $tenantId, $deviceId, $oltDev);
+            $local['syncError'] = "OLT hardware at {$ip}:{$port} is currently unreachable or offline.";
+            $local['isOnline'] = false;
+            return $local;
+        }
+        fclose($fp);
+
+        if (file_exists($oltOfflineFile)) {
+            @unlink($oltOfflineFile);
+        }
+
+        // Dynamic timeout: 30s for 8+ port OLTs with hundreds of ONUs, 15s for 4-port
+        $timeout = ($totalPonPorts > 4) ? 30 : 15;
 
         if ($isBdcom) {
             if ($proto === 'http' || $proto === 'https' || $port === 2321 || $port === 80 || $port === 8080) {

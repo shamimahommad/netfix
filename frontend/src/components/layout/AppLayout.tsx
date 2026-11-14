@@ -86,7 +86,7 @@ export default function AppLayout({ sidebarItems, userType, children }: AppLayou
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white"></span>
               </span>
               <span className="truncate">
-                Managing ISP: <strong className="font-bold underline decoration-white/40">{selectedTenant?.tenantName || 'Tenant Network'}</strong> {selectedTenant?.tenantCode ? `[${selectedTenant.tenantCode}]` : ''} as <strong className="font-bold">SaaS Super Admin</strong>
+                Managing ISP: <strong className="font-bold underline decoration-white/40">{selectedTenant?.tenantName || 'Tenant Network'}</strong> {selectedTenant?.tenantCode ? `[ID #${selectedTenant.tenantCode}]` : ''} as <strong className="font-bold">SaaS Super Admin</strong>
               </span>
             </div>
             <div className="flex items-center gap-2 shrink-0">

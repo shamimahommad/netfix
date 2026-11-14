@@ -49,12 +49,13 @@ class Database {
             self::ensureTables(self::$instance);
             return self::$instance;
         } catch (Throwable $e) {
-            // Log and exit with JSON error
+            // Log real server error to internal logs
+            error_log('Database connection error: ' . $e->getMessage());
             header('Content-Type: application/json; charset=utf-8');
-            http_response_code(500);
+            http_response_code(503);
             echo json_encode([
                 'success' => false,
-                'message' => 'Database connection failed: ' . $e->getMessage(),
+                'message' => 'Service temporarily unavailable. Please try again later.',
             ]);
             exit;
         }
@@ -66,6 +67,18 @@ class Database {
             $stmt->execute(['tbl' => $table, 'col' => $column]);
             if (!$stmt->fetchColumn()) {
                 $pdo->exec("ALTER TABLE `{$table}` ADD `{$column}` {$definition}");
+            }
+        } catch (Throwable $e) {
+            // Silently ignore if already exists or permission restricted
+        }
+    }
+
+    public static function ensureIndex(PDO $pdo, string $table, string $indexName, string $columns): void {
+        try {
+            $stmt = $pdo->prepare("SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tbl AND INDEX_NAME = :idx LIMIT 1");
+            $stmt->execute(['tbl' => $table, 'idx' => $indexName]);
+            if (!$stmt->fetchColumn()) {
+                $pdo->exec("ALTER TABLE `{$table}` ADD INDEX `{$indexName}` ({$columns})");
             }
         } catch (Throwable $e) {
             // Silently ignore if already exists or permission restricted
@@ -146,6 +159,11 @@ class Database {
             self::ensureColumn($pdo, 'customers', 'owner_role', 'VARCHAR(50) DEFAULT NULL');
             self::ensureColumn($pdo, 'customers', 'owner_role_level', 'INT(11) DEFAULT NULL');
             self::ensureColumn($pdo, 'customers', 'owner_path', 'VARCHAR(255) DEFAULT NULL');
+
+            // Ensure high performance composite indexes for Materialized Path hierarchy queries
+            self::ensureIndex($pdo, 'customers', 'idx_cust_tenant_owner_path', '`tenant_id`, `owner_path`');
+            self::ensureIndex($pdo, 'customers', 'idx_cust_tenant_owner', '`tenant_id`, `owner_id`');
+            self::ensureIndex($pdo, 'users', 'idx_users_tenant_hierarchy', '`tenant_id`, `hierarchy_path`');
 
             // Ensure critical columns in access_profiles
             self::ensureColumn($pdo, 'access_profiles', 'color_hex', "VARCHAR(20) NOT NULL DEFAULT '#2563EB'");

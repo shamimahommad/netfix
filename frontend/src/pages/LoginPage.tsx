@@ -25,6 +25,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { authService, AuthError } from '@/services/auth.service';
+import { sanitizeErrorMessage } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { tenantsService } from '@/services/tenants.service';
 import { Tenant } from '@/types/tenant.types';
@@ -140,7 +141,7 @@ export default function LoginPage() {
     } catch (err: any) {
       const authError = err as AuthError;
       const msg = authError?.message || (err?.response?.data?.message) || 'Invalid email or password. Please try again.';
-      setError(msg);
+      setError(sanitizeErrorMessage(msg));
     } finally {
       setIsLoading(false);
     }
@@ -151,19 +152,19 @@ export default function LoginPage() {
     setShowTenants(false);
     setError(null);
     setEmail(tenant.businessEmail);
-    setPassword('password123');
+    setPassword('Star@1122');
   };
 
   const fillDemo = (role: 'saas' | 'isp') => {
     setError(null);
     if (role === 'saas') {
       setEmail('admin@ispsaas.com');
-      setPassword('password123');
+      setPassword('Star@1122');
       setSelectedTenant(null);
       setDemoFilled('SaaS Superadmin');
     } else {
       setEmail('admin@netfix.com');
-      setPassword('password123');
+      setPassword('Star@1122');
       setDemoFilled('ISP Admin');
     }
     setTimeout(() => setDemoFilled(null), 3000);
@@ -423,7 +424,7 @@ export default function LoginPage() {
                             Tenant: {selectedTenant.tenantName}
                           </p>
                           <p className="text-[10px] text-emerald-400 font-mono truncate">
-                            {selectedTenant.tenantCode}
+                            ID #{selectedTenant.tenantCode}
                           </p>
                         </div>
                       </div>
@@ -678,7 +679,7 @@ export default function LoginPage() {
                                 {t.tenantName}
                               </h4>
                               <p className="text-[11px] text-slate-400 font-mono truncate">
-                                {t.tenantCode} · {t.businessEmail}
+                                ID #{t.tenantCode} · {t.businessEmail}
                               </p>
                             </div>
                           </div>

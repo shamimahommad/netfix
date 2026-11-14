@@ -412,7 +412,7 @@ CREATE TABLE `olt_onus` (
   UNIQUE KEY `uq_olt_onu` (`tenant_id`,`network_device_id`,`mac_address`),
   KEY `idx_olt_mac` (`mac_address`),
   KEY `idx_olt_device` (`network_device_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=8749 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=8887 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -767,6 +767,9 @@ CREATE TABLE `tenants` (
   `suspended_at` datetime DEFAULT NULL,
   `terminated_at` datetime DEFAULT NULL,
   `metadata` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`metadata`)),
+  `log_storage_mode` enum('short_term_redis','long_term_victoria','disabled') NOT NULL DEFAULT 'short_term_redis',
+  `log_retention_days` int(10) unsigned NOT NULL DEFAULT 1,
+  `max_live_logs` int(10) unsigned NOT NULL DEFAULT 1000,
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`tenant_id`),
@@ -987,10 +990,6 @@ CREATE TABLE `wallets` (
   KEY `idx_wallets_status` (`status`)
 ) ENGINE=InnoDB AUTO_INCREMENT=22 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Dumping routines for database 'netfix_db'
---
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
@@ -1001,4 +1000,4 @@ CREATE TABLE `wallets` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-11-10 21:51:55
+-- Dump completed on 2026-11-12 15:29:22

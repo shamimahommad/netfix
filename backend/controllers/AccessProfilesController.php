@@ -52,7 +52,15 @@ class AccessProfilesController {
         $where = ["ap.tenant_id = :tid"];
         $params = ['tid' => $tenantId];
 
-        if (!empty($_GET['serverId'])) {
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        $callerLevel = HierarchySecurityService::getHierarchyLevel($user['role'] ?? '');
+        if ($callerLevel > 0) {
+            $assignedServerId = HierarchySecurityService::getAssignedServerId((int)$user['user_id']);
+            if ($assignedServerId) {
+                $where[] = "ap.network_device_id = :assigned_sid";
+                $params['assigned_sid'] = $assignedServerId;
+            }
+        } elseif (!empty($_GET['serverId'])) {
             $where[] = "ap.network_device_id = :sid";
             $params['sid'] = $_GET['serverId'];
         }

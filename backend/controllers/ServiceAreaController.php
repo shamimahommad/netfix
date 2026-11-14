@@ -6,12 +6,36 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
 require_once __DIR__ . '/../lib/AuthMiddleware.php';
+require_once __DIR__ . '/../lib/HierarchySecurityService.php';
 
 class ServiceAreaController {
     public static function listAreas(): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
+
+        $callerId = (int)$user['user_id'];
+        $role = strtolower($user['role'] ?? '');
+        $isLevel0 = (HierarchySecurityService::getHierarchyLevel($role) === 0 || $role === 'saas_admin');
+
+        $params = ['tid' => $tenantId];
+        $custTable = "customers c";
+        $unassignedScopeWhere = "";
+
+        if (!$isLevel0) {
+            $rawPath = $user['hierarchy_path'] ?? "/{$callerId}/";
+            $userPath = '/' . trim($rawPath, '/') . '/';
+            $params['scope_uid'] = $callerId;
+            $params['scope_path_wildcard'] = $userPath . '%';
+            $custTable = "(
+                SELECT c_inner.* 
+                FROM customers c_inner
+                LEFT JOIN users u_inner ON u_inner.user_id = c_inner.owner_id
+                WHERE c_inner.tenant_id = :tid 
+                  AND (c_inner.owner_id = :scope_uid OR u_inner.hierarchy_path LIKE :scope_path_wildcard OR c_inner.owner_path LIKE :scope_path_wildcard)
+            ) c";
+            $unassignedScopeWhere = " AND (c.owner_id = :scope_uid OR u.hierarchy_path LIKE :scope_path_wildcard OR c.owner_path LIKE :scope_path_wildcard)";
+        }
 
         $stmt = $db->prepare("SELECT 
             sa.service_area_id as id,
@@ -38,7 +62,7 @@ class ServiceAreaController {
                     OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.type'))) = 'vip' 
                 THEN c.customer_id END) as vipUsers
             FROM service_areas sa
-            LEFT JOIN customers c ON c.tenant_id = sa.tenant_id AND (
+            LEFT JOIN {$custTable} ON (
                 sa.service_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) AS UNSIGNED)
                 OR sa.name = JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id'))
                 OR sa.name = JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.area_name'))
@@ -49,7 +73,7 @@ class ServiceAreaController {
             WHERE sa.tenant_id = :tid 
             GROUP BY sa.service_area_id, sa.name, sa.description, sa.created_at, sa.updated_at
             ORDER BY sa.name ASC");
-        $stmt->execute(['tid' => $tenantId]);
+        $stmt->execute($params);
         $rows = $stmt->fetchAll();
 
         $areas = array_map(function($r) {
@@ -73,7 +97,7 @@ class ServiceAreaController {
             ];
         }, $rows);
 
-        // Also check if unassigned customers exist for this tenant
+        // Also check if unassigned customers exist for this tenant (scoped downward)
         $unassignedStmt = $db->prepare("
             SELECT 
                 COUNT(DISTINCT c.customer_id) as totalUsers,
@@ -94,9 +118,10 @@ class ServiceAreaController {
                         OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.type'))) = 'vip' 
                     THEN c.customer_id END) as vipUsers
             FROM customers c
+            LEFT JOIN users u ON u.user_id = c.owner_id
             LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status = 'active'
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
-            WHERE c.tenant_id = :tid AND NOT EXISTS (
+            WHERE c.tenant_id = :tid {$unassignedScopeWhere} AND NOT EXISTS (
                 SELECT 1 FROM service_areas sa WHERE sa.tenant_id = c.tenant_id AND (
                     sa.service_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) AS UNSIGNED)
                     OR sa.name = JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id'))
@@ -105,7 +130,7 @@ class ServiceAreaController {
                 )
             )
         ");
-        $unassignedStmt->execute(['tid' => $tenantId]);
+        $unassignedStmt->execute($params);
         $unassigned = $unassignedStmt->fetch();
         if ($unassigned && (int)$unassigned['totalUsers'] > 0) {
             $areas[] = [
@@ -171,6 +196,20 @@ class ServiceAreaController {
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
         $db = Database::getConnection();
+
+        $callerId = (int)$user['user_id'];
+        $role = strtolower($user['role'] ?? '');
+        $isLevel0 = (HierarchySecurityService::getHierarchyLevel($role) === 0 || $role === 'saas_admin');
+
+        if (!$isLevel0) {
+            $check = $db->prepare("SELECT created_by FROM service_areas WHERE service_area_id = :id AND tenant_id = :tid");
+            $check->execute(['id' => $id, 'tid' => $tenantId]);
+            $owner = $check->fetchColumn();
+            if ($owner !== false && (int)$owner !== $callerId) {
+                Response::error('Permission denied: You can only update service areas created by your account.', 403);
+            }
+        }
+
         $stmt = $db->prepare("UPDATE service_areas SET name = :name, description = :desc WHERE service_area_id = :id AND tenant_id = :tid");
         $stmt->execute([
             'name' => $data['name'] ?? '',
@@ -193,6 +232,19 @@ class ServiceAreaController {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
+
+        $callerId = (int)$user['user_id'];
+        $role = strtolower($user['role'] ?? '');
+        $isLevel0 = (HierarchySecurityService::getHierarchyLevel($role) === 0 || $role === 'saas_admin');
+
+        if (!$isLevel0) {
+            $check = $db->prepare("SELECT created_by FROM service_areas WHERE service_area_id = :id AND tenant_id = :tid");
+            $check->execute(['id' => $id, 'tid' => $tenantId]);
+            $owner = $check->fetchColumn();
+            if ($owner !== false && (int)$owner !== $callerId) {
+                Response::error('Permission denied: You can only delete service areas created by your account.', 403);
+            }
+        }
 
         $stmt = $db->prepare("DELETE FROM service_areas WHERE service_area_id = :id AND tenant_id = :tid");
         $stmt->execute(['id' => $id, 'tid' => $tenantId]);

@@ -74,4 +74,12 @@ export const tenantProfileService = {
     const response = await api.post<{ success: boolean; message: string }>(`/tenants/${tenantId}/reset-admin-password`, { password });
     return response.data;
   },
+
+  async updateLogPolicy(
+    tenantId: string,
+    payload: { logStorageMode: 'short_term_redis' | 'long_term_victoria' | 'disabled'; logRetentionDays: number; maxLiveLogs: number },
+  ): Promise<{ success: boolean; message: string; data: any }> {
+    const response = await api.put<{ success: boolean; message: string; data: any }>(`/tenants/${tenantId}/log-policy`, payload);
+    return response.data;
+  },
 };

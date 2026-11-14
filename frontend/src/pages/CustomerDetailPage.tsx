@@ -1480,9 +1480,16 @@ export default function CustomerDetailPage() {
                 label="Connected By" 
                 value={
                   billing.connectedBy ? (
-                    <span className="font-semibold text-slate-800 dark:text-slate-100">
-                      {billing.connectedBy}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-semibold text-slate-800 dark:text-slate-100">
+                        {billing.connectedBy}
+                      </span>
+                      {billing.connectedByRole && !['admin', 'isp_admin', 'saas_admin'].includes(billing.connectedByRole.toLowerCase()) && (
+                        <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800">
+                          {billing.connectedByRole.replace('_', ' ')}
+                        </span>
+                      )}
+                    </div>
                   ) : 'Admin'
                 } 
               />

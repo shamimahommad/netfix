@@ -69,6 +69,7 @@ export default function AddClientPage() {
   const navigate = useNavigate();
   const toast = useToastContext();
   const { user } = useAuthStore();
+  const isAdmin = user?.role_code === 'admin' || user?.role_code === 'isp_admin';
 
   const [step, setStep] = useState<Step>(1);
   const [isSaving, setIsSaving] = useState(false);
@@ -251,8 +252,9 @@ export default function AddClientPage() {
       setServers(list);
       if (list.length > 0) {
         setForm((prev) => {
-          const isValidCurrent = prev.serverId && list.some((s) => s.networkDeviceId === prev.serverId);
-          return isValidCurrent ? prev : { ...prev, serverId: list[0].networkDeviceId };
+          const targetServerId = !isAdmin && user?.assigned_server_id ? user.assigned_server_id : prev.serverId;
+          const isValidCurrent = targetServerId && list.some((s) => s.networkDeviceId === targetServerId);
+          return isValidCurrent ? { ...prev, serverId: targetServerId } : { ...prev, serverId: list[0].networkDeviceId };
         });
       } else {
         setForm((prev) => ({ ...prev, serverId: '' }));
@@ -985,20 +987,44 @@ export default function AddClientPage() {
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
                   Target Server / Router <span className="text-rose-500">*</span>
                 </label>
-                <select
-                  value={form.serverId}
-                  onChange={(e) => setForm((p) => ({ ...p, serverId: e.target.value }))}
-                  className={`w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${errors.serverId ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
-                    }`}
-                >
-                  <option value="">Select Router</option>
-                  {servers.length === 0 && <option value="0">Default Gateway / Standalone</option>}
-                  {servers.map((s) => (
-                    <option key={s.networkDeviceId} value={s.networkDeviceId}>
-                      {s.deviceName}
-                    </option>
-                  ))}
-                </select>
+                {!isAdmin ? (
+                  <div className="space-y-1.5">
+                    <div className="relative flex items-center">
+                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-blue-600 dark:text-blue-400">
+                        <Server className="w-4 h-4" />
+                      </span>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={servers.find((s) => s.networkDeviceId === form.serverId)?.deviceName || user?.assigned_server_name || 'Assigned Server (Locked)'}
+                        className="w-full pl-9 pr-9 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100/70 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 cursor-not-allowed font-medium text-sm"
+                      />
+                      <span className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-amber-500">
+                        <Lock className="w-4 h-4" />
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                      <Lock className="w-3 h-3 text-amber-500 shrink-0" />
+                      <span>Server is locked to your parent reseller's assigned router. Resellers cannot change server.</span>
+                    </p>
+                  </div>
+                ) : (
+                  <select
+                    value={form.serverId}
+                    onChange={(e) => setForm((p) => ({ ...p, serverId: e.target.value }))}
+                    className={`w-full px-3.5 py-2.5 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none ${errors.serverId ? 'border-rose-400' : 'border-slate-200 dark:border-slate-700'
+                      }`}
+                  >
+                    <option value="">Select Router</option>
+                    {servers.length === 0 && <option value="0">Default Gateway / Standalone</option>}
+                    {servers.map((s) => (
+                      <option key={s.networkDeviceId} value={s.networkDeviceId}>
+                        {s.deviceName}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 {errors.serverId && <p className="mt-1 text-xs text-rose-500 font-medium">{errors.serverId}</p>}
               </div>
 

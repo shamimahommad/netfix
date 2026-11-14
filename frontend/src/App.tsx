@@ -9,6 +9,8 @@ import LoginPage from './pages/LoginPage';
 import SaaSLayout from './components/layout/SaaSLayout';
 import TenantLayout from './components/layout/TenantLayout';
 import SaaSDashboard from './pages/SaaSDashboard';
+import SaaSPackagesPage from './pages/SaaSPackagesPage';
+import SaaSPlatformBillingPage from './pages/SaaSPlatformBillingPage';
 import TenantDashboard from './pages/TenantDashboard';
 import CustomersPage from './pages/CustomersPage';
 import CustomerDetailPage from './pages/CustomerDetailPage';
@@ -194,8 +196,9 @@ function AppContent() {
               <Route path="tenants" element={<ISPsListPage />} />
               <Route path="tenants/:tenantId/payment-callback" element={<PaymentCallbackPage />} />
               <Route path="tenants/:tenantId" element={<ISPProfilePage />} />
+              <Route path="packages" element={<SaaSPackagesPage />} />
+              <Route path="billing" element={<SaaSPlatformBillingPage />} />
               <Route path="customers" element={<PlaceholderPage title="Global Customers" description="View and manage customer accounts across all ISP tenants." />} />
-              <Route path="billing" element={<PlaceholderPage title="Platform Billing & Subscriptions" description="Manage SaaS subscription packages, tenant billing cycles, and invoice collections." />} />
               <Route path="network" element={<PlaceholderPage title="Network Infrastructure" description="Global network telemetry, router nodes, and cloud server health." />} />
               <Route path="settings" element={<PlaceholderPage title="SaaS System Settings" description="Configure global platform preferences, security, API integrations, and maintenance schedules." />} />
               <Route index element={<Navigate to="/saas/dashboard" replace />} />
@@ -233,6 +236,7 @@ function AppContent() {
               <Route path="my-packages" element={<MyPackagesPage />} />
               <Route path="reseller" element={<AgentRestrictedGuard><ResellerPage /></AgentRestrictedGuard>} />
               <Route path="topup-balance" element={<TopupBalancePage />} />
+              <Route path="billing/topup-balance" element={<TopupBalancePage />} />
               <Route path="reseller/plan-permission/:userId" element={<AgentRestrictedGuard><PlanPermissionPage /></AgentRestrictedGuard>} />
               <Route path="reseller/login-log" element={<AgentRestrictedGuard><LoginLogPage /></AgentRestrictedGuard>} />
               <Route path="reseller/login-log/:userId" element={<AgentRestrictedGuard><LoginLogPage /></AgentRestrictedGuard>} />

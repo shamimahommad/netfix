@@ -593,7 +593,7 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
                           }`}
                         >
                           <div className="font-medium">{tenant.tenantName}</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400">{tenant.tenantCode}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 font-mono">ID #{tenant.tenantCode}</div>
                         </button>
                       ))}
                     </div>
@@ -683,10 +683,7 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
           <div className="relative hidden sm:block">
           <div className="flex items-center space-x-3">
             <div className="text-right">
-              <p className="text-sm font-medium text-text-primary">{userName}</p>
-              <p className="text-xs text-text-secondary">
-                {userType === 'saas' ? 'SaaS Admin' : getRoleDisplayLabel(user?.role_code)}
-              </p>
+              <p className="text-sm font-semibold text-text-primary leading-tight">{userName}</p>
             </div>
             <button
               type="button"
@@ -769,6 +766,16 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
                   </svg>
                 </span>
                 Change Password
+              </button>
+              <button
+                type="button"
+                onClick={() => { setIsAvatarDropdownOpen(false); handleLogout(); }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 border-t border-slate-100 dark:border-slate-700 transition-colors"
+              >
+                <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-rose-100 dark:bg-rose-900/50 text-rose-600 dark:text-rose-400 shrink-0">
+                  <LogoutIcon />
+                </span>
+                <span className="font-medium">Logout</span>
               </button>
             </div>
           )}

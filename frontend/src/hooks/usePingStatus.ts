@@ -26,10 +26,10 @@ export function usePingStatus(deviceIds: string[], enabled: boolean = true) {
 
     fetchPingStatuses();
 
-    // Set up polling every 10 seconds
+    // Set up polling every 30 seconds
     intervalRef.current = setInterval(() => {
       fetchPingStatuses();
-    }, 10000);
+    }, 30000);
 
     return () => {
       if (intervalRef.current) {

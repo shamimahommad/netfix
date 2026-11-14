@@ -73,7 +73,7 @@ export default function MyPackagesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, search, toast]);
+  }, [page, limit, search]);
 
   useEffect(() => {
     fetchPackages();
@@ -263,7 +263,19 @@ export default function MyPackagesPage() {
                         ৳{Number(row.my_profit || 0).toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold text-slate-700 dark:text-slate-300">
-                        {row.count}
+                        {row.count > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/dashboard/customers/all?search=${encodeURIComponent(row.name)}`)}
+                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all cursor-pointer"
+                            title={`View ${row.count} active subscribers on ${row.name}`}
+                          >
+                            <Users className="w-3 h-3" />
+                            <span>{row.count.toLocaleString()}</span>
+                          </button>
+                        ) : (
+                          <span className="text-slate-400 dark:text-slate-500 font-normal">0</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-slate-600 dark:text-slate-400 text-xs">
                         {row.validity}

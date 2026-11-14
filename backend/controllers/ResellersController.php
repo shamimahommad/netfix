@@ -72,6 +72,10 @@ class ResellersController {
         $rows = $stmt->fetchAll();
 
         $resellers = array_map(function($r) {
+            $sId = $r['serverId'];
+            if (empty($sId) || $sId === '0' || $sId === 'unassigned') {
+                $sId = HierarchySecurityService::getAssignedServerId((int)$r['user_id']);
+            }
             return [
                 'userId' => (string)$r['user_id'],
                 'name' => trim($r['first_name'] . ' ' . $r['last_name']),
@@ -82,7 +86,7 @@ class ResellersController {
                 'credit_limit' => $r['credit_limit'] !== null ? (float)$r['credit_limit'] : 0.00,
                 'phone' => $r['phone'],
                 'status' => $r['status'],
-                'serverId' => $r['serverId'],
+                'serverId' => $sId ?: null,
             ];
         }, $rows);
 
@@ -179,6 +183,27 @@ class ResellersController {
         $parentUser = HierarchySecurityService::getUser($parentId);
         $parentPath = $parentUser['hierarchy_path'] ?? "/{$parentId}/";
 
+        // Strict Server Assignment: Resellers & Agents NEVER select a server.
+        // Downlines strictly inherit their parent reseller's assigned server.
+        $callerRole = strtolower($currentUser['role'] ?? '');
+        $callerLevel = HierarchySecurityService::getHierarchyLevel($callerRole);
+        $isLevel0 = ($callerLevel === 0 || $callerRole === 'saas_admin');
+
+        $assignedServerId = null;
+        if (!$isLevel0) {
+            $assignedServerId = HierarchySecurityService::getAssignedServerId((int)$currentUser['user_id']);
+            if (!$assignedServerId) {
+                Response::error('Server Assignment Required: No server has been assigned to your reseller account by ISP Admin. Please contact ISP Admin before adding downlines.', 400);
+            }
+        } else {
+            $parentLevel = HierarchySecurityService::getHierarchyLevel($parentUser['role'] ?? '');
+            if ($parentLevel > 0) {
+                $assignedServerId = HierarchySecurityService::getAssignedServerId($parentId);
+            } else {
+                $assignedServerId = !empty($data['serverId']) ? (string)$data['serverId'] : null;
+            }
+        }
+
         $stmt = $db->prepare("INSERT INTO users 
             (tenant_id, email, username, password_hash, first_name, last_name, phone, role, role_level, parent_id, hierarchy_path, status, metadata, created_by)
             VALUES (:tid, :email, :uname, :pwd, :fname, '', :phone, :role, :lvl, :pid, :path, :status, :meta, :created_by)");
@@ -197,8 +222,8 @@ class ResellersController {
             'status' => $data['status'] ?? 'active',
             'meta' => json_encode([
                 'credit_limit' => $data['credit_limit'] ?? 0,
-                'network_device_id' => $data['serverId'] ?? null,
-            ]),
+                'network_device_id' => $assignedServerId,
+            ], JSON_UNESCAPED_UNICODE),
             'created_by' => $currentUser['user_id'],
         ]);
 
@@ -249,33 +274,207 @@ class ResellersController {
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $db = Database::getConnection();
 
-        $fields = [];
-        $params = ['id' => $id, 'tid' => $tenantId];
+        // 1. Verify user exists
+        $stmt = $db->prepare("SELECT user_id, tenant_id, username, email, role, hierarchy_path, metadata FROM users WHERE user_id = :id LIMIT 1");
+        $stmt->execute(['id' => $id]);
+        $targetUser = $stmt->fetch();
 
-        if (!empty($data['name'])) {
+        if (!$targetUser) {
+            Response::error('User not found', 404);
+        }
+
+        $callerRole = $currentUser['role'] ?? '';
+        $isSuperAdmin = ($callerRole === 'saas_admin');
+        $isTenantAdmin = in_array($callerRole, ['admin', 'isp_admin', 'manager'], true);
+
+        // Security check
+        if (!$isSuperAdmin) {
+            if ($isTenantAdmin) {
+                if (!empty($targetUser['tenant_id']) && (string)$targetUser['tenant_id'] !== (string)$tenantId) {
+                    Response::error('Access denied for this user', 403);
+                }
+            } else {
+                $callerPath = $currentUser['hierarchy_path'] ?? "/{$currentUser['user_id']}/";
+                $targetPath = $targetUser['hierarchy_path'] ?? '';
+                if (!str_starts_with($targetPath, rtrim($callerPath, '/') . '/')) {
+                    Response::error('Permission denied to update this user', 403);
+                }
+            }
+        }
+
+        $fields = [];
+        $params = ['id' => $id];
+
+        // First Name
+        if (isset($data['name']) && trim($data['name']) !== '') {
             $fields[] = "first_name = :name";
-            $params['name'] = $data['name'];
+            $params['name'] = trim($data['name']);
         }
-        if (!empty($data['phone'])) {
+
+        // Username
+        if (isset($data['username']) && trim($data['username']) !== '') {
+            $newUsername = trim($data['username']);
+            if (strtolower($newUsername) !== strtolower($targetUser['username'])) {
+                $check = $db->prepare("SELECT user_id FROM users WHERE LOWER(username) = LOWER(:u) AND user_id != :id LIMIT 1");
+                $check->execute(['u' => $newUsername, 'id' => $id]);
+                if ($check->fetch()) {
+                    Response::error('Username already taken', 400);
+                }
+                $fields[] = "username = :uname";
+                $params['uname'] = $newUsername;
+
+                // Sync default generated email if applicable
+                $currentEmail = $targetUser['email'] ?? '';
+                if (empty($currentEmail) || str_ends_with($currentEmail, '@ispnetfix.local') || str_ends_with($currentEmail, '@reseller.local')) {
+                    $fields[] = "email = :new_email";
+                    $params['new_email'] = strtolower($newUsername) . '@ispnetfix.local';
+                }
+            }
+        }
+
+        // Email
+        if (isset($data['email']) && trim($data['email']) !== '') {
+            $newEmail = trim($data['email']);
+            if (strtolower($newEmail) !== strtolower($targetUser['email'] ?? '')) {
+                $checkEmail = $db->prepare("SELECT user_id FROM users WHERE LOWER(email) = LOWER(:e) AND user_id != :id LIMIT 1");
+                $checkEmail->execute(['e' => $newEmail, 'id' => $id]);
+                if ($checkEmail->fetch()) {
+                    Response::error('Email already in use', 400);
+                }
+                $fields[] = "email = :email";
+                $params['email'] = $newEmail;
+            }
+        }
+
+        // Phone
+        if (isset($data['phone'])) {
             $fields[] = "phone = :phone";
-            $params['phone'] = $data['phone'];
+            $params['phone'] = trim($data['phone']) ?: null;
         }
-        if (!empty($data['password'])) {
+
+        // Password Reset
+        if (isset($data['password']) && trim((string)$data['password']) !== '') {
+            $rawPassword = trim((string)$data['password']);
+            if (strlen($rawPassword) < 4) {
+                Response::error('Password must be at least 4 characters', 400);
+            }
             $fields[] = "password_hash = :pwd";
-            $params['pwd'] = password_hash($data['password'], PASSWORD_BCRYPT);
+            $fields[] = "password_changed_at = NOW()";
+            $params['pwd'] = password_hash($rawPassword, PASSWORD_BCRYPT);
         }
+
+        // Status
         if (!empty($data['status'])) {
             $fields[] = "status = :status";
             $params['status'] = $data['status'];
         }
 
+        // Role & Role Level
+        $roleLevels = [
+            'admin' => 100,
+            'isp_admin' => 90,
+            'manager' => 85,
+            'reseller' => 80,
+            'sub_reseller' => 60,
+            'dealer' => 40,
+            'agent' => 20
+        ];
+        if (!empty($data['role']) && isset($roleLevels[$data['role']])) {
+            $fields[] = "role = :role";
+            $fields[] = "role_level = :lvl";
+            $params['role'] = $data['role'];
+            $params['lvl'] = $roleLevels[$data['role']];
+        }
+
+        // Metadata: credit_limit, network_device_id
+        $meta = json_decode($targetUser['metadata'] ?? '{}', true) ?: [];
+        $metaUpdated = false;
+        if (isset($data['credit_limit']) && ($isSuperAdmin || $isTenantAdmin)) {
+            $meta['credit_limit'] = (float)$data['credit_limit'];
+            $metaUpdated = true;
+        }
+
+        // Server Assignment: ONLY ISP Admin (Level 0) can assign or change server!
+        // Resellers and Agents can NEVER change server.
+        if (($isSuperAdmin || $isTenantAdmin) && array_key_exists('serverId', $data)) {
+            $newServerId = !empty($data['serverId']) ? (string)$data['serverId'] : null;
+            $oldServerId = $meta['network_device_id'] ?? null;
+            $meta['network_device_id'] = $newServerId;
+            $metaUpdated = true;
+
+            // Cascade to all sub-resellers, dealers, and agents under this reseller
+            if ($newServerId !== $oldServerId) {
+                HierarchySecurityService::cascadeServerToDescendants((int)$id, $newServerId);
+            }
+        }
+        if ($metaUpdated) {
+            $fields[] = "metadata = :meta";
+            $params['meta'] = json_encode($meta);
+        }
+
         if (!empty($fields)) {
-            $sql = "UPDATE users SET " . implode(', ', $fields) . " WHERE user_id = :id AND tenant_id = :tid";
+            $fields[] = "updated_at = NOW()";
+            $sql = "UPDATE users SET " . implode(', ', $fields) . " WHERE user_id = :id";
             $stmt = $db->prepare($sql);
             $stmt->execute($params);
         }
 
-        Response::json(['success' => true, 'message' => 'Reseller updated successfully']);
+        Response::json([
+            'success' => true,
+            'message' => 'Reseller updated successfully',
+            'userId' => (string)$id,
+        ]);
+    }
+
+    public static function resetPassword(string $id): void {
+        $currentUser = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+        $password = trim((string)($data['password'] ?? ''));
+
+        if (empty($password)) {
+            Response::error('Password is required', 400);
+        }
+        if (strlen($password) < 4) {
+            Response::error('Password must be at least 4 characters', 400);
+        }
+
+        $db = Database::getConnection();
+        $stmt = $db->prepare("SELECT user_id, tenant_id, username, email, role, hierarchy_path FROM users WHERE user_id = :id LIMIT 1");
+        $stmt->execute(['id' => $id]);
+        $targetUser = $stmt->fetch();
+
+        if (!$targetUser) {
+            Response::error('User not found', 404);
+        }
+
+        $callerRole = $currentUser['role'] ?? '';
+        $isSuperAdmin = ($callerRole === 'saas_admin');
+        $isTenantAdmin = in_array($callerRole, ['admin', 'isp_admin', 'manager'], true);
+
+        if (!$isSuperAdmin) {
+            if ($isTenantAdmin) {
+                if (!empty($targetUser['tenant_id']) && (string)$targetUser['tenant_id'] !== (string)$tenantId) {
+                    Response::error('Access denied for this user', 403);
+                }
+            } else {
+                $callerPath = $currentUser['hierarchy_path'] ?? "/{$currentUser['user_id']}/";
+                $targetPath = $targetUser['hierarchy_path'] ?? '';
+                if (!str_starts_with($targetPath, rtrim($callerPath, '/') . '/')) {
+                    Response::error('Permission denied to reset password for this user', 403);
+                }
+            }
+        }
+
+        $newHash = password_hash($password, PASSWORD_BCRYPT);
+        $upd = $db->prepare("UPDATE users SET password_hash = :hash, password_changed_at = NOW(), updated_at = NOW() WHERE user_id = :id");
+        $upd->execute(['hash' => $newHash, 'id' => $id]);
+
+        Response::json([
+            'success' => true,
+            'message' => 'Password reset successfully for ' . $targetUser['username'],
+            'username' => $targetUser['username'],
+        ]);
     }
 
     public static function setStatus(string $id): void {
@@ -285,8 +484,21 @@ class ResellersController {
         $status = $data['status'] ?? 'active';
 
         $db = Database::getConnection();
-        $stmt = $db->prepare("UPDATE users SET status = :status WHERE user_id = :id AND tenant_id = :tid");
-        $stmt->execute(['status' => $status, 'id' => $id, 'tid' => $tenantId]);
+        $stmt = $db->prepare("SELECT user_id, tenant_id FROM users WHERE user_id = :id LIMIT 1");
+        $stmt->execute(['id' => $id]);
+        $targetUser = $stmt->fetch();
+
+        if (!$targetUser) {
+            Response::error('User not found', 404);
+        }
+
+        $callerRole = $currentUser['role'] ?? '';
+        if ($callerRole !== 'saas_admin' && !empty($targetUser['tenant_id']) && (string)$targetUser['tenant_id'] !== (string)$tenantId) {
+            Response::error('Access denied', 403);
+        }
+
+        $upd = $db->prepare("UPDATE users SET status = :status, updated_at = NOW() WHERE user_id = :id");
+        $upd->execute(['status' => $status, 'id' => $id]);
 
         Response::json(['success' => true, 'status' => $status]);
     }
@@ -296,8 +508,21 @@ class ResellersController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("UPDATE users SET status = 'inactive', deleted_at = NOW() WHERE user_id = :id AND tenant_id = :tid");
-        $stmt->execute(['id' => $id, 'tid' => $tenantId]);
+        $stmt = $db->prepare("SELECT user_id, tenant_id FROM users WHERE user_id = :id LIMIT 1");
+        $stmt->execute(['id' => $id]);
+        $targetUser = $stmt->fetch();
+
+        if (!$targetUser) {
+            Response::error('User not found', 404);
+        }
+
+        $callerRole = $currentUser['role'] ?? '';
+        if ($callerRole !== 'saas_admin' && !empty($targetUser['tenant_id']) && (string)$targetUser['tenant_id'] !== (string)$tenantId) {
+            Response::error('Access denied', 403);
+        }
+
+        $upd = $db->prepare("UPDATE users SET status = 'inactive', deleted_at = NOW(), updated_at = NOW() WHERE user_id = :id");
+        $upd->execute(['id' => $id]);
 
         Response::json(['success' => true]);
     }
@@ -444,7 +669,66 @@ class ResellersController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $userId = $currentUser['user_id'];
+        $userId = (int)$currentUser['user_id'];
+        $role = strtolower($currentUser['role'] ?? '');
+        $isLevel0 = (HierarchySecurityService::getHierarchyLevel($role) === 0 || $role === 'saas_admin');
+
+        $page = max(1, (int)($_GET['page'] ?? 1));
+        $limit = max(1, min(100, (int)($_GET['limit'] ?? 25)));
+        $offset = ($page - 1) * $limit;
+
+        $where = ["ap.tenant_id = :tid"];
+        $params = ['uid' => $userId, 'tid' => $tenantId];
+
+        if (!empty($_GET['search'])) {
+            $search = '%' . trim($_GET['search']) . '%';
+            $where[] = "(ap.profile_name LIKE :s1 OR ap.protocol LIKE :s2 OR ap.mikrotik_profile_name LIKE :s3)";
+            $params['s1'] = $search;
+            $params['s2'] = $search;
+            $params['s3'] = $search;
+        }
+
+        // Downward-Inclusive Hierarchy Scoping for active subscribers
+        if ($isLevel0) {
+            $subscribersCountSql = "(
+                SELECT COUNT(DISTINCT cs_sub.customer_id)
+                FROM customer_services cs_sub
+                JOIN customers c_sub ON c_sub.customer_id = cs_sub.customer_id
+                WHERE cs_sub.access_profile_id = ap.access_profile_id
+                  AND cs_sub.status = 'active'
+                  AND c_sub.tenant_id = ap.tenant_id
+            )";
+        } else {
+            $rawPath = $currentUser['hierarchy_path'] ?? "/{$userId}/";
+            $userPath = '/' . trim($rawPath, '/') . '/';
+            $params['scope_uid'] = $userId;
+            $params['scope_path_wildcard'] = $userPath . '%';
+
+            $subscribersCountSql = "(
+                SELECT COUNT(DISTINCT cs_sub.customer_id)
+                FROM customer_services cs_sub
+                JOIN customers c_sub ON c_sub.customer_id = cs_sub.customer_id
+                LEFT JOIN users u_sub ON u_sub.user_id = c_sub.owner_id
+                WHERE cs_sub.access_profile_id = ap.access_profile_id
+                  AND cs_sub.status = 'active'
+                  AND c_sub.tenant_id = ap.tenant_id
+                  AND (c_sub.owner_id = :scope_uid OR u_sub.hierarchy_path LIKE :scope_path_wildcard OR c_sub.owner_path LIKE :scope_path_wildcard)
+            )";
+        }
+
+        $whereSql = implode(' AND ', $where);
+
+        // Count total packages
+        $countStmt = $db->prepare("SELECT COUNT(*) FROM access_profiles ap WHERE {$whereSql}");
+        foreach ($params as $k => $v) {
+            if ($k !== 'scope_uid' && $k !== 'scope_path_wildcard' && $k !== 'uid') {
+                $countStmt->bindValue(':' . $k, $v);
+            }
+        }
+        $countStmt->execute();
+        $total = (int)$countStmt->fetchColumn();
+        $countStmt->closeCursor();
+
         $stmt = $db->prepare("SELECT 
             ap.access_profile_id as id,
             COALESCE(
@@ -470,19 +754,26 @@ class ResellersController {
             ap.profile_name as name,
             ap.mikrotik_profile_name as mikrotik_profile,
             ap.price,
-            COALESCE(rpp.sell_price, ap.price) as my_price,
-            COALESCE(rpp.pop_profit, 0) as my_profit,
-            COUNT(cs.customer_id) as count,
+            COALESCE(tp.cost_price, rpp.sell_price, ap.price) as my_price,
+            COALESCE(NULLIF(tp.retail_price - tp.cost_price, 0), rpp.pop_profit, (ap.price - COALESCE(tp.cost_price, rpp.sell_price, ap.price)), 0) as my_profit,
+            {$subscribersCountSql} as count,
             CONCAT(ap.validity_days, ' Days') as validity,
             CASE WHEN ap.data_volume_type = 'unlimited' THEN 'Unlimited' ELSE CONCAT(ap.data_volume_gb, ' GB') END as volume,
             ap.status
             FROM access_profiles ap
             LEFT JOIN network_devices nd ON nd.network_device_id = ap.network_device_id
+            LEFT JOIN tier_packages tp ON tp.package_id = ap.access_profile_id AND tp.user_id = :uid AND tp.tenant_id = :tid
             LEFT JOIN reseller_plan_permission rpp ON rpp.access_profile_id = ap.access_profile_id AND rpp.user_id = :uid
-            LEFT JOIN customer_services cs ON cs.access_profile_id = ap.access_profile_id AND cs.status = 'active'
-            WHERE ap.tenant_id = :tid
-            GROUP BY ap.access_profile_id");
-        $stmt->execute(['uid' => $userId, 'tid' => $tenantId]);
+            WHERE {$whereSql}
+            ORDER BY ap.access_profile_id ASC
+            LIMIT :lim OFFSET :off");
+
+        foreach ($params as $k => $v) {
+            $stmt->bindValue(':' . $k, $v);
+        }
+        $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
+        $stmt->bindValue(':off', $offset, PDO::PARAM_INT);
+        $stmt->execute();
         $rows = $stmt->fetchAll();
 
         $data = array_map(function($r) {
@@ -505,10 +796,10 @@ class ResellersController {
         Response::json([
             'data' => $data,
             'meta' => [
-                'total' => count($data),
-                'page' => 1,
-                'limit' => 50,
-                'totalPages' => 1,
+                'total' => $total,
+                'page' => $page,
+                'limit' => $limit,
+                'totalPages' => max(1, (int)ceil($total / $limit)),
             ],
         ]);
     }

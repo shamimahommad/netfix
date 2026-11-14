@@ -31,4 +31,14 @@ export const tenantsService = {
     const response = await api.delete<{ success: boolean; message: string }>(`/tenants/${id}`);
     return response.data;
   },
+
+  async getNextTenantCode(): Promise<{ success: boolean; nextCode: string }> {
+    const response = await api.get<{ success: boolean; nextCode: string }>('/tenants/next-code');
+    return response.data;
+  },
+
+  async lookupTenant(codeOrId: string): Promise<{ success: boolean; data: any }> {
+    const response = await api.get<{ success: boolean; data: any }>(`/tenants/lookup/${encodeURIComponent(codeOrId)}`);
+    return response.data;
+  },
 };

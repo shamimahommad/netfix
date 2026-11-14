@@ -19,6 +19,8 @@ export interface LoginResponse {
     tenant_logo?: string | null;
     user_type: 'saas' | 'isp' | 'customer';
     role_code: string;
+    assigned_server_id?: string | null;
+    assigned_server_name?: string | null;
   };
 }
 
@@ -29,6 +31,8 @@ export interface MeResponse {
   tenant_logo?: string | null;
   user_type: 'saas' | 'isp' | 'customer';
   role_code: string;
+  assigned_server_id?: string | null;
+  assigned_server_name?: string | null;
   balance: number;
   first_name?: string;
   last_name?: string;

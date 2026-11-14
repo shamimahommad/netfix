@@ -27,6 +27,12 @@ import {
   Globe,
   Layers,
   Clock,
+  Database,
+  HardDrive,
+  Zap,
+  ShieldCheck,
+  Copy,
+  Hash,
 } from 'lucide-react';
 import { tenantProfileService } from '@/services/tenant-profile.service';
 import { useToastContext } from '@/contexts/ToastContext';
@@ -39,8 +45,9 @@ import {
   TenantDeviceItem,
   TenantUserItem,
 } from '@/types/tenant-profile.types';
+import { LogStorageMode } from '@/types/tenant.types';
 
-type ProfileTab = 'network' | 'limits' | 'features' | 'payment' | 'sms' | 'users';
+type ProfileTab = 'network' | 'limits' | 'features' | 'payment' | 'sms' | 'users' | 'logs';
 
 const itemUp = { initial: { opacity: 0, y: 12 }, animate: { opacity: 1, y: 0 } };
 
@@ -115,6 +122,18 @@ export default function ISPProfilePage() {
   const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
   const [newAdminPassword, setNewAdminPassword] = useState('');
   const [isResettingPassword, setIsResettingPassword] = useState(false);
+
+  // Syslog Tiered Policy Form
+  const [logPolicyForm, setLogPolicyForm] = useState<{
+    logStorageMode: LogStorageMode;
+    logRetentionDays: number;
+    maxLiveLogs: number;
+  }>({
+    logStorageMode: 'short_term_redis',
+    logRetentionDays: 1,
+    maxLiveLogs: 1000,
+  });
+  const [isSavingLogPolicy, setIsSavingLogPolicy] = useState(false);
 
   useEffect(() => {
     if (tenantId) {
@@ -201,6 +220,16 @@ export default function ISPProfilePage() {
           credentials: sms.credentials || {},
         });
       }
+
+      // Syslog Storage Policy
+      if (pData.tenant) {
+        const tAny = pData.tenant as any;
+        setLogPolicyForm({
+          logStorageMode: tAny.logStorageMode || tAny.log_storage_mode || 'short_term_redis',
+          logRetentionDays: Number(tAny.logRetentionDays ?? tAny.log_retention_days ?? 1),
+          maxLiveLogs: Number(tAny.maxLiveLogs ?? tAny.max_live_logs ?? 1000),
+        });
+      }
     } catch (err: any) {
       console.error('Error loading tenant profile:', err);
       const msg = err.response?.data?.message || err.message || 'Failed to load ISP profile';
@@ -243,6 +272,20 @@ export default function ISPProfilePage() {
       toast.error(err.response?.data?.message || 'Failed to update limits');
     } finally {
       setIsSavingLimits(false);
+    }
+  };
+
+  const handleSaveLogPolicy = async () => {
+    if (!tenantId) return;
+    setIsSavingLogPolicy(true);
+    try {
+      await tenantProfileService.updateLogPolicy(tenantId, logPolicyForm);
+      toast.success('Log storage policy updated successfully');
+      loadProfile(true);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to update log storage policy');
+    } finally {
+      setIsSavingLogPolicy(false);
     }
   };
 
@@ -469,7 +512,7 @@ export default function ISPProfilePage() {
                   {tenant.tenantName}
                 </h1>
                 <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-600">
-                  {tenant.tenantCode}
+                  ID #{tenant.tenantCode}
                 </span>
                 <span
                   className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${
@@ -643,6 +686,7 @@ export default function ISPProfilePage() {
           { id: 'payment', label: 'Payment Gateways', icon: CreditCard, count: enabledGateways.length },
           { id: 'sms', label: 'SMS Gateway', icon: MessageSquare },
           { id: 'users', label: 'Tenant Staff & Admins', icon: Users, count: users.length },
+          { id: 'logs', label: 'Syslog Storage Policy', icon: Database, badgeText: logPolicyForm.logStorageMode === 'long_term_victoria' ? 'VictoriaLogs' : logPolicyForm.logStorageMode === 'disabled' ? 'Disabled' : 'Redis' },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -667,6 +711,21 @@ export default function ISPProfilePage() {
                   }`}
                 >
                   {tab.count}
+                </span>
+              )}
+              {tab.badgeText && (
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                    isActive
+                      ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
+                      : tab.badgeText === 'VictoriaLogs'
+                      ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
+                      : tab.badgeText === 'Disabled'
+                      ? 'bg-slate-100 dark:bg-slate-700 text-slate-500'
+                      : 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                  }`}
+                >
+                  {tab.badgeText}
                 </span>
               )}
             </button>
@@ -1011,6 +1070,38 @@ export default function ISPProfilePage() {
             >
               Test Payment Flow
             </button>
+          </div>
+
+          {/* Unique ISP ID & Dedicated Payment Webhook Integration Card */}
+          <div className="p-5 bg-gradient-to-r from-blue-50 to-indigo-50/60 dark:from-slate-900 dark:to-slate-900 border-b border-slate-200 dark:border-slate-700/80 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
+                  <Hash className="w-4 h-4" />
+                  ISP Unique ID: <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 font-bold">#{tenant.tenantCode}</span>
+                </span>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Use this dedicated webhook URL in merchant portals (bKash, Nagad, SSLCommerz, SurjoPay) for automated instant payment callbacks and IPN reconciliation.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+              <div className="flex-1 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2 font-mono text-xs text-slate-700 dark:text-slate-300 truncate select-all">
+                {`${window.location.origin}/api/payment/webhook?isp_id=${tenant.tenantCode}`}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/api/payment/webhook?isp_id=${tenant.tenantCode}`);
+                  toast.success(`Webhook URL for ${tenant.tenantCode} copied to clipboard!`);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-sm transition-all active:scale-95 shrink-0 flex items-center gap-1.5"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copy Webhook URL</span>
+              </button>
+            </div>
           </div>
 
           <div className="p-6 space-y-4">
@@ -1399,6 +1490,215 @@ export default function ISPProfilePage() {
                 </tbody>
               </table>
             )}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Tab 7: Syslog Storage Policy (Redis & VictoriaLogs) */}
+      {activeTab === 'logs' && (
+        <motion.div {...itemUp} className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 sm:p-6 shadow-sm space-y-6">
+          <div className="border-b border-slate-100 dark:border-slate-800 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <Database className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                Syslog Ingestion & Storage Policy (Tiered Architecture)
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Configure whether this ISP tenant retains ephemeral in-memory live logs in Redis or archives compressed long-term records in VictoriaLogs.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleSaveLogPolicy}
+              disabled={isSavingLogPolicy}
+              className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm shadow-sm transition-all active:scale-95 disabled:opacity-50 shrink-0"
+            >
+              <Save className="w-4 h-4" />
+              <span>{isSavingLogPolicy ? 'Saving Policy...' : 'Save Storage Policy'}</span>
+            </button>
+          </div>
+
+          {/* 3 Tier Storage Mode Cards */}
+          <div className="space-y-3">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Select Primary Storage Engine
+            </label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Option 1: Redis */}
+              <div
+                onClick={() => setLogPolicyForm({ ...logPolicyForm, logStorageMode: 'short_term_redis' })}
+                className={`relative p-5 rounded-2xl border-2 cursor-pointer transition-all ${
+                  logPolicyForm.logStorageMode === 'short_term_redis'
+                    ? 'border-amber-500 bg-amber-50/40 dark:bg-amber-950/20 shadow-sm'
+                    : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50'
+                }`}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                    <Zap className="w-5 h-5" />
+                  </div>
+                  <input
+                    type="radio"
+                    name="logStorageMode"
+                    value="short_term_redis"
+                    checked={logPolicyForm.logStorageMode === 'short_term_redis'}
+                    onChange={() => {}}
+                    className="w-4 h-4 text-amber-600 focus:ring-amber-500 border-slate-300"
+                  />
+                </div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mt-3 flex items-center gap-2">
+                  Short-Term Live Buffer
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 font-bold uppercase">
+                    Redis
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                  Ephemeral in-memory list (<code>logs:tenant:{'{id}'}</code>). Automatically trimmed to recent live logs with 24-hour expiration. Zero SSD disk writes!
+                </p>
+                <div className="mt-4 pt-3 border-t border-slate-200/60 dark:border-slate-800 flex flex-wrap gap-1.5 text-[11px] font-medium text-amber-800 dark:text-amber-300">
+                  <span className="px-2 py-0.5 rounded bg-amber-100/70 dark:bg-amber-900/40">Zero MySQL I/O</span>
+                  <span className="px-2 py-0.5 rounded bg-amber-100/70 dark:bg-amber-900/40">Real-time Stream</span>
+                  <span className="px-2 py-0.5 rounded bg-amber-100/70 dark:bg-amber-900/40">Auto 24h Purge</span>
+                </div>
+              </div>
+
+              {/* Option 2: VictoriaLogs */}
+              <div
+                onClick={() => setLogPolicyForm({ ...logPolicyForm, logStorageMode: 'long_term_victoria' })}
+                className={`relative p-5 rounded-2xl border-2 cursor-pointer transition-all ${
+                  logPolicyForm.logStorageMode === 'long_term_victoria'
+                    ? 'border-purple-500 bg-purple-50/40 dark:bg-purple-950/20 shadow-sm'
+                    : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50'
+                }`}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+                    <HardDrive className="w-5 h-5" />
+                  </div>
+                  <input
+                    type="radio"
+                    name="logStorageMode"
+                    value="long_term_victoria"
+                    checked={logPolicyForm.logStorageMode === 'long_term_victoria'}
+                    onChange={() => {}}
+                    className="w-4 h-4 text-purple-600 focus:ring-purple-500 border-slate-300"
+                  />
+                </div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mt-3 flex items-center gap-2">
+                  Long-Term Archive
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 font-bold uppercase">
+                    VictoriaLogs
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                  High-compression columnar storage with ultra-fast LogsQL full-text search. Up to 10x-20x storage compression compared to standard SQL tables.
+                </p>
+                <div className="mt-4 pt-3 border-t border-slate-200/60 dark:border-slate-800 flex flex-wrap gap-1.5 text-[11px] font-medium text-purple-800 dark:text-purple-300">
+                  <span className="px-2 py-0.5 rounded bg-purple-100/70 dark:bg-purple-900/40">LogsQL Engine</span>
+                  <span className="px-2 py-0.5 rounded bg-purple-100/70 dark:bg-purple-900/40">10x Compression</span>
+                  <span className="px-2 py-0.5 rounded bg-purple-100/70 dark:bg-purple-900/40">BTRC Compliance</span>
+                </div>
+              </div>
+
+              {/* Option 3: Disabled */}
+              <div
+                onClick={() => setLogPolicyForm({ ...logPolicyForm, logStorageMode: 'disabled' })}
+                className={`relative p-5 rounded-2xl border-2 cursor-pointer transition-all ${
+                  logPolicyForm.logStorageMode === 'disabled'
+                    ? 'border-slate-500 bg-slate-100/60 dark:bg-slate-800/60 shadow-sm'
+                    : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50'
+                }`}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 flex items-center justify-center">
+                    <AlertCircle className="w-5 h-5" />
+                  </div>
+                  <input
+                    type="radio"
+                    name="logStorageMode"
+                    value="disabled"
+                    checked={logPolicyForm.logStorageMode === 'disabled'}
+                    onChange={() => {}}
+                    className="w-4 h-4 text-slate-600 focus:ring-slate-500 border-slate-300"
+                  />
+                </div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mt-3 flex items-center gap-2">
+                  Syslog Ingestion Disabled
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                  Incoming RouterOS syslog packets for this tenant are dropped immediately at the UDP collector socket with zero memory allocation and zero disk writes.
+                </p>
+                <div className="mt-4 pt-3 border-t border-slate-200/60 dark:border-slate-800 flex flex-wrap gap-1.5 text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                  <span className="px-2 py-0.5 rounded bg-slate-200/60 dark:bg-slate-800">No Storage Used</span>
+                  <span className="px-2 py-0.5 rounded bg-slate-200/60 dark:bg-slate-800">Zero CPU Load</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Dynamic Configuration Fields */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pt-4 border-t border-slate-100 dark:border-slate-800">
+            {/* Max Live Logs in Redis */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                Live Buffer Log Limit (Max In-Memory Logs)
+              </label>
+              <div className="relative">
+                <select
+                  value={logPolicyForm.maxLiveLogs}
+                  disabled={logPolicyForm.logStorageMode === 'disabled'}
+                  onChange={(e) => setLogPolicyForm({ ...logPolicyForm, maxLiveLogs: parseInt(e.target.value) || 1000 })}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium disabled:opacity-50"
+                >
+                  <option value={500}>Keep last 500 logs (~150 KB RAM)</option>
+                  <option value={1000}>Keep last 1,000 logs (~300 KB RAM) [Recommended]</option>
+                  <option value={2500}>Keep last 2,500 logs (~750 KB RAM)</option>
+                  <option value={5000}>Keep last 5,000 logs (~1.5 MB RAM)</option>
+                  <option value={10000}>Keep last 10,000 logs (~3.0 MB RAM)</option>
+                </select>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Redis executes <code>LTRIM</code> on every batch flush to guarantee this exact buffer limit.
+              </p>
+            </div>
+
+            {/* VictoriaLogs Retention Days */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                Archive Retention Period (VictoriaLogs)
+              </label>
+              <div className="relative">
+                <select
+                  value={logPolicyForm.logRetentionDays}
+                  disabled={logPolicyForm.logStorageMode !== 'long_term_victoria'}
+                  onChange={(e) => setLogPolicyForm({ ...logPolicyForm, logRetentionDays: parseInt(e.target.value) || 30 })}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium disabled:opacity-50"
+                >
+                  <option value={7}>7 Days (1 Week Fast Retention)</option>
+                  <option value={30}>30 Days (1 Month Standard)</option>
+                  <option value={60}>60 Days (2 Months)</option>
+                  <option value={90}>90 Days (3 Months ISP Regulatory)</option>
+                  <option value={180}>180 Days (6 Months Enterprise Archive)</option>
+                  <option value={365}>365 Days (1 Full Year Compliance)</option>
+                </select>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Logs older than this retention threshold are automatically pruned by VictoriaLogs retention engine.
+              </p>
+            </div>
+          </div>
+
+          {/* Operational Status Info Box */}
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-start gap-3">
+            <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+            <div className="text-xs space-y-1 text-slate-600 dark:text-slate-300">
+              <p className="font-semibold text-slate-900 dark:text-slate-100">
+                Architecture Guarantee: No MySQL Locking or Slowdowns
+              </p>
+              <p>
+                MikroTik RouterOS pushes syslog packets at up to 10,000+ packets/sec during morning peak hours or fiber flapping. The upgraded collector bypasses MySQL tables completely, routing directly to Redis in-memory lists or VictoriaLogs streaming endpoints.
+              </p>
+            </div>
           </div>
         </motion.div>
       )}

@@ -15,15 +15,41 @@ services:
       - DB_PASS=${DB_PASS:-SecretPass2026!}
       - JWT_SECRET=${JWT_SECRET:-netfix_super_secret_jwt_key_2026_change_in_prod}
       - APP_ENV=${APP_ENV:-production}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - VICTORIALOGS_URL=${VICTORIALOGS_URL:-http://victorialogs:9428}
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
+      victorialogs:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://127.0.0.1/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 15s
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly no --save "" --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    restart: always
+
+  victorialogs:
+    image: victoriametrics/victoria-logs:v1.3.1-victorialogs
+    command:
+      - "-storageDataPath=/vlogs-data"
+      - "-retentionPeriod=180d"
+      - "-httpListenAddr=:9428"
+    ports:
+      - "9428:9428"
+    volumes:
+      - victorialogs_data:/vlogs-data
     restart: always
 
   db:
@@ -46,3 +72,4 @@ services:
 
 volumes:
   db_data:
+  victorialogs_data:

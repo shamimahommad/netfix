@@ -15,7 +15,8 @@ require_once __DIR__ . '/lib/AuthMiddleware.php';
 
 // Global Exception Handler for Clean JSON Responses
 set_exception_handler(function (Throwable $e) {
-    Response::error($e->getMessage(), 500);
+    error_log('Uncaught Exception: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+    Response::error('Service temporarily unavailable. Please try again later.', 500);
 });
 
 // Controllers
@@ -37,6 +38,8 @@ require_once __DIR__ . '/controllers/SearchController.php';
 require_once __DIR__ . '/controllers/TaskLogsController.php';
 require_once __DIR__ . '/controllers/PublicTopupController.php';
 require_once __DIR__ . '/controllers/CompanyProfileController.php';
+require_once __DIR__ . '/controllers/SaaSPackagesController.php';
+require_once __DIR__ . '/controllers/SaaSPlatformBillingController.php';
 
 // Parse Request Path and Method
 $rawUri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
@@ -61,7 +64,7 @@ if ($uri === '/' || $uri === '/health') {
         $count = (int)$db->query("SELECT COUNT(*) FROM users")->fetchColumn();
         $dbStatus = "Connected to MySQL netfix_db ({$count} users)";
     } catch (Throwable $e) {
-        $dbStatus = "Database error: " . $e->getMessage();
+        $dbStatus = "Service unavailable";
     }
 
     Response::json([
@@ -85,7 +88,8 @@ if ($uri === '/system/init-db') {
             'users_count' => $count,
         ]);
     } catch (Throwable $e) {
-        Response::error('Failed to initialize database: ' . $e->getMessage(), 500);
+        error_log('Failed to initialize database: ' . $e->getMessage());
+        Response::error('Service temporarily unavailable. Please try again later.', 500);
     }
 }
 
@@ -123,6 +127,40 @@ if ($method === 'POST' && preg_match('#^/auth/impersonate/([^/]+)$#', $uri, $m))
 // ---------------------------------------------------------------------
 // DASHBOARD ROUTES
 // ---------------------------------------------------------------------
+if ($method === 'GET' && ($uri === '/dashboard/saas' || $uri === '/saas/dashboard')) {
+    DashboardController::saasStats();
+}
+
+// ---------------------------------------------------------------------
+// SAAS PACKAGES & PLATFORM SUBSCRIPTION BILLING
+// ---------------------------------------------------------------------
+if ($method === 'GET' && ($uri === '/saas/packages' || $uri === '/packages/saas')) {
+    SaaSPackagesController::list();
+}
+if ($method === 'POST' && ($uri === '/saas/packages' || $uri === '/packages/saas')) {
+    SaaSPackagesController::create();
+}
+if ($method === 'POST' && $uri === '/saas/packages/assign') {
+    SaaSPackagesController::assignTenantPackage();
+}
+if ($method === 'PUT' && preg_match('#^/saas/packages/([^/]+)$#', $uri, $m)) {
+    SaaSPackagesController::update($m[1]);
+}
+if ($method === 'DELETE' && preg_match('#^/saas/packages/([^/]+)$#', $uri, $m)) {
+    SaaSPackagesController::delete($m[1]);
+}
+if ($method === 'GET' && ($uri === '/saas/billing/overview' || $uri === '/saas/billing')) {
+    SaaSPlatformBillingController::overview();
+}
+if ($method === 'POST' && $uri === '/saas/billing/record-payment') {
+    SaaSPlatformBillingController::recordPayment();
+}
+if ($method === 'POST' && $uri === '/saas/billing/extend-trial') {
+    SaaSPlatformBillingController::extendTrial();
+}
+if ($method === 'POST' && $uri === '/saas/billing/generate-invoice') {
+    SaaSPlatformBillingController::generateInvoice();
+}
 if ($method === 'GET' && $uri === '/dashboard/stats') {
     DashboardController::stats();
 }
@@ -321,7 +359,17 @@ if ($method === 'GET' && ($uri === '/reports/reconciliation' || $uri === '/api/r
     require __DIR__ . '/api/reports/reconciliation.php';
     exit;
 }
-if (($method === 'POST' || $method === 'GET') && ($uri === '/payment/webhook' || $uri === '/payments/webhook' || $uri === '/api/payment/webhook.php' || $uri === '/payment/webhook.php')) {
+if (($method === 'POST' || $method === 'GET') && (
+    $uri === '/payment/webhook' || 
+    $uri === '/payments/webhook' || 
+    $uri === '/api/payment/webhook.php' || 
+    $uri === '/payment/webhook.php' ||
+    preg_match('#^/payment/webhook/([^/]+)$#', $uri, $m) ||
+    preg_match('#^/payments/webhook/([^/]+)$#', $uri, $m)
+)) {
+    if (isset($m[1])) {
+        $_GET['isp_id'] = $m[1];
+    }
     require __DIR__ . '/api/payment/webhook.php';
     exit;
 }
@@ -367,6 +415,9 @@ if ($method === 'POST' && preg_match('#^/resellers/([^/]+)/login-as$#', $uri, $m
 }
 if ($method === 'PATCH' && preg_match('#^/resellers/([^/]+)/status$#', $uri, $m)) {
     ResellersController::setStatus($m[1]);
+}
+if ($method === 'POST' && preg_match('#^/resellers/([^/]+)/reset-password$#', $uri, $m)) {
+    ResellersController::resetPassword($m[1]);
 }
 if ($method === 'GET' && preg_match('#^/resellers/([^/]+)$#', $uri, $m)) {
     ResellersController::show($m[1]);
@@ -574,6 +625,12 @@ if ($method === 'GET' && preg_match('#^/uploads/logos/([a-zA-Z0-9_\-\.]+)$#', $u
 if ($method === 'GET' && $uri === '/tenants') {
     TenantsController::index();
 }
+if ($method === 'GET' && $uri === '/tenants/next-code') {
+    TenantsController::nextCode();
+}
+if ($method === 'GET' && preg_match('#^/tenants/lookup/([^/]+)$#', $uri, $m)) {
+    TenantsController::lookup($m[1]);
+}
 if ($method === 'GET' && $uri === '/tenants/sms-providers') {
     TenantsController::smsProviders();
 }
@@ -600,6 +657,9 @@ if ($method === 'PUT' && preg_match('#^/tenants/([^/]+)/sms-gateway$#', $uri, $m
 }
 if ($method === 'PATCH' && preg_match('#^/tenants/([^/]+)/limits$#', $uri, $m)) {
     TenantsController::updateLimits($m[1]);
+}
+if (($method === 'PUT' || $method === 'POST') && preg_match('#^/tenants/([^/]+)/log-policy$#', $uri, $m)) {
+    TenantsController::updateLogPolicy($m[1]);
 }
 if ($method === 'POST' && preg_match('#^/tenants/([^/]+)/reset-admin-password$#', $uri, $m)) {
     TenantsController::resetAdminPassword($m[1]);
