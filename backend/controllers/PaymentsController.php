@@ -27,6 +27,16 @@ class PaymentsController {
         $db->beginTransaction();
 
         try {
+            // Validate collector ID: if caller is Level > 0 (downline reseller/agent), they can only assign to themselves or their accessible downlines
+            require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+            $callerLevel = HierarchySecurityService::getHierarchyLevel($user['role'] ?? '');
+            $collectorId = !empty($data['receivedByUserId']) ? (int)$data['receivedByUserId'] : (int)$user['user_id'];
+            if ($callerLevel > 0 && $collectorId !== (int)$user['user_id']) {
+                if (!HierarchySecurityService::canAccessUser((int)$user['user_id'], $collectorId)) {
+                    $collectorId = (int)$user['user_id']; // Fallback safely to self
+                }
+            }
+
             // 1. Record Transaction
             $stmtTrx = $db->prepare("INSERT INTO transactions 
                 (tenant_id, customer_id, transaction_ref, transaction_type, amount, method, initiator_user_id, initiator_role, collector_user_id, description)
@@ -39,7 +49,7 @@ class PaymentsController {
                 'method' => $method,
                 'uid' => $user['user_id'],
                 'role' => $user['role'],
-                'coll' => $data['receivedByUserId'] ?? $user['user_id'],
+                'coll' => $collectorId,
                 'notes' => $data['notes'] ?? 'Manual payment received',
             ]);
             $trxId = $db->lastInsertId();
@@ -109,7 +119,17 @@ class PaymentsController {
         $role = strtolower($user['role'] ?? '');
         $isLevel0 = (HierarchySecurityService::getHierarchyLevel($role) === 0 || $role === 'saas_admin');
 
-        $where = ["t.tenant_id = :tid"];
+        $page = max(1, (int)($_GET['page'] ?? 1));
+        $limit = max(1, min(100, (int)($_GET['limit'] ?? 25)));
+        $offset = ($page - 1) * $limit;
+
+        $statusFilter = strtolower(trim($_GET['status'] ?? 'all'));
+        $gatewayFilter = strtolower(trim($_GET['gateway'] ?? 'all'));
+        $dateFrom = !empty($_GET['dateFrom']) ? trim($_GET['dateFrom']) : null;
+        $dateTo = !empty($_GET['dateTo']) ? trim($_GET['dateTo']) : null;
+        $search = !empty($_GET['search']) ? trim($_GET['search']) : null;
+
+        $where = ["pi.tenant_id = :tid"];
         $params = ['tid' => $tenantId];
 
         if (!$isLevel0) {
@@ -117,54 +137,123 @@ class PaymentsController {
             $userPath = '/' . trim($rawPath, '/') . '/';
             $params['scope_uid'] = $callerId;
             $params['scope_path_wildcard'] = $userPath . '%';
-            $where[] = "(c.owner_id = :scope_uid OR u.hierarchy_path LIKE :scope_path_wildcard OR c.owner_path LIKE :scope_path_wildcard)";
+            $where[] = "(
+                c.owner_id = :scope_uid 
+                OR u_owner.hierarchy_path LIKE :scope_path_wildcard 
+                OR c.owner_path LIKE :scope_path_wildcard 
+                OR CAST(JSON_UNQUOTE(JSON_EXTRACT(pi.metadata, '$.user_id')) AS UNSIGNED) = :scope_uid 
+                OR u_meta.hierarchy_path LIKE :scope_path_wildcard
+                OR tr.initiator_user_id = :scope_uid
+            )";
+        }
+
+        if ($statusFilter !== 'all' && $statusFilter !== '') {
+            if ($statusFilter === 'success' || $statusFilter === 'paid') {
+                $where[] = "(pi.status = 'completed' OR tr.transaction_id IS NOT NULL)";
+            } elseif ($statusFilter === 'failed') {
+                $where[] = "(pi.status IN ('failed', 'cancelled') AND tr.transaction_id IS NULL)";
+            } elseif ($statusFilter === 'pending') {
+                $where[] = "(pi.status IN ('initiated', 'pending') AND tr.transaction_id IS NULL)";
+            } elseif ($statusFilter === 'expired') {
+                $where[] = "(pi.status IN ('expired', 'cancelled') AND tr.transaction_id IS NULL)";
+            }
+        }
+
+        if ($gatewayFilter !== 'all' && $gatewayFilter !== '') {
+            $where[] = "LOWER(pi.gateway) = :gw";
+            $params['gw'] = $gatewayFilter;
+        }
+
+        if ($dateFrom) {
+            $where[] = "DATE(pi.created_at) >= :dateFrom";
+            $params['dateFrom'] = $dateFrom;
+        }
+
+        if ($dateTo) {
+            $where[] = "DATE(pi.created_at) <= :dateTo";
+            $params['dateTo'] = $dateTo;
+        }
+
+        if ($search) {
+            $where[] = "(pi.transaction_ref LIKE :s OR pi.gateway_payment_id LIKE :s OR c.full_name LIKE :s OR c.phone LIKE :s OR c.customer_code LIKE :s OR u_meta.username LIKE :s OR u_meta.first_name LIKE :s)";
+            $params['s'] = "%{$search}%";
         }
 
         $whereSql = implode(' AND ', $where);
 
+        // Count total matching
+        $countStmt = $db->prepare("SELECT COUNT(*) FROM payment_intents pi
+            LEFT JOIN customers c ON c.customer_id = pi.customer_id
+            LEFT JOIN users u_owner ON u_owner.user_id = c.owner_id
+            LEFT JOIN users u_meta ON u_meta.user_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(pi.metadata, '$.user_id')) AS UNSIGNED)
+            LEFT JOIN transactions tr ON (tr.transaction_ref = pi.transaction_ref OR tr.transaction_ref = pi.gateway_payment_id)
+            WHERE {$whereSql}");
+        $countStmt->execute($params);
+        $total = (int)$countStmt->fetchColumn();
+
+        // Query paginated items
         $stmt = $db->prepare("SELECT 
-            t.transaction_id as paymentIntentId,
-            t.transaction_ref as merchantInvoiceNumber,
-            COALESCE(i.invoice_number, t.transaction_ref) as invoiceNumber,
-            i.invoice_id as invoiceId,
-            t.method as gateway,
-            t.transaction_ref as gatewayPaymentId,
-            t.amount,
-            'PAID' as status,
-            t.customer_id as customerId,
-            c.full_name as payeeName,
-            c.phone as payeeMobile,
-            t.created_at as createdAt,
-            t.created_at as updatedAt,
-            t.created_at as paidAt
-            FROM transactions t
-            LEFT JOIN customers c ON c.customer_id = t.customer_id
-            LEFT JOIN users u ON u.user_id = c.owner_id
-            LEFT JOIN invoices i ON i.customer_id = t.customer_id
+            pi.id as paymentIntentId,
+            COALESCE(pi.transaction_ref, pi.gateway_payment_id, CONCAT('PI-', pi.id)) as merchantInvoiceNumber,
+            COALESCE(i.invoice_number, pi.transaction_ref, CONCAT('PI-', pi.id)) as invoiceNumber,
+            pi.invoice_id as invoiceId,
+            pi.gateway as gateway,
+            COALESCE(pi.gateway_payment_id, pi.transaction_ref) as gatewayPaymentId,
+            pi.amount,
+            CASE 
+                WHEN pi.status = 'completed' OR tr.transaction_id IS NOT NULL THEN 'PAID'
+                WHEN pi.status IN ('failed', 'cancelled') THEN 'FAILED'
+                WHEN pi.status = 'expired' THEN 'EXPIRED'
+                ELSE 'PENDING'
+            END as status,
+            pi.customer_id as customerId,
+            COALESCE(
+                NULLIF(c.full_name, ''),
+                NULLIF(TRIM(CONCAT(COALESCE(u_meta.first_name, ''), ' ', COALESCE(u_meta.last_name, ''))), ''),
+                u_meta.username,
+                'Subscriber / Topup'
+            ) as payeeName,
+            COALESCE(
+                NULLIF(c.phone, ''),
+                NULLIF(u_meta.phone, ''),
+                '—'
+            ) as payeeMobile,
+            pi.created_at as createdAt,
+            pi.created_at as updatedAt,
+            CASE WHEN pi.status = 'completed' OR tr.transaction_id IS NOT NULL THEN pi.created_at ELSE NULL END as paidAt
+            FROM payment_intents pi
+            LEFT JOIN customers c ON c.customer_id = pi.customer_id
+            LEFT JOIN users u_owner ON u_owner.user_id = c.owner_id
+            LEFT JOIN users u_meta ON u_meta.user_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(pi.metadata, '$.user_id')) AS UNSIGNED)
+            LEFT JOIN invoices i ON i.invoice_id = pi.invoice_id
+            LEFT JOIN transactions tr ON (tr.transaction_ref = pi.transaction_ref OR tr.transaction_ref = pi.gateway_payment_id)
             WHERE {$whereSql}
-            ORDER BY t.transaction_id DESC LIMIT 50");
+            ORDER BY pi.id DESC
+            LIMIT {$limit} OFFSET {$offset}");
         $stmt->execute($params);
-        $items = $stmt->fetchAll();
+        $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Calculate summary
         $stmtSum = $db->prepare("SELECT 
-            SUM(CASE WHEN DATE(t.created_at) = CURDATE() THEN t.amount ELSE 0 END) as today,
-            SUM(CASE WHEN DATE(t.created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY) THEN t.amount ELSE 0 END) as yesterday,
-            SUM(CASE WHEN t.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01') THEN t.amount ELSE 0 END) as this_month,
-            SUM(CASE WHEN t.created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) AND t.created_at < DATE_FORMAT(NOW(), '%Y-%m-01') THEN t.amount ELSE 0 END) as last_month,
-            SUM(t.amount) as filtered_total
-            FROM transactions t
-            LEFT JOIN customers c ON c.customer_id = t.customer_id
-            LEFT JOIN users u ON u.user_id = c.owner_id
+            SUM(CASE WHEN DATE(pi.created_at) = CURDATE() AND (pi.status = 'completed' OR tr.transaction_id IS NOT NULL) THEN pi.amount ELSE 0 END) as today,
+            SUM(CASE WHEN DATE(pi.created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY) AND (pi.status = 'completed' OR tr.transaction_id IS NOT NULL) THEN pi.amount ELSE 0 END) as yesterday,
+            SUM(CASE WHEN pi.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01') AND (pi.status = 'completed' OR tr.transaction_id IS NOT NULL) THEN pi.amount ELSE 0 END) as this_month,
+            SUM(CASE WHEN pi.created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) AND pi.created_at < DATE_FORMAT(NOW(), '%Y-%m-01') AND (pi.status = 'completed' OR tr.transaction_id IS NOT NULL) THEN pi.amount ELSE 0 END) as last_month,
+            SUM(CASE WHEN pi.status = 'completed' OR tr.transaction_id IS NOT NULL THEN pi.amount ELSE 0 END) as filtered_total
+            FROM payment_intents pi
+            LEFT JOIN customers c ON c.customer_id = pi.customer_id
+            LEFT JOIN users u_owner ON u_owner.user_id = c.owner_id
+            LEFT JOIN users u_meta ON u_meta.user_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(pi.metadata, '$.user_id')) AS UNSIGNED)
+            LEFT JOIN transactions tr ON (tr.transaction_ref = pi.transaction_ref OR tr.transaction_ref = pi.gateway_payment_id)
             WHERE {$whereSql}");
         $stmtSum->execute($params);
-        $sum = $stmtSum->fetch() ?: [];
+        $sum = $stmtSum->fetch(PDO::FETCH_ASSOC) ?: [];
 
         Response::json([
             'success' => true,
             'data' => [
                 'items' => $items ?: [],
-                'total' => count($items),
+                'total' => $total,
                 'summary' => [
                     'today' => (float)($sum['today'] ?? 0),
                     'yesterday' => (float)($sum['yesterday'] ?? 0),
@@ -172,6 +261,11 @@ class PaymentsController {
                     'lastMonth' => (float)($sum['last_month'] ?? 0),
                     'filteredTotal' => (float)($sum['filtered_total'] ?? 0),
                 ],
+            ],
+            'meta' => [
+                'total' => $total,
+                'page' => $page,
+                'limit' => $limit,
             ],
         ]);
     }
@@ -252,14 +346,27 @@ class PaymentsController {
         $countStmt->execute($params);
         $total = (int)$countStmt->fetchColumn();
 
-        // Fetch paginated rows
+        // Fetch paginated rows with dynamic running balance calculation
         $dataStmt = $db->prepare("SELECT 
             t.transaction_id,
             t.transaction_ref,
             t.transaction_type,
             t.amount,
             t.method,
-            t.running_balance_after_transaction,
+            COALESCE(
+                t.running_balance_after_transaction,
+                (
+                    SELECT SUM(CASE WHEN t2.transaction_type IN ('RENEW_DEBIT', 'DEBIT') THEN -t2.amount ELSE t2.amount END)
+                    FROM transactions t2
+                    WHERE t2.tenant_id = t.tenant_id
+                      AND (
+                          (t.initiator_user_id IS NOT NULL AND t2.initiator_user_id = t.initiator_user_id)
+                          OR (t.initiator_user_id IS NULL AND t2.customer_id = t.customer_id)
+                      )
+                      AND t2.transaction_id <= t.transaction_id
+                ),
+                0.00
+            ) as running_balance_after_transaction,
             t.description,
             t.created_at,
             c.full_name as customer_name,

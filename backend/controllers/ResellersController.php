@@ -39,12 +39,16 @@ class ResellersController {
             $params['status'] = $_GET['status'];
         }
 
-        // Downward-Only Access Control via Materialized Path
+        // Downward-Only Access Control via Materialized Path & Parent Fallback
         $callerRole = strtolower($user['role'] ?? '');
         $isLevel0 = in_array($callerRole, ['admin', 'isp_admin', 'manager', 'tenant_admin', 'saas_admin', 'super_admin'], true);
         if (!$isLevel0) {
-            $userPath = $user['hierarchy_path'] ?? "/{$user['user_id']}/";
-            $where[] = "(u.hierarchy_path LIKE :caller_path_like AND u.user_id != :caller_id)";
+            $userPath = $user['hierarchy_path'] ?? null;
+            if (empty($userPath) || $userPath === '/') {
+                $hUser = HierarchySecurityService::getUser((int)$user['user_id']);
+                $userPath = $hUser['hierarchy_path'] ?? "/{$user['user_id']}/";
+            }
+            $where[] = "((u.hierarchy_path LIKE :caller_path_like OR u.parent_id = :caller_id) AND u.user_id != :caller_id)";
             $params['caller_path_like'] = rtrim($userPath, '/') . '/%';
             $params['caller_id'] = $user['user_id'];
         }
@@ -60,10 +64,14 @@ class ResellersController {
             u.role,
             u.phone,
             u.status,
+            u.parent_id,
+            p.username as parent_username,
+            TRIM(CONCAT(p.first_name, ' ', p.last_name)) as parent_name,
             COALESCE(SUM(l.credit - l.debit), 0) as balance,
             CAST(JSON_UNQUOTE(JSON_EXTRACT(u.metadata, '$.credit_limit')) AS DECIMAL(10,2)) as credit_limit,
             CAST(JSON_UNQUOTE(JSON_EXTRACT(u.metadata, '$.network_device_id')) AS CHAR) as serverId
             FROM users u
+            LEFT JOIN users p ON p.user_id = u.parent_id
             LEFT JOIN reseller_ledger l ON l.user_id = u.user_id
             WHERE {$whereSql}
             GROUP BY u.user_id
@@ -71,7 +79,7 @@ class ResellersController {
         $stmt->execute($params);
         $rows = $stmt->fetchAll();
 
-        $resellers = array_map(function($r) {
+        $resellers = array_map(function($r) use ($isLevel0) {
             $sId = $r['serverId'];
             if (empty($sId) || $sId === '0' || $sId === 'unassigned') {
                 $sId = HierarchySecurityService::getAssignedServerId((int)$r['user_id']);
@@ -87,6 +95,9 @@ class ResellersController {
                 'phone' => $r['phone'],
                 'status' => $r['status'],
                 'serverId' => $sId ?: null,
+                'parentId' => $isLevel0 && $r['parent_id'] ? (string)$r['parent_id'] : null,
+                'parentUsername' => $isLevel0 && !empty($r['parent_username']) ? $r['parent_username'] : null,
+                'parentName' => $isLevel0 && !empty($r['parent_name']) ? $r['parent_name'] : null,
             ];
         }, $rows);
 
@@ -294,9 +305,14 @@ class ResellersController {
                     Response::error('Access denied for this user', 403);
                 }
             } else {
-                $callerPath = $currentUser['hierarchy_path'] ?? "/{$currentUser['user_id']}/";
+                $callerPath = $currentUser['hierarchy_path'] ?? null;
+                if (empty($callerPath) || $callerPath === '/') {
+                    $hUser = HierarchySecurityService::getUser((int)$currentUser['user_id']);
+                    $callerPath = $hUser['hierarchy_path'] ?? "/{$currentUser['user_id']}/";
+                }
                 $targetPath = $targetUser['hierarchy_path'] ?? '';
-                if (!str_starts_with($targetPath, rtrim($callerPath, '/') . '/')) {
+                $isDirectChild = ((int)($targetUser['parent_id'] ?? 0) === (int)$currentUser['user_id']);
+                if (!str_starts_with($targetPath, rtrim($callerPath, '/') . '/') && !$isDirectChild) {
                     Response::error('Permission denied to update this user', 403);
                 }
             }
@@ -458,9 +474,14 @@ class ResellersController {
                     Response::error('Access denied for this user', 403);
                 }
             } else {
-                $callerPath = $currentUser['hierarchy_path'] ?? "/{$currentUser['user_id']}/";
+                $callerPath = $currentUser['hierarchy_path'] ?? null;
+                if (empty($callerPath) || $callerPath === '/') {
+                    $hUser = HierarchySecurityService::getUser((int)$currentUser['user_id']);
+                    $callerPath = $hUser['hierarchy_path'] ?? "/{$currentUser['user_id']}/";
+                }
                 $targetPath = $targetUser['hierarchy_path'] ?? '';
-                if (!str_starts_with($targetPath, rtrim($callerPath, '/') . '/')) {
+                $isDirectChild = ((int)($targetUser['parent_id'] ?? 0) === (int)$currentUser['user_id']);
+                if (!str_starts_with($targetPath, rtrim($callerPath, '/') . '/') && !$isDirectChild) {
                     Response::error('Permission denied to reset password for this user', 403);
                 }
             }
@@ -597,22 +618,82 @@ class ResellersController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        $callerRole = strtolower($currentUser['role'] ?? '');
+        $callerLevel = HierarchySecurityService::getHierarchyLevel($callerRole);
+        $callerId = (int)$currentUser['user_id'];
+
+        $where = ["ap.tenant_id = :tid_ap"];
+        $params = [
+            'uid_tp' => $userId,
+            'uid_rpp' => $userId,
+            'tid_ap' => $tenantId,
+            'tid_tp' => $tenantId,
+            'tid_rpp' => $tenantId,
+        ];
+
+        // If caller is downline reseller/sub-reseller, scope packages to what the caller is authorized to sell
+        if ($callerLevel > 0) {
+            $hasExplicitPermissions = (int)$db->query("SELECT (
+                (SELECT COUNT(*) FROM tier_packages WHERE user_id = {$callerId} AND is_allowed = 1) +
+                (SELECT COUNT(*) FROM reseller_plan_permission WHERE user_id = {$callerId} AND is_allowed = 1)
+            )")->fetchColumn();
+
+            if ($hasExplicitPermissions > 0) {
+                $where[] = "(
+                    ap.access_profile_id IN (SELECT package_id FROM tier_packages WHERE user_id = :cuid1 AND is_allowed = 1)
+                    OR ap.access_profile_id IN (SELECT access_profile_id FROM reseller_plan_permission WHERE user_id = :cuid2 AND is_allowed = 1)
+                )";
+                $params['cuid1'] = $callerId;
+                $params['cuid2'] = $callerId;
+            }
+        }
+
+        $whereSql = implode(' AND ', $where);
+
         $stmt = $db->prepare("SELECT 
             ap.access_profile_id as packageId,
-            COALESCE(rpp.sell_price, ap.price) as sellPrice,
+            ap.profile_name as name,
+            ap.profile_name as profileName,
+            ap.profile_code as code,
+            ap.profile_code as packageCode,
+            ap.protocol,
+            ap.price,
+            COALESCE(
+                nd.device_name,
+                (
+                    SELECT nd3.device_name 
+                    FROM network_devices nd3 
+                    WHERE nd3.tenant_id = ap.tenant_id AND nd3.device_type = 'router' 
+                    ORDER BY nd3.network_device_id DESC 
+                    LIMIT 1
+                ),
+                'PPPoE Server'
+            ) as serverName,
+            COALESCE(tp.cost_price, rpp.sell_price, ap.price) as sellPrice,
+            COALESCE(tp.commission_rate, rpp.pop_profit_percent, 0) as popProfitPercent,
             COALESCE(rpp.pop_profit, 0) as popProfit,
-            COALESCE(rpp.pop_profit_percent, 0) as popProfitPercent,
             COALESCE(rpp.is_allowed, 1) as allowed
             FROM access_profiles ap
-            LEFT JOIN reseller_plan_permission rpp ON rpp.access_profile_id = ap.access_profile_id AND rpp.user_id = :uid AND rpp.tenant_id = :tid
-            WHERE ap.tenant_id = :tid
+            LEFT JOIN network_devices nd ON nd.network_device_id = ap.network_device_id
+            LEFT JOIN tier_packages tp ON tp.package_id = ap.access_profile_id AND tp.user_id = :uid_tp AND tp.tenant_id = :tid_tp
+            LEFT JOIN reseller_plan_permission rpp ON rpp.access_profile_id = ap.access_profile_id AND rpp.user_id = :uid_rpp AND rpp.tenant_id = :tid_rpp
+            WHERE {$whereSql}
             ORDER BY ap.access_profile_id ASC");
-        $stmt->execute(['uid' => $userId, 'tid' => $tenantId]);
+        $stmt->execute($params);
         $rows = $stmt->fetchAll();
 
         $items = array_map(function($r) {
             return [
+                'id' => (string)$r['packageId'],
                 'packageId' => (string)$r['packageId'],
+                'name' => $r['name'],
+                'profileName' => $r['profileName'],
+                'code' => $r['code'],
+                'packageCode' => $r['packageCode'],
+                'protocol' => $r['protocol'] ?? 'pppoe',
+                'serverName' => $r['serverName'] ?? 'PPPoE Server',
+                'price' => (float)$r['price'],
                 'sellPrice' => (float)$r['sellPrice'],
                 'popProfit' => (float)$r['popProfit'],
                 'popProfitPercent' => (float)$r['popProfitPercent'],
@@ -620,7 +701,11 @@ class ResellersController {
             ];
         }, $rows);
 
-        Response::json(['items' => $items]);
+        Response::json([
+            'success' => true,
+            'items' => $items,
+            'data' => $items,
+        ]);
     }
 
     public static function putPlanPermissions(string $userId): void {
@@ -677,8 +762,13 @@ class ResellersController {
         $limit = max(1, min(100, (int)($_GET['limit'] ?? 25)));
         $offset = ($page - 1) * $limit;
 
-        $where = ["ap.tenant_id = :tid"];
-        $params = ['uid' => $userId, 'tid' => $tenantId];
+        $where = ["ap.tenant_id = :tid_ap"];
+        $params = [
+            'uid_tp' => $userId,
+            'uid_rpp' => $userId,
+            'tid_ap' => $tenantId,
+            'tid_tp' => $tenantId,
+        ];
 
         if (!empty($_GET['search'])) {
             $search = '%' . trim($_GET['search']) . '%';
@@ -721,7 +811,7 @@ class ResellersController {
         // Count total packages
         $countStmt = $db->prepare("SELECT COUNT(*) FROM access_profiles ap WHERE {$whereSql}");
         foreach ($params as $k => $v) {
-            if ($k !== 'scope_uid' && $k !== 'scope_path_wildcard' && $k !== 'uid') {
+            if ($k !== 'scope_uid' && $k !== 'scope_path_wildcard' && $k !== 'uid_tp' && $k !== 'uid_rpp' && $k !== 'tid_tp') {
                 $countStmt->bindValue(':' . $k, $v);
             }
         }
@@ -762,8 +852,8 @@ class ResellersController {
             ap.status
             FROM access_profiles ap
             LEFT JOIN network_devices nd ON nd.network_device_id = ap.network_device_id
-            LEFT JOIN tier_packages tp ON tp.package_id = ap.access_profile_id AND tp.user_id = :uid AND tp.tenant_id = :tid
-            LEFT JOIN reseller_plan_permission rpp ON rpp.access_profile_id = ap.access_profile_id AND rpp.user_id = :uid
+            LEFT JOIN tier_packages tp ON tp.package_id = ap.access_profile_id AND tp.user_id = :uid_tp AND tp.tenant_id = :tid_tp
+            LEFT JOIN reseller_plan_permission rpp ON rpp.access_profile_id = ap.access_profile_id AND rpp.user_id = :uid_rpp
             WHERE {$whereSql}
             ORDER BY ap.access_profile_id ASC
             LIMIT :lim OFFSET :off");

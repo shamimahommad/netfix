@@ -275,9 +275,33 @@ class BillingController {
 
             // Create paid invoice with pure numeric globally unique sequence
             $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 6);
+
+            // Strict Pre-Flight Balance & Credit Limit Enforcement for Reseller, Sub-Reseller, Dealer, Agent
+            require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+            require_once __DIR__ . '/../lib/WalletLedgerService.php';
+
+            $callerRole = strtolower($user['role'] ?? '');
+            $callerLevel = HierarchySecurityService::getHierarchyLevel($callerRole);
+
+            $rechargeRef = null;
+            $actorDeduction = $totalAmount;
+            if ($callerLevel > 0) {
+                // Deduct cost from caller's wallet and cascade margin to upstream
+                $rechargeResult = WalletLedgerService::rechargeWithMarginCascade(
+                    (int)$user['user_id'],
+                    (int)$customerId,
+                    (int)$planId,
+                    $invNumber,
+                    $tenantId ? (int)$tenantId : null,
+                    $months
+                );
+                $rechargeRef = $rechargeResult['recharge_ref'] ?? null;
+                $actorDeduction = (float)($rechargeResult['actor_deduction'] ?? $totalAmount);
+            }
+
             $stmtInv = $db->prepare("INSERT INTO invoices 
-                (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, collected_by, renew_mode, created_by)
-                VALUES (:tid, :cid, :sid, :inv_num, CURDATE(), CURDATE(), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :coll, 'RENEW', :uid)");
+                (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, collected_by, charged_user_id, renew_mode, notes, previous_expire_date, created_by)
+                VALUES (:tid, :cid, :sid, :inv_num, CURDATE(), CURDATE(), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :coll, :chg, 'RENEW', :notes, :prev_exp, :uid)");
             $stmtInv->execute([
                 'tid' => $tenantId,
                 'cid' => $customerId,
@@ -286,13 +310,16 @@ class BillingController {
                 'sub' => $totalAmount,
                 'tot' => $totalAmount,
                 'paid' => $totalAmount,
-                'base' => $totalAmount,
+                'base' => $actorDeduction,
                 'sell' => $totalAmount,
                 'coll' => $user['user_id'],
+                'chg' => $user['user_id'],
+                'notes' => $rechargeRef ? "Recharge Ref: {$rechargeRef}" : null,
+                'prev_exp' => $currentService['expires_at'] ?? null,
                 'uid' => $user['user_id'],
             ]);
 
-            // Record transaction
+            // Record transaction matching actual initiator wallet deduction
             $trxRef = 'TRX-RENEW-' . strtoupper(bin2hex(random_bytes(4)));
             $stmtTrx = $db->prepare("INSERT INTO transactions 
                 (tenant_id, customer_id, transaction_ref, transaction_type, amount, method, initiator_user_id, initiator_role, collector_user_id, description)
@@ -301,7 +328,7 @@ class BillingController {
                 'tid' => $tenantId,
                 'cid' => $customerId,
                 'ref' => $trxRef,
-                'amt' => $totalAmount,
+                'amt' => $actorDeduction,
                 'uid' => $user['user_id'],
                 'role' => $user['role'],
                 'coll' => $user['user_id'],
@@ -331,8 +358,15 @@ class BillingController {
                     'bill_amount' => $totalAmount,
                 ],
             ]);
+        } catch (DomainException $de) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            Response::error($de->getMessage(), 400);
         } catch (Throwable $e) {
-            $db->rollBack();
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
             Response::error('Failed to renew service: ' . $e->getMessage(), 500);
         }
     }
@@ -644,58 +678,263 @@ class BillingController {
      * POST /billing/invoices/{id}/cancel
      */
     public static function cancelInvoice(string $id): void {
-        $user = AuthMiddleware::requireAuth();
-        $db = Database::getConnection();
-
-        $stmt = $db->prepare("SELECT * FROM invoices WHERE invoice_id = :id LIMIT 1");
-        $stmt->execute(['id' => $id]);
-        $inv = $stmt->fetch();
-
-        if (!$inv) {
-            Response::error('Invoice not found', 404);
-        }
-
-        $stmtUp = $db->prepare("UPDATE invoices SET status = 'cancelled', notes = CONCAT(COALESCE(notes, ''), ' [Cancelled on " . date('Y-m-d H:i') . "]') WHERE invoice_id = :id");
-        $stmtUp->execute(['id' => $id]);
-
-        Response::json([
-            'success' => true,
-            'message' => 'Invoice cancelled successfully',
-            'data' => [
-                'invoiceId' => (string)$inv['invoice_id'],
-                'status' => 'cancelled',
-            ],
-        ]);
+        self::returnInvoice($id);
     }
 
     /**
      * POST /billing/invoices/{id}/return
+     * Atomically reverses invoice, refunds the reseller wallet, claws back upstream margins,
+     * and reverts customer service expiry.
      */
     public static function returnInvoice(string $id): void {
         $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT * FROM invoices WHERE invoice_id = :id LIMIT 1");
-        $stmt->execute(['id' => $id]);
+        $stmt = $db->prepare("SELECT * FROM invoices WHERE invoice_id = :id AND (tenant_id = :tid OR :tid2 IS NULL) LIMIT 1");
+        $stmt->execute(['id' => $id, 'tid' => $tenantId, 'tid2' => $tenantId]);
         $inv = $stmt->fetch();
 
         if (!$inv) {
             Response::error('Invoice not found', 404);
         }
 
-        $returnAmount = (float)$inv['paid_amount'];
+        if ($inv['status'] === 'returned') {
+            Response::error('Invoice has already been returned and refunded.', 400);
+        }
 
-        $stmtUp = $db->prepare("UPDATE invoices SET status = 'cancelled', paid_amount = 0, balance_due = total_amount, notes = CONCAT(COALESCE(notes, ''), ' [Returned ৳" . $returnAmount . " on " . date('Y-m-d H:i') . "]') WHERE invoice_id = :id");
-        $stmtUp->execute(['id' => $id]);
+        $invId = (int)$inv['invoice_id'];
+        $invNum = $inv['invoice_number'];
+        $customerId = (int)$inv['customer_id'];
+        $collectedBy = !empty($inv['charged_user_id']) 
+            ? (int)$inv['charged_user_id'] 
+            : (!empty($inv['collected_by']) ? (int)$inv['collected_by'] : (!empty($inv['created_by']) ? (int)$inv['created_by'] : (int)$user['user_id']));
+        $totalAmount = (float)$inv['total_amount'];
+        $paidAmount = (float)$inv['paid_amount'];
+        $effectiveTenantId = (int)($inv['tenant_id'] ?? $tenantId);
+
+        $db->beginTransaction();
+        try {
+            require_once __DIR__ . '/../lib/WalletLedgerService.php';
+
+            // Extract recharge reference if stored in notes or lookup from wallet_transactions
+            $rechargeRef = null;
+            if (!empty($inv['notes']) && preg_match('/Recharge Ref:\s*([A-Za-z0-9\-_]+)/i', $inv['notes'], $rm)) {
+                $rechargeRef = trim($rm[1]);
+            }
+
+            // Find actor deduction from wallet_transactions
+            if ($rechargeRef) {
+                $stmtWt = $db->prepare("SELECT * FROM wallet_transactions 
+                    WHERE tenant_id = :tid AND reference_type = 'CUSTOMER_RECHARGE' AND reference_id = :ref LIMIT 1");
+                $stmtWt->execute(['tid' => $effectiveTenantId, 'ref' => $rechargeRef]);
+                $actorWt = $stmtWt->fetch(PDO::FETCH_ASSOC);
+            } else {
+                $stmtWt = $db->prepare("SELECT * FROM wallet_transactions 
+                    WHERE tenant_id = :tid 
+                      AND reference_type = 'CUSTOMER_RECHARGE' 
+                      AND user_id = :uid 
+                      AND (description LIKE :custDesc OR created_at BETWEEN DATE_SUB(:invTime, INTERVAL 5 MINUTE) AND DATE_ADD(:invTime, INTERVAL 5 MINUTE))
+                    ORDER BY transaction_id DESC LIMIT 1");
+                $stmtWt->execute([
+                    'tid' => $effectiveTenantId,
+                    'uid' => $collectedBy,
+                    'custDesc' => "%customer #{$customerId}%",
+                    'invTime' => $inv['created_at'],
+                ]);
+                $actorWt = $stmtWt->fetch(PDO::FETCH_ASSOC);
+                if ($actorWt) {
+                    $rechargeRef = $actorWt['reference_id'];
+                }
+            }
+
+            $refundAmount = 0.00;
+            if ($actorWt) {
+                $refundAmount = (float)$actorWt['amount'];
+
+                // a) Refund actor wallet
+                $wStmt = $db->prepare("SELECT wallet_id, balance FROM wallets WHERE user_id = :uid FOR UPDATE");
+                $wStmt->execute(['uid' => $collectedBy]);
+                $actorWallet = $wStmt->fetch(PDO::FETCH_ASSOC);
+
+                if ($actorWallet) {
+                    $balBefore = (float)$actorWallet['balance'];
+                    $balAfter = round($balBefore + $refundAmount, 2);
+
+                    $db->prepare("UPDATE wallets SET balance = :bal, updated_at = NOW() WHERE wallet_id = :wid")
+                       ->execute(['bal' => $balAfter, 'wid' => $actorWallet['wallet_id']]);
+
+                    // Audit in wallet_transactions
+                    $db->prepare("INSERT INTO wallet_transactions 
+                        (tenant_id, wallet_id, user_id, type, amount, balance_before, balance_after, reference_type, reference_id, description, created_by)
+                        VALUES (:tid, :wid, :uid, 'credit', :amt, :bb, :ba, 'INVOICE_RETURN', :ref, :desc, :cb)")
+                       ->execute([
+                           'tid' => $effectiveTenantId,
+                           'wid' => $actorWallet['wallet_id'],
+                           'uid' => $collectedBy,
+                           'amt' => $refundAmount,
+                           'bb' => $balBefore,
+                           'ba' => $balAfter,
+                           'ref' => "RET-{$invNum}",
+                           'desc' => "Refund for returned invoice #{$invNum} (Customer #{$customerId})",
+                           'cb' => $user['user_id'],
+                       ]);
+
+                    // Keep reseller_ledger in sync
+                    $db->prepare("INSERT INTO reseller_ledger 
+                        (tenant_id, user_id, credit, debit, reference_type, reference_id, notes, created_by)
+                        VALUES (:tid, :uid, :amt, 0.00, 'INVOICE_RETURN', :ref, :notes, :cb)")
+                       ->execute([
+                           'tid' => $effectiveTenantId,
+                           'uid' => $collectedBy,
+                           'amt' => $refundAmount,
+                           'ref' => "RET-{$invNum}",
+                           'notes' => "Refund for returned invoice #{$invNum} (Customer #{$customerId})",
+                           'cb' => $user['user_id'],
+                       ]);
+                }
+
+                // b) Clawback upstream commissions
+                if ($rechargeRef) {
+                    $stmtComm = $db->prepare("SELECT * FROM wallet_transactions 
+                        WHERE tenant_id = :tid AND reference_type = 'UPSTREAM_COMMISSION' AND reference_id = :ref");
+                    $stmtComm->execute(['tid' => $effectiveTenantId, 'ref' => $rechargeRef]);
+                    $commissions = $stmtComm->fetchAll(PDO::FETCH_ASSOC);
+
+                    foreach ($commissions as $comm) {
+                        $pUid = (int)$comm['user_id'];
+                        $commAmt = (float)$comm['amount'];
+
+                        $pWStmt = $db->prepare("SELECT wallet_id, balance FROM wallets WHERE user_id = :uid FOR UPDATE");
+                        $pWStmt->execute(['uid' => $pUid]);
+                        $pWallet = $pWStmt->fetch(PDO::FETCH_ASSOC);
+
+                        if ($pWallet) {
+                            $pBalBefore = (float)$pWallet['balance'];
+                            $pBalAfter = round($pBalBefore - $commAmt, 2);
+
+                            $db->prepare("UPDATE wallets SET balance = :bal, updated_at = NOW() WHERE wallet_id = :wid")
+                               ->execute(['bal' => $pBalAfter, 'wid' => $pWallet['wallet_id']]);
+
+                            $db->prepare("INSERT INTO wallet_transactions 
+                                (tenant_id, wallet_id, user_id, type, amount, balance_before, balance_after, reference_type, reference_id, description, created_by)
+                                VALUES (:tid, :wid, :uid, 'debit', :amt, :bb, :ba, 'COMMISSION_REVERSAL', :ref, :desc, :cb)")
+                               ->execute([
+                                   'tid' => $effectiveTenantId,
+                                   'wid' => $pWallet['wallet_id'],
+                                   'uid' => $pUid,
+                                   'amt' => $commAmt,
+                                   'bb' => $pBalBefore,
+                                   'ba' => $pBalAfter,
+                                   'ref' => "RET-{$invNum}",
+                                   'desc' => "Reversal of margin commission on returned invoice #{$invNum}",
+                                   'cb' => $user['user_id'],
+                               ]);
+
+                            $db->prepare("INSERT INTO reseller_ledger 
+                                (tenant_id, user_id, debit, credit, reference_type, reference_id, notes, created_by)
+                                VALUES (:tid, :uid, :amt, 0.00, 'COMMISSION_REVERSAL', :ref, :notes, :cb)")
+                               ->execute([
+                                   'tid' => $effectiveTenantId,
+                                   'uid' => $pUid,
+                                   'amt' => $commAmt,
+                                   'ref' => "RET-{$invNum}",
+                                   'notes' => "Reversal of margin commission on returned invoice #{$invNum}",
+                                   'cb' => $user['user_id'],
+                               ]);
+                        }
+                    }
+                }
+            } else if ($paidAmount > 0) {
+                // Direct refund fallback
+                $refundAmount = $paidAmount;
+                WalletLedgerService::topup(
+                    (int)$user['user_id'],
+                    $collectedBy,
+                    $refundAmount,
+                    "Refund for returned invoice #{$invNum}",
+                    $effectiveTenantId
+                );
+            }
+
+            // 2. Record in transactions table (as REFUND)
+            if ($refundAmount > 0) {
+                $db->prepare("INSERT INTO transactions 
+                    (tenant_id, customer_id, transaction_ref, transaction_type, amount, method, initiator_user_id, initiator_role, collector_user_id, description)
+                    VALUES (:tid, :cid, :ref, 'REFUND', :amt, 'system', :uid, 'reseller', :coll, :desc)")
+                   ->execute([
+                       'tid' => $effectiveTenantId,
+                       'cid' => $customerId,
+                       'ref' => "RET-{$invNum}",
+                       'amt' => $refundAmount,
+                       'uid' => $collectedBy,
+                       'coll' => $user['user_id'],
+                       'desc' => "Refund for returned invoice #{$invNum} (Customer #{$customerId})",
+                   ]);
+            }
+
+            // 3. Revert Customer Service Expiry Date
+            $stmtCs = $db->prepare("SELECT * FROM customer_services WHERE customer_id = :cid ORDER BY customer_service_id DESC LIMIT 1");
+            $stmtCs->execute(['cid' => $customerId]);
+            $cs = $stmtCs->fetch(PDO::FETCH_ASSOC);
+
+            if ($cs) {
+                if (!empty($inv['previous_expire_date'])) {
+                    $newExp = $inv['previous_expire_date'];
+                } else {
+                    $newExp = date('Y-m-d H:i:s', strtotime('-30 days', strtotime($cs['expires_at'])));
+                }
+
+                $newStatus = strtotime($newExp) < time() ? 'expired' : $cs['status'];
+
+                $db->prepare("UPDATE customer_services SET expires_at = :exp, status = :st, updated_at = NOW() WHERE customer_service_id = :sid")
+                   ->execute([
+                       'exp' => $newExp,
+                       'st' => $newStatus,
+                       'sid' => $cs['customer_service_id'],
+                   ]);
+
+                // Update MikroTik Router if expired
+                if ($newStatus === 'expired') {
+                    $db->prepare("UPDATE customers SET status = 'expired', billing_status = 'Unpaid' WHERE customer_id = :cid")
+                       ->execute(['cid' => $customerId]);
+                    try {
+                        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+                        MikrotikSyncService::disableCustomer($db, $customerId);
+                    } catch (\Throwable $mke) {
+                        error_log("MikroTik disable notice on invoice return: " . $mke->getMessage());
+                    }
+                }
+            }
+
+            // 4. Update Invoice status to 'cancelled' with refund notes
+            $noteMsg = " [Returned & Refunded ৳{$refundAmount} on " . date('Y-m-d H:i') . "]";
+            $db->prepare("UPDATE invoices 
+                SET status = 'cancelled', paid_amount = 0.00, balance_due = 0.00, notes = CONCAT(COALESCE(notes, ''), :note) 
+                WHERE invoice_id = :id")
+               ->execute([
+                   'note' => $noteMsg,
+                   'id' => $invId,
+               ]);
+
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollBack();
+            Response::error('Failed to process invoice return: ' . $e->getMessage(), 500);
+        }
+
+        $actorNewBal = WalletLedgerService::getBalance($collectedBy);
 
         Response::json([
             'success' => true,
-            'message' => 'Invoice return processed successfully',
-            'returnAmount' => $returnAmount,
+            'message' => "Invoice return processed. ৳" . number_format($refundAmount, 2) . " has been refunded to your wallet.",
+            'returnAmount' => $refundAmount,
+            'balance' => $actorNewBal,
             'data' => [
                 'invoiceId' => (string)$inv['invoice_id'],
                 'status' => 'cancelled',
-                'returnAmount' => $returnAmount,
+                'returnAmount' => $refundAmount,
+                'balance' => $actorNewBal,
             ],
         ]);
     }

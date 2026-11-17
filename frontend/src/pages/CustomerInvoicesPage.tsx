@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { billingService, InvoiceDto } from '@/services/billing.service';
 import { formatInvoiceIdDisplay } from '@/lib/formatInvoiceId';
+import { useAuthStore } from '@/stores/authStore';
 
 function formatDateTime(s?: string) {
   if (!s) return '—';
@@ -180,7 +181,8 @@ export default function CustomerInvoicesPage() {
     setActionLoading(inv.invoiceId);
     try {
       await billingService.cancelInvoice(inv.invoiceId);
-      await Swal.fire({ title: 'Cancelled', text: 'Invoice has been cancelled.', icon: 'success' });
+      await useAuthStore.getState().refreshMe();
+      await Swal.fire({ title: 'Cancelled', text: 'Invoice has been cancelled and refunded.', icon: 'success' });
       fetchInvoices();
     } catch (err: any) {
       Swal.fire({
@@ -208,6 +210,7 @@ export default function CustomerInvoicesPage() {
     setActionLoading(inv.invoiceId);
     try {
       const res = await billingService.returnInvoice(inv.invoiceId);
+      await useAuthStore.getState().refreshMe();
       await Swal.fire({
         title: 'Return Processed',
         text: res?.message ?? `Return amount: ৳${res?.returnAmount ?? 0}`,

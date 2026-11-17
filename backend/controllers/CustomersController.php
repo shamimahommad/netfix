@@ -952,6 +952,20 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             $price = (float)($stmtPkg->fetchColumn() ?: 500.00);
 
             $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 6);
+
+            // Strict Pre-Flight Balance & Credit Limit Enforcement for Reseller, Sub-Reseller, Dealer, Agent
+            if ($callerLevel > 0) {
+                require_once __DIR__ . '/../lib/WalletLedgerService.php';
+                WalletLedgerService::rechargeWithMarginCascade(
+                    (int)$user['user_id'],
+                    (int)$customerId,
+                    (int)$packageId,
+                    $invNumber,
+                    $tenantId ? (int)$tenantId : null,
+                    1
+                );
+            }
+
             $stmtInv = $db->prepare("INSERT INTO invoices 
                 (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, created_by)
                 VALUES (:tid, :cid, :sid, :inv_num, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 10 DAY), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :uid)");
@@ -987,6 +1001,9 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             ], 201);
         } catch (Throwable $e) {
             $db->rollBack();
+            if ($e instanceof DomainException) {
+                Response::error($e->getMessage(), 400);
+            }
             if ($e instanceof PDOException && (int)($e->errorInfo[1] ?? 0) === 1062) {
                 Response::error('Duplicate customer ID or PPPoE username detected. Must be unique across the platform.', 409);
             }
@@ -1372,7 +1389,24 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         $stmt->execute($params);
         $rows = $stmt->fetchAll();
 
-        Response::json($rows ?: []);
+        $mapped = array_map(function($r) {
+            return [
+                'resellerId' => $r['resellerId'] !== null ? (string)$r['resellerId'] : null,
+                'resellerName' => (string)($r['resellerName'] ?? 'Direct / Admin'),
+                'resellerRole' => $r['resellerRole'],
+                'total' => (int)($r['total'] ?? 0),
+                'active' => (int)($r['active'] ?? 0),
+                'expired' => (int)($r['expired'] ?? 0),
+                'left' => (int)($r['left'] ?? 0),
+                'pending' => (int)($r['pending'] ?? 0),
+                'pppoe' => (int)($r['pppoe'] ?? 0),
+                'hotspot' => (int)($r['hotspot'] ?? 0),
+                'free' => (int)($r['free'] ?? 0),
+                'vip' => (int)($r['vip'] ?? 0),
+            ];
+        }, $rows ?: []);
+
+        Response::json($mapped);
     }
 
     public static function reportsAreaWise(): void {
@@ -1421,7 +1455,22 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         $stmt->execute($params);
         $rows = $stmt->fetchAll();
 
-        Response::json($rows ?: []);
+        $mapped = array_map(function($r) {
+            return [
+                'areaName' => (string)($r['areaName'] ?? 'Unassigned Area'),
+                'total' => (int)($r['total'] ?? 0),
+                'active' => (int)($r['active'] ?? 0),
+                'expired' => (int)($r['expired'] ?? 0),
+                'left' => (int)($r['left'] ?? 0),
+                'pending' => (int)($r['pending'] ?? 0),
+                'pppoe' => (int)($r['pppoe'] ?? 0),
+                'hotspot' => (int)($r['hotspot'] ?? 0),
+                'free' => (int)($r['free'] ?? 0),
+                'vip' => (int)($r['vip'] ?? 0),
+            ];
+        }, $rows ?: []);
+
+        Response::json($mapped);
     }
 
     public static function reportsServerWise(): void {

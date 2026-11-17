@@ -55,10 +55,31 @@ class AccessProfilesController {
         require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         $callerLevel = HierarchySecurityService::getHierarchyLevel($user['role'] ?? '');
         if ($callerLevel > 0) {
-            $assignedServerId = HierarchySecurityService::getAssignedServerId((int)$user['user_id']);
-            if ($assignedServerId) {
-                $where[] = "ap.network_device_id = :assigned_sid";
-                $params['assigned_sid'] = $assignedServerId;
+            $callerId = (int)$user['user_id'];
+            $assignedServerId = HierarchySecurityService::getAssignedServerId($callerId);
+
+            // A downline reseller/dealer/agent is authorized to sell packages:
+            // 1. That are assigned/allowed to them in tier_packages or reseller_plan_permission
+            // 2. OR if assignedServerId matches
+            // 3. OR if no package restrictions have been explicitly set for this user, all tenant packages
+            $hasExplicitPermissions = (int)$db->query("SELECT (
+                (SELECT COUNT(*) FROM tier_packages WHERE user_id = {$callerId} AND is_allowed = 1) +
+                (SELECT COUNT(*) FROM reseller_plan_permission WHERE user_id = {$callerId} AND is_allowed = 1)
+            )")->fetchColumn();
+
+            if ($hasExplicitPermissions > 0) {
+                $where[] = "(
+                    ap.access_profile_id IN (SELECT package_id FROM tier_packages WHERE user_id = :caller_uid1 AND is_allowed = 1)
+                    OR ap.access_profile_id IN (SELECT access_profile_id FROM reseller_plan_permission WHERE user_id = :caller_uid2 AND is_allowed = 1)
+                )";
+                $params['caller_uid1'] = $callerId;
+                $params['caller_uid2'] = $callerId;
+            } elseif (!empty($assignedServerId) && $assignedServerId !== '0') {
+                $serverHasPackages = (int)$db->query("SELECT COUNT(*) FROM access_profiles WHERE tenant_id = " . (int)$tenantId . " AND network_device_id = " . $db->quote($assignedServerId))->fetchColumn();
+                if ($serverHasPackages > 0) {
+                    $where[] = "ap.network_device_id = :assigned_sid";
+                    $params['assigned_sid'] = $assignedServerId;
+                }
             }
         } elseif (!empty($_GET['serverId'])) {
             $where[] = "ap.network_device_id = :sid";
@@ -108,7 +129,7 @@ class AccessProfilesController {
 
         $total = count($rows);
         $page = max(1, (int)($_GET['page'] ?? 1));
-        $limit = max(1, min(100, (int)($_GET['limit'] ?? 10)));
+        $limit = max(1, min(500, (int)($_GET['limit'] ?? 10)));
         $totalPages = ceil($total / $limit) ?: 1;
 
         $pagedRows = array_slice($rows, ($page - 1) * $limit, $limit);

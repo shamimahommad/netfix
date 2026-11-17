@@ -630,6 +630,10 @@ class PaymentGatewayService {
             ]);
             $intent = $stmtIntent->fetch();
 
+            $intentMeta = !empty($intent['metadata']) ? json_decode($intent['metadata'], true) : [];
+            if (!is_array($intentMeta)) $intentMeta = [];
+            $mergedMeta = array_merge($intentMeta, ['settled' => true, 'raw' => $rawResponse]);
+
             if ($intent) {
                 $customerId = $customerId ?: ($intent['customer_id'] ? (int)$intent['customer_id'] : null);
                 $invoiceId = $invoiceId ?: ($intent['invoice_id'] ? (int)$intent['invoice_id'] : null);
@@ -637,26 +641,66 @@ class PaymentGatewayService {
 
                 $db->prepare("UPDATE payment_intents SET status = 'completed', metadata = :meta WHERE id = :id")
                    ->execute([
-                       'meta' => json_encode($rawResponse),
+                       'meta' => json_encode($mergedMeta),
                        'id' => $intent['id'],
                    ]);
             }
 
             // 2. Insert into transactions table
             $transRef = $trxId ?: ('TRX-' . strtoupper($gateway) . '-' . substr(uniqid(), -6));
+            $flow = $intentMeta['flow'] ?? '';
+            $topupUserId = !empty($intentMeta['user_id']) ? (int)$intentMeta['user_id'] : null;
+            $isBalanceTopup = ($flow === 'balance_topup' || ($flow === 'public_topup' && ($intentMeta['type'] ?? '') === 'reseller'));
+
+            $initiatorUid = $topupUserId ?: 0;
+            $initiatorRole = $intentMeta['role'] ?? ($topupUserId ? 'reseller' : 'pgw');
+            $desc = $isBalanceTopup 
+                ? strtoupper($gateway) . " Online Balance Topup (Ref: {$transRef})" 
+                : strtoupper($gateway) . " Online Payment (Ref: {$transRef})";
+
             $stmtTrx = $db->prepare("INSERT INTO transactions 
                 (tenant_id, customer_id, transaction_ref, transaction_type, amount, method, initiator_user_id, initiator_role, description, metadata)
-                VALUES (:tid, :cid, :ref, 'GATEWAY_PAYMENT', :amt, :method, 0, 'pgw', :desc, :meta)");
+                VALUES (:tid, :cid, :ref, 'GATEWAY_PAYMENT', :amt, :method, :uid, :role, :desc, :meta)");
             $stmtTrx->execute([
                 'tid' => $tenantId,
                 'cid' => $customerId ?: null,
                 'ref' => $transRef,
                 'amt' => $amount,
                 'method' => $gateway,
-                'desc' => strtoupper($gateway) . " Online Payment (Ref: {$transRef})",
-                'meta' => json_encode($rawResponse),
+                'uid' => $initiatorUid,
+                'role' => $initiatorRole,
+                'desc' => $desc,
+                'meta' => json_encode($mergedMeta),
             ]);
             $transactionId = $db->lastInsertId();
+
+            // 2b. If Balance Topup: Credit Wallet & Reseller Ledger atomically
+            if ($isBalanceTopup && $topupUserId) {
+                require_once __DIR__ . '/WalletLedgerService.php';
+                try {
+                    WalletLedgerService::topup(
+                        $topupUserId,
+                        $topupUserId,
+                        $amount,
+                        "Online balance topup via {$gateway} (Ref: {$transRef})",
+                        $tenantId
+                    );
+                } catch (\Throwable $wle) {
+                    $w = WalletLedgerService::ensureWallet($topupUserId, $tenantId);
+                    $newBal = (float)($w['balance'] ?? 0) + $amount;
+                    $db->prepare("UPDATE wallets SET balance = :bal, updated_at = NOW() WHERE user_id = :uid")
+                       ->execute(['bal' => $newBal, 'uid' => $topupUserId]);
+                    $db->prepare("INSERT INTO reseller_ledger (tenant_id, user_id, credit, debit, reference_type, reference_id, notes, created_by)
+                        VALUES (:tid, :uid, :amt, 0, 'ONLINE_TOPUP', :ref, :desc, :uid)")
+                       ->execute([
+                           'tid' => $tenantId,
+                           'uid' => $topupUserId,
+                           'amt' => $amount,
+                           'ref' => $transRef,
+                           'desc' => "Online balance topup via {$gateway} (Ref: {$transRef})",
+                       ]);
+                }
+            }
 
             $mikrotikResult = null;
 

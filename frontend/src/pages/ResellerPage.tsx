@@ -299,8 +299,27 @@ export default function ResellerPage() {
   const { user, refreshMe } = useAuthStore();
   const permissions = usePermissions();
   const isAdmin = user?.role_code === 'admin' || user?.role_code === 'isp_admin';
+  const isCompanyAdmin = isAdmin || ['saas_admin', 'tenant_admin', 'manager'].includes(user?.role_code || '');
   const allowedAddRoles = getAllowedAddRoles(user?.role_code);
   const canShowAddUser = permissions.canManageSubTier && allowedAddRoles.length > 0;
+
+  const pageTitle = isAdmin
+    ? 'Reseller Management'
+    : user?.role_code === 'sub_reseller'
+    ? 'Agent Management'
+    : 'Sub Reseller Management';
+
+  const pageSubtitle = isAdmin
+    ? 'Manage company resellers, sub-resellers, and agents. Roles, credit limits, and permissions.'
+    : user?.role_code === 'sub_reseller'
+    ? 'Manage your downline agents. Balances and permissions.'
+    : 'Manage your downline sub-resellers and agents. Balances and permissions.';
+
+  const addBtnLabel = isAdmin
+    ? 'Add Reseller'
+    : user?.role_code === 'sub_reseller'
+    ? 'Add Agent'
+    : 'Add Sub Reseller';
 
   const [viewMode, setViewMode] = useState<'table' | 'tree'>('table');
   const [list, setList] = useState<Reseller[]>([]);
@@ -648,8 +667,8 @@ export default function ResellerPage() {
       {/* Page Header */}
       <PageHeader
         icon={<Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
-        title="Reseller Management"
-        subtitle="Manage resellers, sub-resellers, and agents. Roles, credit limits, and permissions."
+        title={pageTitle}
+        subtitle={pageSubtitle}
         badge={`${list.length} Users`}
         actions={
           <div className="flex items-center gap-2.5">
@@ -699,7 +718,7 @@ export default function ResellerPage() {
                 onClick={() => setAddOpen(true)}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm shadow-sm transition-all active:scale-95"
               >
-                <UserPlus className="w-4 h-4" /> Add Reseller
+                <UserPlus className="w-4 h-4" /> {addBtnLabel}
               </button>
             )}
           </div>
@@ -844,7 +863,20 @@ export default function ResellerPage() {
                       <td className="p-3">
                         <div className="flex items-center gap-2">
                           <AvatarInitials name={r.name} />
-                          <span className="text-slate-900 dark:text-slate-100">{r.name}</span>
+                          <div>
+                            <span className="text-slate-900 dark:text-slate-100 font-medium">{r.name}</span>
+                            {isCompanyAdmin && r.parentUsername && r.role !== 'reseller' && (
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1 font-normal">
+                                <span>Under:</span>
+                                <span className="font-semibold text-indigo-600 dark:text-indigo-400">@{r.parentUsername}</span>
+                              </div>
+                            )}
+                            {isCompanyAdmin && r.role === 'reseller' && (
+                              <div className="text-[11px] text-slate-400 dark:text-slate-500 font-normal">
+                                Direct Reseller
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </td>
                       <td className="p-3 text-slate-700 dark:text-slate-300">{r.username}</td>

@@ -107,8 +107,8 @@ export default function ResellerWiseCustomersPage() {
     return sorted.slice(start, start + pageSize);
   }, [sorted, currentPage, pageSize]);
 
-  const totalCustomers = rows.reduce((sum, r) => sum + r.total, 0);
-  const totalActive = rows.reduce((sum, r) => sum + r.active, 0);
+  const totalCustomers = rows.reduce((sum, r) => sum + (Number(r.total) || 0), 0);
+  const totalActive = rows.reduce((sum, r) => sum + (Number(r.active) || 0), 0);
   const totalResellers = rows.length;
 
   const handleSort = (key: SortKey) => {
@@ -233,7 +233,7 @@ export default function ResellerWiseCustomersPage() {
                     {COLUMNS.map((col) => {
                       const val = row[col.key];
                       const drillUrl = getCustomerListUrl(row.resellerId, col.key);
-                      const isClickable = drillUrl && typeof val === 'number' && val > 0;
+                      const isClickable = Boolean(drillUrl && Number(val) > 0);
 
                       return (
                         <td

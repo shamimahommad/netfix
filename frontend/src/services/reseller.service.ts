@@ -83,6 +83,9 @@ export interface Reseller {
   phone: string | null;
   status: string;
   serverId: string | null;
+  parentId?: string | null;
+  parentUsername?: string | null;
+  parentName?: string | null;
 }
 
 export interface ListResellersParams {

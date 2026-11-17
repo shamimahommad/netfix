@@ -52,22 +52,50 @@ export default function PlanPermissionPage() {
 
     Promise.all([
       resellerService.getOne(userId),
-      networkPackagesService.list({ limit: 500 }),
+      networkPackagesService.list({ limit: 500 }).catch(() => ({ data: [] })),
       resellerService.getPlanPermissions(userId).catch(() => ({ items: [] })),
     ])
       .then(([u, pkgRes, permRes]) => {
         if (cancelled) return;
         setUser(u);
 
-        const res = pkgRes as NetworkPackagesResponse & { data?: NetworkPackage[] };
-        const list = Array.isArray(res?.data) ? res.data : Array.isArray(pkgRes) ? (pkgRes as NetworkPackage[]) : [];
+        const res = pkgRes as any;
+        let list: NetworkPackage[] = Array.isArray(res?.data)
+          ? res.data
+          : Array.isArray(res?.items)
+          ? res.items
+          : Array.isArray(pkgRes)
+          ? (pkgRes as NetworkPackage[])
+          : [];
+        const items = permRes?.items ?? (Array.isArray((permRes as any)?.data) ? (permRes as any).data : []);
+
+        // Fallback: If networkPackagesService.list is empty, use package definitions from getPlanPermissions
+        if (list.length === 0 && Array.isArray(items) && items.length > 0) {
+          list = items.map((i: any) => ({
+            id: String(i.packageId || i.id),
+            name: i.name || i.profileName || `Package #${i.packageId || i.id}`,
+            profileName: i.name || i.profileName || `Package #${i.packageId || i.id}`,
+            packageCode: i.packageCode || i.code || '',
+            protocol: i.protocol || 'pppoe',
+            serverName: i.serverName || 'PPPoE Server',
+            price: Number(i.price ?? i.sellPrice ?? 0),
+            color: '#2563EB',
+            count: 0,
+            validity: { days: 30, hours: 0 },
+            volume: { type: 'unlimited', gb: null },
+            privacy: 'public',
+            status: 'enabled',
+            createdAt: '',
+            updatedAt: '',
+          })) as any[];
+        }
+
         setPackages(list);
 
-        const items = permRes?.items ?? [];
         const permMap = new Map(
-          items.map((i) => [
-            i.packageId,
-            { sellPrice: i.sellPrice, popProfit: i.popProfit ?? 0, popProfitPercent: i.popProfitPercent ?? 0, allowed: i.allowed },
+          items.map((i: any) => [
+            String(i.packageId || i.id),
+            { sellPrice: Number(i.sellPrice ?? 0), popProfit: Number(i.popProfit ?? 0), popProfitPercent: Number(i.popProfitPercent ?? 0), allowed: Boolean(i.allowed) },
           ]),
         );
 
@@ -210,7 +238,7 @@ export default function PlanPermissionPage() {
       const isAllowed = selectedIds.has(pkgId);
 
       if (filterMode === 'allowed' && !isAllowed) return false;
-      if (filterMode === 'restricted' && !isAllowed) return false;
+      if (filterMode === 'restricted' && isAllowed) return false;
 
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();

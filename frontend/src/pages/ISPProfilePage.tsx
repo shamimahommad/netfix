@@ -33,7 +33,9 @@ import {
   ShieldCheck,
   Copy,
   Hash,
+  Sparkles,
 } from 'lucide-react';
+import { getCustomerViewTemplate, setCustomerViewTemplate, CustomerViewTemplate } from '@/lib/customerViewTemplate';
 import { tenantProfileService } from '@/services/tenant-profile.service';
 import { useToastContext } from '@/contexts/ToastContext';
 import { useTenantStore } from '@/stores/tenantStore';
@@ -70,6 +72,7 @@ export default function ISPProfilePage() {
     mapEnabled: false,
     monitoringEnabled: false,
   });
+  const [customerViewLayout, setCustomerViewLayout] = useState<CustomerViewTemplate>(() => getCustomerViewTemplate(tenantId));
   const [isSavingFeatures, setIsSavingFeatures] = useState(false);
 
   // Limits state
@@ -189,6 +192,7 @@ export default function ISPProfilePage() {
           monitoringEnabled: Boolean(pData.settings.monitoringEnabled),
         });
       }
+      setCustomerViewLayout(getCustomerViewTemplate(tenantId));
 
       // Payment gateways
       const gateways: PaymentGatewayConfig[] = [
@@ -252,7 +256,8 @@ export default function ISPProfilePage() {
     setIsSavingFeatures(true);
     try {
       await tenantProfileService.updateTenantFeatures(tenantId, features);
-      toast.success('Feature toggles updated successfully');
+      setCustomerViewTemplate(customerViewLayout, tenantId);
+      toast.success('Feature toggles and UI layout updated successfully');
       loadProfile(true);
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to update features');
@@ -1035,6 +1040,71 @@ export default function ISPProfilePage() {
                 />
                 <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600" />
               </label>
+            </div>
+
+            {/* Customer View Page Design Layout */}
+            <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">Customer View Page Design Layout</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Configure which subscriber profile layout template is assigned to this ISP tenant</p>
+                  </div>
+                </div>
+                <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800">
+                  SaaS Controlled
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <label className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
+                  customerViewLayout === 'modern'
+                    ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/20 ring-1 ring-blue-500'
+                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:bg-slate-50'
+                }`}>
+                  <input
+                    type="radio"
+                    name="customerViewLayout"
+                    value="modern"
+                    checked={customerViewLayout === 'modern'}
+                    onChange={() => setCustomerViewLayout('modern')}
+                    className="mt-1 text-blue-600 focus:ring-blue-500"
+                  />
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-bold text-slate-900 dark:text-slate-100">Modern Pro (Recommended)</span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">NEW</span>
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      High-tech Bento grid, unified command center, live telemetry cards, optical health gauge & instant copy notice tools.
+                    </p>
+                  </div>
+                </label>
+
+                <label className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
+                  customerViewLayout === 'classic'
+                    ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/20 ring-1 ring-blue-500'
+                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 hover:bg-slate-50'
+                }`}>
+                  <input
+                    type="radio"
+                    name="customerViewLayout"
+                    value="classic"
+                    checked={customerViewLayout === 'classic'}
+                    onChange={() => setCustomerViewLayout('classic')}
+                    className="mt-1 text-blue-600 focus:ring-blue-500"
+                  />
+                  <div>
+                    <span className="text-sm font-bold text-slate-900 dark:text-slate-100">Classic Layout</span>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      Traditional 3-column layout with compact embedded buttons inside cards.
+                    </p>
+                  </div>
+                </label>
+              </div>
             </div>
           </div>
 

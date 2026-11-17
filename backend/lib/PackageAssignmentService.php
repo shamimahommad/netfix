@@ -66,13 +66,19 @@ class PackageAssignmentService {
         }
 
         if (!$tp || empty($tp['is_allowed'])) {
-            throw new DomainException(
-                "Parent {$parent['username']} (Level {$level}) is not authorized to sell package '{$pkg['profile_name']}'."
-            );
+            if ($level === 1 && !$tp) {
+                // If parent is a Level 1 Reseller and has not been explicitly restricted, default cost floor is retail price
+                $parentCost = $retailPrice;
+                $parentCommission = 0.00;
+            } else {
+                throw new DomainException(
+                    "Parent {$parent['username']} (Level {$level}) is not authorized to sell package '{$pkg['profile_name']}'."
+                );
+            }
+        } else {
+            $parentCost = (float)$tp['cost_price'];
+            $parentCommission = (float)$tp['commission_rate'];
         }
-
-        $parentCost = (float)$tp['cost_price'];
-        $parentCommission = (float)$tp['commission_rate'];
 
         // Maximum commission child can receive without violating parent cost floor
         $maxAllowedCommission = $retailPrice > 0 

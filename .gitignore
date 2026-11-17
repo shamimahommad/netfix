@@ -37,6 +37,7 @@ yarn-error.log*
 Thumbs.db
 .idea/
 .vscode/
+.serena/
 *.swp
 *.swo
 

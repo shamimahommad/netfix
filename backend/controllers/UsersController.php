@@ -13,6 +13,12 @@ class UsersController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        $callerRole = strtolower($user['role'] ?? '');
+        $callerLevel = HierarchySecurityService::getHierarchyLevel($callerRole);
+        $callerId = (int)$user['user_id'];
+        $isLevel0 = ($callerLevel === 0 || $callerRole === 'saas_admin');
+
         $where = ["status = 'active'"];
         $params = [];
 
@@ -23,6 +29,21 @@ class UsersController {
             }
             $where[] = "tenant_id = :tid";
             $params['tid'] = $tenantId;
+        }
+
+        // Downward Hierarchy Guard: Non-admins cannot see upstream or horizontal users
+        if (!$isLevel0) {
+            $callerPath = $user['hierarchy_path'] ?? null;
+            if (empty($callerPath) || $callerPath === '/') {
+                $hUser = HierarchySecurityService::getUser($callerId);
+                $callerPath = $hUser['hierarchy_path'] ?? "/{$callerId}/";
+            }
+            $callerPathWildcard = rtrim($callerPath, '/') . '/%';
+
+            $where[] = "(user_id = :caller_id OR hierarchy_path LIKE :caller_path_wildcard OR parent_id = :caller_pid)";
+            $params['caller_id'] = $callerId;
+            $params['caller_path_wildcard'] = $callerPathWildcard;
+            $params['caller_pid'] = $callerId;
         }
 
         $whereSql = implode(' AND ', $where);
@@ -56,7 +77,13 @@ class UsersController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $where = ["status = 'active'"];
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        $callerRole = strtolower($user['role'] ?? '');
+        $callerLevel = HierarchySecurityService::getHierarchyLevel($callerRole);
+        $callerId = (int)$user['user_id'];
+        $isLevel0 = ($callerLevel === 0 || $callerRole === 'saas_admin');
+
+        $where = ["u.status = 'active'"];
         $params = [];
 
         if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
@@ -64,15 +91,32 @@ class UsersController {
                 Response::json(['success' => true, 'data' => []]);
                 return;
             }
-            $where[] = "tenant_id = :tid";
+            $where[] = "u.tenant_id = :tid";
             $params['tid'] = $tenantId;
         }
 
+        // STRICT RULE: No upstream users!
+        // Downline callers can only view/select themselves and users strictly under them
+        if (!$isLevel0) {
+            $callerPath = $user['hierarchy_path'] ?? null;
+            if (empty($callerPath) || $callerPath === '/') {
+                $hUser = HierarchySecurityService::getUser($callerId);
+                $callerPath = $hUser['hierarchy_path'] ?? "/{$callerId}/";
+            }
+            $callerPathWildcard = rtrim($callerPath, '/') . '/%';
+
+            $where[] = "(u.user_id = :caller_id OR u.hierarchy_path LIKE :caller_path_wildcard OR u.parent_id = :caller_pid)";
+            $params['caller_id'] = $callerId;
+            $params['caller_path_wildcard'] = $callerPathWildcard;
+            $params['caller_pid'] = $callerId;
+        }
+
+        $params['caller_sort_id'] = $callerId;
         $whereSql = implode(' AND ', $where);
-        $stmt = $db->prepare("SELECT user_id, first_name, last_name, username, role 
-            FROM users 
+        $stmt = $db->prepare("SELECT u.user_id, u.first_name, u.last_name, u.username, u.role, u.role_level 
+            FROM users u
             WHERE {$whereSql}
-            ORDER BY first_name ASC");
+            ORDER BY (u.user_id = :caller_sort_id) DESC, u.role_level ASC, u.first_name ASC");
         $stmt->execute($params);
         $rows = $stmt->fetchAll();
 

@@ -144,3 +144,8 @@ This file serves as the permanent source of truth for all coding and UI design s
   powershell -ExecutionPolicy Bypass -File ./run_project.ps1 -Restart
   ```
 
+# Strict Execution Rules
+1. NEVER create temporary test scripts (e.g., test_*.php) or run terminal verification commands unless explicitly asked.
+2. NEVER scan the entire project. Only read and edit the exact files mentioned with `@`.
+3. Do NOT write verification loops. Apply the code fix directly and stop immediately.
+4. Keep changes minimal and strictly focused on the prompt.

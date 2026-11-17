@@ -389,7 +389,9 @@ class PaymentGatewayController {
 
         $callbackUrl = !empty($data['callbackURL']) 
             ? trim($data['callbackURL']) 
-            : (self::getFrontendBaseUrl() . "/dashboard/topup-balance");
+            : (!empty($data['callbackUrl']) 
+                ? trim($data['callbackUrl']) 
+                : (self::getFrontendBaseUrl() . "/dashboard/topup-balance"));
 
         $res = PaymentGatewayService::initiatePayment(
             $db,
@@ -453,7 +455,13 @@ class PaymentGatewayController {
             $stmtTrx = $db->prepare("SELECT * FROM transactions WHERE transaction_ref = :ref AND tenant_id = :tid LIMIT 1");
             $stmtTrx->execute(['ref' => $paymentId, 'tid' => $tenantId]);
             if ($stmtTrx->fetch()) {
-                Response::json(['success' => true, 'message' => 'Payment already verified and credited.']);
+                require_once __DIR__ . '/../lib/WalletLedgerService.php';
+                $curBal = WalletLedgerService::getBalance($userId);
+                Response::json([
+                    'success' => true,
+                    'message' => 'Payment already verified and credited.',
+                    'balance' => $curBal,
+                ]);
                 return;
             }
             Response::error('Payment intent not found', 404);
@@ -462,7 +470,21 @@ class PaymentGatewayController {
         $gateway = $intent['gateway'];
         $amount = (float)$intent['amount'];
         $meta = !empty($intent['metadata']) ? json_decode($intent['metadata'], true) : [];
+        if (!is_array($meta)) $meta = [];
         $targetUserId = !empty($meta['user_id']) ? (int)$meta['user_id'] : $userId;
+
+        // If intent was already settled by callback/webhook, fetch balance and return
+        if ($intent['status'] === 'completed' || !empty($meta['settled'])) {
+            require_once __DIR__ . '/../lib/WalletLedgerService.php';
+            $curBal = WalletLedgerService::getBalance($targetUserId);
+            Response::json([
+                'success' => true,
+                'message' => 'Payment confirmed and balance updated successfully!',
+                'trxID' => $intent['transaction_ref'] ?: $intent['gateway_payment_id'],
+                'balance' => $curBal,
+            ]);
+            return;
+        }
 
         $settings = PaymentGatewayService::getGatewaySettings($db, $tenantId, $gateway);
         $trxId = 'TRX-' . strtoupper($gateway) . '-' . substr(uniqid(), -6) . date('His');
@@ -494,28 +516,27 @@ class PaymentGatewayController {
             // Insert into transactions
             $db->prepare("INSERT INTO transactions 
                 (tenant_id, customer_id, transaction_ref, transaction_type, amount, method, initiator_user_id, initiator_role, description, metadata)
-                VALUES (:tid, NULL, :ref, 'GATEWAY_PAYMENT', :amt, :method, :uid, 'admin', :desc, :meta)")
+                VALUES (:tid, NULL, :ref, 'GATEWAY_PAYMENT', :amt, :method, :uid, :role, :desc, :meta)")
                ->execute([
                    'tid' => $tenantId,
                    'ref' => $trxId,
                    'amt' => $amount,
                    'method' => $gateway,
                    'uid' => $targetUserId,
+                   'role' => $user['role'] ?? 'reseller',
                    'desc' => strtoupper($gateway) . " Online Balance Topup (Ref: {$trxId})",
                    'meta' => json_encode($rawRes),
                ]);
 
-            // Credit reseller_ledger
-            $db->prepare("INSERT INTO reseller_ledger 
-                (tenant_id, user_id, credit, debit, reference_type, reference_id, notes, created_by)
-                VALUES (:tid, :uid, :amt, 0, 'ONLINE_TOPUP', :ref, :desc, :uid)")
-               ->execute([
-                   'tid' => $tenantId,
-                   'uid' => $targetUserId,
-                   'amt' => $amount,
-                   'ref' => $trxId,
-                   'desc' => "Online balance topup via {$gateway} (Ref: {$trxId})",
-               ]);
+            // Credit wallet & wallet_transactions & reseller_ledger atomically
+            require_once __DIR__ . '/../lib/WalletLedgerService.php';
+            WalletLedgerService::topup(
+                $userId,
+                $targetUserId,
+                $amount,
+                "Online balance topup via {$gateway} (Ref: {$trxId})",
+                $tenantId
+            );
 
             $db->commit();
         } catch (\Throwable $e) {
@@ -523,10 +544,9 @@ class PaymentGatewayController {
             Response::error('Failed to credit balance: ' . $e->getMessage(), 500);
         }
 
-        // Fetch updated balance
-        $stmtBal = $db->prepare("SELECT COALESCE(SUM(credit - debit), 0) as balance FROM reseller_ledger WHERE user_id = :uid");
-        $stmtBal->execute(['uid' => $targetUserId]);
-        $newBalance = (float)($stmtBal->fetchColumn() ?: 0);
+        // Fetch updated balance directly from wallet service
+        require_once __DIR__ . '/../lib/WalletLedgerService.php';
+        $newBalance = WalletLedgerService::getBalance($targetUserId);
 
         Response::json([
             'success' => true,

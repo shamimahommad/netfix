@@ -211,22 +211,35 @@ class AuthController {
         $user = AuthMiddleware::requireAuth();
         $db = Database::getConnection();
 
-        // Calculate balance from wallets table (primary) or reseller_ledger
+        // Calculate balance from wallets table (primary) or reseller_ledger with auto self-healing
         $balance = 0.00;
         if (!empty($user['user_id'])) {
+            $uid = (int)$user['user_id'];
             $stmt = $db->prepare("SELECT balance FROM wallets WHERE user_id = :uid LIMIT 1");
-            $stmt->execute(['uid' => $user['user_id']]);
+            $stmt->execute(['uid' => $uid]);
             $wBal = $stmt->fetchColumn();
             $stmt->closeCursor();
 
+            $stmtLedger = $db->prepare("SELECT COALESCE(SUM(credit - debit), 0) as balance FROM reseller_ledger WHERE user_id = :uid");
+            $stmtLedger->execute(['uid' => $uid]);
+            $lBal = (float)($stmtLedger->fetchColumn() ?: 0.00);
+
             if ($wBal !== false) {
-                $balance = (float)$wBal;
+                $walletBal = (float)$wBal;
+                // If wallet is at 0.00 but ledger has credit, heal wallet to match
+                if ($walletBal == 0.00 && $lBal != 0.00) {
+                    $balance = $lBal;
+                    $db->prepare("UPDATE wallets SET balance = :bal, updated_at = NOW() WHERE user_id = :uid")
+                       ->execute(['bal' => $balance, 'uid' => $uid]);
+                } else {
+                    $balance = $walletBal;
+                }
             } else {
-                $stmt = $db->prepare("SELECT COALESCE(SUM(credit - debit), 0) as balance FROM reseller_ledger WHERE user_id = :uid");
-                $stmt->execute(['uid' => $user['user_id']]);
-                $row = $stmt->fetch();
-                $stmt->closeCursor();
-                $balance = (float)($row['balance'] ?? 0);
+                $balance = $lBal;
+                require_once __DIR__ . '/../lib/WalletLedgerService.php';
+                WalletLedgerService::ensureWallet($uid, (int)($user['tenant_id'] ?? 1));
+                $db->prepare("UPDATE wallets SET balance = :bal, updated_at = NOW() WHERE user_id = :uid")
+                   ->execute(['bal' => $balance, 'uid' => $uid]);
             }
         }
 

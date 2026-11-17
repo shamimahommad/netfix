@@ -112,12 +112,12 @@ class PublicTopupController {
             return;
         }
 
-        // 2. Search in Users table for Reseller
+        // 2. Search in Users table for Reseller or Sub-reseller
         $sqlReseller = "SELECT u.*, t.tenant_name 
                         FROM users u
                         LEFT JOIN tenants t ON t.tenant_id = u.tenant_id
                         WHERE (u.username = :q OR u.phone = :q OR u.email = :q) 
-                          AND u.role = 'reseller'";
+                          AND u.role IN ('reseller', 'sub_reseller', 'agent')";
         $resParams = ['q' => $q];
         if ($tenantId !== '') {
             $sqlReseller .= " AND u.tenant_id = :tid";
@@ -130,13 +130,12 @@ class PublicTopupController {
         $reseller = $stmtRes->fetch();
 
         if ($reseller) {
-            $uid = $reseller['user_id'];
+            $uid = (int)$reseller['user_id'];
             $tid = (string)$reseller['tenant_id'];
 
-            // Query current balance from reseller ledger
-            $stmtBal = $db->prepare("SELECT closing_balance FROM reseller_ledger WHERE user_id = :uid ORDER BY ledger_id DESC LIMIT 1");
-            $stmtBal->execute(['uid' => $uid]);
-            $curBal = (float)($stmtBal->fetchColumn() ?: 0);
+            // Query current balance from atomic WalletLedgerService
+            require_once __DIR__ . '/../lib/WalletLedgerService.php';
+            $curBal = WalletLedgerService::getBalance($uid);
 
             Response::json([
                 'type' => 'reseller',

@@ -56,12 +56,16 @@ class AuthMiddleware {
             return self::$currentUser;
         }
 
-        $stmt = $db->prepare("SELECT user_id, tenant_id, email, username, first_name, last_name, phone, status, role, role_level, parent_id FROM users WHERE user_id = :id AND status = 'active' LIMIT 1");
+        $stmt = $db->prepare("SELECT user_id, tenant_id, email, username, first_name, last_name, phone, status, role, role_level, parent_id, hierarchy_path, metadata FROM users WHERE user_id = :id AND status = 'active' LIMIT 1");
         $stmt->execute(['id' => $payload['user_id']]);
         $user = $stmt->fetch();
 
         if (!$user) {
             return null;
+        }
+
+        if (empty($user['hierarchy_path']) || $user['hierarchy_path'] === '/') {
+            $user['hierarchy_path'] = "/{$user['user_id']}/";
         }
 
         // Attach impersonation data if present

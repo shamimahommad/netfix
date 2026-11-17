@@ -297,7 +297,8 @@ class WalletLedgerService {
         int $customerId,
         int $packageId,
         ?string $invoiceNumber = null,
-        ?int $tenantId = null
+        ?int $tenantId = null,
+        int $months = 1
     ): array {
         $db = Database::getConnection();
         $actorUser = HierarchySecurityService::getUser($actorUserId);
@@ -345,6 +346,9 @@ class WalletLedgerService {
             }
         }
 
+        $months = max(1, $months);
+        $actorCost = round($actorCost * $months, 2);
+
         $isNested = $db->inTransaction();
         if (!$isNested) {
             $db->beginTransaction();
@@ -368,10 +372,17 @@ class WalletLedgerService {
                     throw new DomainException("Initiator wallet is {$actorWallet['status']}");
                 }
 
+                $meta = json_decode($actorUser['metadata'] ?? '{}', true) ?: [];
+                $creditLimit = (float)($meta['credit_limit'] ?? 0.00);
                 $actorBalBefore = (float)$actorWallet['balance'];
-                if ($actorBalBefore < $actorCost) {
+                $availableFunds = round($actorBalBefore + $creditLimit, 2);
+
+                if ($availableFunds < $actorCost) {
+                    $limitText = $creditLimit > 0 ? " (Credit Limit: ৳" . number_format($creditLimit, 2) . ")" : "";
                     throw new DomainException(
-                        "Insufficient wallet balance: Available ৳{$actorBalBefore}, Package Cost ৳{$actorCost}."
+                        "Insufficient balance. Your current balance is ৳" . number_format($actorBalBefore, 2) . 
+                        $limitText . ", Required: ৳" . number_format($actorCost, 2) . 
+                        ". Please recharge your balance from top-up option or request a credit limit from your upstream."
                     );
                 }
 
@@ -436,6 +447,7 @@ class WalletLedgerService {
                 $pCostVal = $pCostStmt->fetchColumn();
 
                 $parentCost = $pCostVal !== false ? (float)$pCostVal : 0.00;
+                $parentCost = round($parentCost * $months, 2);
                 $marginProfit = round($currentChildCost - $parentCost, 2);
 
                 if ($marginProfit > 0) {

@@ -205,13 +205,38 @@ export const customersService = {
   },
 
   async getResellerWiseReport(): Promise<ResellerWiseReportRow[]> {
-    const response = await api.get<ResellerWiseReportRow[]>('/customers/reports/reseller-wise');
-    return Array.isArray(response.data) ? response.data : [];
+    const response = await api.get<any[]>('/customers/reports/reseller-wise');
+    const raw = Array.isArray(response.data) ? response.data : [];
+    return raw.map((r) => ({
+      resellerId: r.resellerId != null ? String(r.resellerId) : null,
+      resellerName: String(r.resellerName || 'Direct / Admin'),
+      total: Number(r.total) || 0,
+      active: Number(r.active) || 0,
+      expired: Number(r.expired) || 0,
+      left: Number(r.left) || 0,
+      pending: Number(r.pending) || 0,
+      pppoe: Number(r.pppoe) || 0,
+      hotspot: Number(r.hotspot) || 0,
+      free: Number(r.free) || 0,
+      vip: Number(r.vip) || 0,
+    }));
   },
 
   async getAreaWiseReport(): Promise<AreaWiseReportRow[]> {
-    const response = await api.get<AreaWiseReportRow[]>('/customers/reports/area-wise');
-    return Array.isArray(response.data) ? response.data : [];
+    const response = await api.get<any[]>('/customers/reports/area-wise');
+    const raw = Array.isArray(response.data) ? response.data : [];
+    return raw.map((r) => ({
+      areaName: String(r.areaName || 'Unassigned Area'),
+      total: Number(r.total) || 0,
+      active: Number(r.active) || 0,
+      expired: Number(r.expired) || 0,
+      left: Number(r.left) || 0,
+      pending: Number(r.pending) || 0,
+      pppoe: Number(r.pppoe) || 0,
+      hotspot: Number(r.hotspot) || 0,
+      free: Number(r.free) || 0,
+      vip: Number(r.vip) || 0,
+    }));
   },
 
   async getServerWiseReport(): Promise<ServerWiseReportRow[]> {
