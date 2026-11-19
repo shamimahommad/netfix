@@ -525,6 +525,47 @@ class NetworkController {
         ]);
     }
 
+    public static function updatePingInterval(string $deviceId): void {
+        $user = AuthMiddleware::requireAuth();
+        self::requireAdminOrCompanyRole($user);
+        $tenantId = AuthMiddleware::getTenantId();
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+
+        $customPingInterval = isset($data['customPingInterval']) && $data['customPingInterval'] !== null && $data['customPingInterval'] !== ''
+            ? max(5, (int)$data['customPingInterval'])
+            : null;
+
+        $db = Database::getConnection();
+
+        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE (network_device_id = :id OR device_code = :code) AND tenant_id = :tid LIMIT 1");
+            $stmt->execute(['id' => $deviceId, 'code' => $deviceId, 'tid' => $tenantId]);
+        } else {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id OR device_code = :code LIMIT 1");
+            $stmt->execute(['id' => $deviceId, 'code' => $deviceId]);
+        }
+        $device = $stmt->fetch();
+
+        if (!$device) {
+            Response::error('Device not found', 404);
+            return;
+        }
+
+        $upStmt = $db->prepare("UPDATE network_devices SET custom_ping_interval = :interval, updated_at = NOW() WHERE network_device_id = :id");
+        $upStmt->execute([
+            'interval' => $customPingInterval,
+            'id' => $device['network_device_id'],
+        ]);
+
+        Response::json([
+            'success' => true,
+            'message' => $customPingInterval 
+                ? "Ping interval updated to {$customPingInterval} seconds" 
+                : "Ping interval reset to default",
+            'customPingInterval' => $customPingInterval,
+        ]);
+    }
+
     public static function testConnection(): void {
         $user = AuthMiddleware::requireAuth();
         self::requireAdminOrCompanyRole($user);

@@ -505,6 +505,9 @@ if ($method === 'POST' && preg_match('#^/network/devices/([^/]+)/action$#', $uri
 if ($method === 'POST' && preg_match('#^/network/devices/([^/]+)/ping-now$#', $uri, $m)) {
     NetworkController::pingNow($m[1]);
 }
+if (($method === 'PATCH' || $method === 'POST' || $method === 'PUT') && preg_match('#^/network/devices/([^/]+)/ping-interval$#', $uri, $m)) {
+    NetworkController::updatePingInterval($m[1]);
+}
 if ($method === 'GET' && preg_match('#^/network/devices/([^/]+)/profiles$#', $uri, $m)) {
     NetworkController::getProfiles($m[1]);
 }
