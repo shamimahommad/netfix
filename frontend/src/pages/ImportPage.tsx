@@ -39,6 +39,7 @@ import {
 } from '@/services/import.service';
 import { NetworkDevice, NetworkPackage } from '@/types/network.types';
 import { ServiceArea } from '@/types/service-area.types';
+import { BD_DISTRICTS, getThanaNamesForDistrict } from '@/data/bd-districts-thanas';
 
 type ImportTab = 'mikrotik' | 'csv';
 
@@ -79,6 +80,8 @@ export default function ImportPage() {
   const [mtTargetReseller, setMtTargetReseller] = useState<string>('admin');
   const [mtDefaultArea, setMtDefaultArea] = useState<string>('');
   const [mtDefaultPackage, setMtDefaultPackage] = useState<string>('');
+  const [mtDistrict, setMtDistrict] = useState<string>('');
+  const [mtThana, setMtThana] = useState<string>('');
 
   // MikroTik Preview State
   const [mtLoadingPreview, setMtLoadingPreview] = useState(false);
@@ -296,6 +299,8 @@ export default function ImportPage() {
         deviceId: mtRouterId,
         importAs: mtImportAs,
         expiryDate: mtImportAs === 'prepaid' ? mtExpiryDate : undefined,
+        district: mtDistrict || undefined,
+        thana: mtThana || undefined,
         invoiceMonth: mtImportAs === 'postpaid' ? mtInvoiceMonth : undefined,
         generateInvoice: mtImportAs === 'postpaid' ? mtGenerateFirstInvoice : false,
         deductResellerBalance: mtResellerAutoMinus,
@@ -310,7 +315,10 @@ export default function ImportPage() {
           profile: u.profile,
           name: u.suggested_name,
           phone: u.suggested_phone,
-          address: u.comment || undefined,
+          address: u.suggested_area || u.comment || undefined,
+          suggested_code: u.suggested_code,
+          suggested_area: u.suggested_area,
+          suggested_expiry: u.suggested_expiry,
           packageId: u.matched_package_id || mtDefaultPackage || null,
           caller_id: u.caller_id,
           comment: u.comment,
@@ -771,6 +779,9 @@ export default function ImportPage() {
                       className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500"
                     />
                   </div>
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1 font-medium">
+                    ⚠️ ফাঁকা রাখলে সকল কাস্টমার "Expired" স্ট্যাটাসে যুক্ত হবে।
+                  </p>
                 </div>
               ) : (
                 <div>
@@ -821,6 +832,50 @@ export default function ImportPage() {
                       {a.name}
                     </option>
                   ))}
+                </select>
+              </div>
+            </div>
+
+            {/* District & Thana/Upazila Row (Optional) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  District (Optional)
+                </label>
+                <select
+                  value={mtDistrict}
+                  onChange={(e) => {
+                    setMtDistrict(e.target.value);
+                    setMtThana('');
+                  }}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500"
+                >
+                  <option value="">-- Select District (Optional) --</option>
+                  {BD_DISTRICTS.map((d) => (
+                    <option key={d.districtEn} value={d.districtEn}>
+                      {d.districtEn}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Thana / Upazila (Optional)
+                </label>
+                <select
+                  value={mtThana}
+                  onChange={(e) => setMtThana(e.target.value)}
+                  disabled={!mtDistrict}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 text-sm outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <option value="">{mtDistrict ? '-- Select Thana/Upazila --' : '-- Select District First --'}</option>
+                  {mtDistrict &&
+                    getThanaNamesForDistrict(mtDistrict).map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
                 </select>
               </div>
             </div>
@@ -1070,8 +1125,22 @@ export default function ImportPage() {
                           <td className="p-3 font-mono text-slate-500 dark:text-slate-400">
                             {mtShowPasswords ? u.password || '—' : '••••••••'}
                           </td>
-                          <td className="p-3">{u.suggested_name || '—'}</td>
-                          <td className="p-3">{u.suggested_phone || '—'}</td>
+                          <td className="p-3">
+                            <div>
+                              <div className="font-medium text-slate-800 dark:text-slate-200">{u.suggested_name || '—'}</div>
+                              {u.suggested_code && (
+                                <span className="text-[11px] text-cyan-600 dark:text-cyan-400 font-mono">ID: {u.suggested_code}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <div>
+                              <div>{u.suggested_phone || '—'}</div>
+                              {u.suggested_area && (
+                                <span className="text-[11px] text-slate-400">{u.suggested_area}</span>
+                              )}
+                            </div>
+                          </td>
                           <td className="p-3 font-medium text-slate-700 dark:text-slate-200">
                             {u.profile}
                           </td>

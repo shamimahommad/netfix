@@ -48,8 +48,11 @@ if (!HierarchySecurityService::hasPermission((int)$user['user_id'], 'can_recharg
 }
 
 $packageId = $data['package_id'] ?? $data['plan_id'] ?? null;
+$billingCycle = $data['billing_cycle'] ?? (isset($data['selected_days']) && (int)$data['selected_days'] < 30 ? 'Day-based' : 'Monthly');
+$isDayBased = ($billingCycle === 'Day-based' || (isset($data['selected_days']) && (int)$data['selected_days'] > 0 && empty($data['no_of_month'])));
+
 $months = max(1, (int)($data['billing_cycle_months'] ?? $data['no_of_month'] ?? 1));
-$days = isset($data['selected_days']) ? (int)$data['selected_days'] : ($months * 30);
+$days = isset($data['selected_days']) && (int)$data['selected_days'] > 0 ? (int)$data['selected_days'] : ($months * 30);
 
 $db = Database::getConnection();
 $db->beginTransaction();
@@ -67,8 +70,31 @@ try {
     }
 
     $profileName = $package['mikrotik_profile_name'] ?? ($package['profile_name'] ?? 'default');
-    $price = (float)($data['plan_price'] ?? $package['price'] ?? 500);
-    $totalAmount = $price * $months;
+    $monthlyPrice = (float)($data['plan_price'] ?? $package['price'] ?? 500);
+
+    if ($isDayBased) {
+        if (isset($data['bill_amount']) && (float)$data['bill_amount'] > 0) {
+            $totalAmount = (float)$data['bill_amount'];
+        } else {
+            $calc = ($monthlyPrice / 30) * $days;
+            $totalAmount = (float)round($calc);
+            if ($totalAmount < 1) {
+                $totalAmount = round($calc, 2);
+            }
+        }
+        $renewDaysParam = $days;
+        $renewMonthsParam = 1;
+        $renewMode = 'DAY_RENEW';
+        $bCycleDb = 'custom';
+        $renewNotes = "Day-based Renewal: {$days} Day(s) (Package: {$profileName})";
+    } else {
+        $totalAmount = round($monthlyPrice * $months, 2);
+        $renewDaysParam = null;
+        $renewMonthsParam = $months;
+        $renewMode = 'RENEW';
+        $bCycleDb = 'monthly';
+        $renewNotes = "Monthly Renewal: {$months} Month(s) (Package: {$profileName})";
+    }
     $rateLimit = $package['rate_limit'] ?? '10M/10M';
 
     // 2. Calculate new expiry date
@@ -86,11 +112,12 @@ try {
     // 3. Update customer service & customer
     if ($currentService) {
         $stmtUpdate = $db->prepare("UPDATE customer_services 
-            SET expires_at = :exp, status = 'active', access_profile_id = COALESCE(:pid, access_profile_id), updated_at = NOW() 
+            SET expires_at = :exp, status = 'active', access_profile_id = COALESCE(:pid, access_profile_id), billing_cycle = :bc, updated_at = NOW() 
             WHERE customer_service_id = :sid");
         $stmtUpdate->execute([
             'exp' => $newExpireDate,
             'pid' => $packageId ?: $currentService['access_profile_id'],
+            'bc' => $bCycleDb,
             'sid' => $currentService['customer_service_id'],
         ]);
     }
@@ -101,8 +128,8 @@ try {
     // 4. Create paid invoice & record transaction
     $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 6);
     $stmtInv = $db->prepare("INSERT INTO invoices 
-        (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, collected_by, renew_mode, created_by)
-        VALUES (:tid, :cid, :sid, :inv_num, CURDATE(), CURDATE(), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :coll, 'RENEW', :uid)");
+        (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, collected_by, renew_mode, notes, created_by)
+        VALUES (:tid, :cid, :sid, :inv_num, CURDATE(), CURDATE(), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :coll, :renew_mode, :notes, :uid)");
     $stmtInv->execute([
         'tid' => $tenantId,
         'cid' => $customerId,
@@ -114,13 +141,15 @@ try {
         'base' => $totalAmount,
         'sell' => $totalAmount,
         'coll' => $user['user_id'],
+        'renew_mode' => $renewMode,
+        'notes' => $renewNotes,
         'uid' => $user['user_id'],
     ]);
 
     $trxRef = 'TRX-RENEW-' . strtoupper(bin2hex(random_bytes(4)));
     $stmtTrx = $db->prepare("INSERT INTO transactions 
         (tenant_id, customer_id, transaction_ref, transaction_type, amount, method, initiator_user_id, initiator_role, collector_user_id, description)
-        VALUES (:tid, :cid, :ref, 'RENEW_DEBIT', :amt, 'system', :uid, :role, :coll, 'Customer subscription renewal')");
+        VALUES (:tid, :cid, :ref, 'RENEW_DEBIT', :amt, 'system', :uid, :role, :coll, :descr)");
     $stmtTrx->execute([
         'tid' => $tenantId,
         'cid' => $customerId,
@@ -129,6 +158,7 @@ try {
         'uid' => $user['user_id'],
         'role' => $user['role'],
         'coll' => $user['user_id'],
+        'descr' => $isDayBased ? "Customer subscription renewal ({$days} Days)" : "Customer subscription renewal ({$months} Months)",
     ]);
 
     // 5. Atomic Wallet Deduction & Cascading Upstream Margin
@@ -137,7 +167,10 @@ try {
         (int)$customerId,
         (int)$package['access_profile_id'],
         $invNumber,
-        $tenantId ? (int)$tenantId : null
+        $tenantId ? (int)$tenantId : null,
+        $renewMonthsParam,
+        $renewDaysParam
+    );
     );
 
     $db->commit();

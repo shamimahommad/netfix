@@ -198,11 +198,6 @@ export default function PublicTopupPage() {
     }
   };
 
-  const fillDemoCustomer = () => {
-    setQuery('100001');
-    setError(null);
-    runLookup('100001');
-  };
 
   // =========================================================================
   // VIEW: PAYMENT RESULT (Success / Failure Return)
@@ -443,14 +438,6 @@ export default function PublicTopupPage() {
                       <Search className="w-3.5 h-3.5 text-cyan-400" />
                       Customer ID / Mobile / Username
                     </label>
-                    <button
-                      type="button"
-                      onClick={fillDemoCustomer}
-                      className="text-[11px] text-cyan-400 hover:text-cyan-300 font-semibold inline-flex items-center gap-1 transition-colors hover:underline cursor-pointer"
-                    >
-                      <Sparkles className="w-3 h-3" />
-                      ⚡ Fill Demo: 100001
-                    </button>
                   </div>
 
                   <div className="relative">

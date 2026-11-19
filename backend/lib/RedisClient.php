@@ -243,6 +243,39 @@ class RedisClient {
         return is_numeric($res) ? (int)$res : 0;
     }
 
+    public function get(string $key): ?string {
+        if ($this->nativeRedis) {
+            try {
+                $val = $this->nativeRedis->get($key);
+                return ($val !== false && $val !== null) ? (string)$val : null;
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+        $res = $this->sendCommand(['GET', $key]);
+        return is_string($res) ? $res : null;
+    }
+
+    public function set(string $key, string $value, ?int $ttlSeconds = null): bool {
+        if ($this->nativeRedis) {
+            try {
+                if ($ttlSeconds && $ttlSeconds > 0) {
+                    return (bool)$this->nativeRedis->setex($key, $ttlSeconds, $value);
+                }
+                return (bool)$this->nativeRedis->set($key, $value);
+            } catch (\Throwable $e) {
+                return false;
+            }
+        }
+        $args = ['SET', $key, $value];
+        if ($ttlSeconds && $ttlSeconds > 0) {
+            $args[] = 'EX';
+            $args[] = (string)$ttlSeconds;
+        }
+        $res = $this->sendCommand($args);
+        return ($res === 'OK' || $res === true);
+    }
+
     public function expire(string $key, int $seconds): bool {
         if ($this->nativeRedis) {
             try {

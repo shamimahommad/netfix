@@ -369,6 +369,7 @@ export default function FinancialLedgerPage() {
               className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium"
             >
               <option value="">My Own Wallet (Self)</option>
+              <option value="all">All Accounts (Combined)</option>
               {downlines.map((dl) => (
                 <option key={dl.userId} value={dl.userId}>
                   {dl.username} ({dl.role})

@@ -49,7 +49,6 @@ export default function LoginPage() {
   const [tenantSearch, setTenantSearch] = useState('');
 
   // UI helpers
-  const [demoFilled, setDemoFilled] = useState<string | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
@@ -155,20 +154,6 @@ export default function LoginPage() {
     setPassword('Star@1122');
   };
 
-  const fillDemo = (role: 'saas' | 'isp') => {
-    setError(null);
-    if (role === 'saas') {
-      setEmail('admin@ispsaas.com');
-      setPassword('Star@1122');
-      setSelectedTenant(null);
-      setDemoFilled('SaaS Superadmin');
-    } else {
-      setEmail('admin@netfix.com');
-      setPassword('Star@1122');
-      setDemoFilled('ISP Admin');
-    }
-    setTimeout(() => setDemoFilled(null), 3000);
-  };
 
   if (token && isAuthenticated && user) {
     const target =
@@ -356,37 +341,6 @@ export default function LoginPage() {
                     </p>
                   </div>
 
-                  {/* 1-Tap Quick Demo Credentials */}
-                  <div className="mb-5 p-3 rounded-2xl bg-slate-950/70 border border-slate-800/80">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                        <Zap className="w-3 h-3 text-amber-400" /> Quick Demo Fill:
-                      </span>
-                      {demoFilled && (
-                        <span className="text-[10px] font-semibold text-emerald-400 flex items-center gap-1 animate-pulse">
-                          <CheckCircle2 className="w-3 h-3" /> Filled {demoFilled}!
-                        </span>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => fillDemo('saas')}
-                        className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-700 border border-slate-800 hover:border-slate-700 text-xs font-medium text-slate-200 transition-all text-center flex items-center justify-center gap-1.5"
-                      >
-                        <span>👑</span>
-                        <span>SaaS Admin</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => fillDemo('isp')}
-                        className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-700 border border-slate-800 hover:border-slate-700 text-xs font-medium text-slate-200 transition-all text-center flex items-center justify-center gap-1.5"
-                      >
-                        <span>⚡</span>
-                        <span>ISP Admin</span>
-                      </button>
-                    </div>
-                  </div>
 
                   {/* Error Notification Alert */}
                   <AnimatePresence>

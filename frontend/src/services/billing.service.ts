@@ -62,6 +62,7 @@ export const billingService = {
     selected_days?: number;
     plan_id: string;
     plan_price: number;
+    bill_amount?: number;
     send_sms?: boolean;
     renew_as_reseller?: boolean;
     pay_from_customer_balance?: boolean;

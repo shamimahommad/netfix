@@ -17,16 +17,96 @@ interface TopbarProps {
 }
 
 const getPageTitle = (pathname: string): string => {
-  const path = pathname.split('/').pop() || 'dashboard';
-  const titles: Record<string, string> = {
-    dashboard: 'Dashboard',
-    tenants: 'Tenants',
-    customers: 'Customers',
-    billing: 'Billing',
-    network: 'Network',
-    settings: 'Settings',
+  const clean = pathname.replace(/^\/+|\/+$/g, '').toLowerCase();
+
+  const routeMap: Record<string, string> = {
+    'dashboard': 'Dashboard Overview',
+    'dashboard/pppoe-logs': 'PPPoE Session Logs',
+    'dashboard/customers/all': 'All Customers',
+    'dashboard/customers/add': 'Add New Customer',
+    'dashboard/customers/online': 'Online Customers',
+    'dashboard/customers/offline': 'Offline Customers',
+    'dashboard/customers/suspended': 'Suspended Customers',
+    'dashboard/customers/expiring-soon': 'Expiring Soon Customers',
+    'dashboard/customers': 'Customers',
+    'dashboard/billing/all': 'Billing - All Accounts',
+    'dashboard/billing/active': 'Active Accounts',
+    'dashboard/billing/suspended': 'Suspended Accounts',
+    'dashboard/billing/bulk-renew': 'Bulk Customer Renewal',
+    'dashboard/billing': 'Billing & Accounts',
+    'dashboard/topup-balance': 'Topup Balance',
+    'dashboard/billing/topup-balance': 'Topup Balance',
+    'dashboard/sms/send': 'Send SMS',
+    'dashboard/sms/templates': 'SMS Templates',
+    'dashboard/sms/logs': 'SMS Logs',
+    'dashboard/sms': 'SMS Gateway',
+    'dashboard/reseller': 'Reseller Management',
+    'dashboard/my-packages': 'My Packages',
+    'dashboard/area': 'Coverage Areas',
+    'dashboard/service-area/areas': 'Service Areas',
+    'dashboard/service-area/sub-areas': 'Service Sub Areas',
+    'dashboard/map': 'Network Coverage Map',
+    'dashboard/support/ticket': 'Support Tickets',
+    'dashboard/support': 'Customer Support',
+    'dashboard/network/mikrotik': 'MikroTik Routers',
+    'dashboard/network/package-copy': 'Package Synchronizer',
+    'dashboard/network/packages': 'Bandwidth Plans & Packages',
+    'dashboard/network/monitoring/live-traffic': 'Live Traffic Monitor',
+    'dashboard/network/olt': 'OLT Infrastructure',
+    'dashboard/network': 'Network Infrastructure',
+    'dashboard/report/online-transactions': 'Online Transactions',
+    'dashboard/report/merchant-payments': 'Merchant Payments',
+    'dashboard/report/customer-payments': 'Customer Payments',
+    'dashboard/report/recharge-history': 'Recharge History',
+    'dashboard/report/invoices': 'Invoices Report',
+    'dashboard/report/ledger': 'Financial Ledger',
+    'dashboard/report/financial-ledger': 'Financial Ledger',
+    'dashboard/report/reconciliation': 'Reconciliation Audit',
+    'dashboard/report/reseller-wise-customers': 'Reseller Wise Customers',
+    'dashboard/report/area-wise-customers': 'Area Wise Customers',
+    'dashboard/report/server-wise-customers': 'Server Wise Customers',
+    'dashboard/report': 'Reports & Analytics',
+    'dashboard/settings/company-profile': 'Company Profile & Settings',
+    'dashboard/settings/company-setup': 'Company Setup',
+    'dashboard/settings/import': 'Data Import & Migration',
+    'dashboard/settings': 'System Settings',
+
+    // SaaS Admin routes
+    'saas/dashboard': 'SaaS Dashboard',
+    'saas/tenants': 'ISP Tenants & Providers',
+    'saas/packages': 'SaaS Subscription Packages',
+    'saas/billing': 'Platform Billing',
+    'saas/customers': 'Global Customers',
+    'saas/network': 'Network Telemetry',
+    'saas/settings': 'Platform Settings',
+
+    // Customer Portal routes
+    'customer/dashboard': 'Customer Dashboard',
+    'customer/profile': 'My Profile',
+    'customer/usage': 'Data Usage',
+    'customer/invoices': 'My Invoices',
+    'customer/pay-bill': 'Instant Pay Bill',
+    'customer/payment-history': 'Payment History',
+    'customer/ticket': 'Support Tickets',
+    'customer/report': 'Traffic Reports',
   };
-  return titles[path] || 'Dashboard';
+
+  if (routeMap[clean]) {
+    return routeMap[clean];
+  }
+
+  for (const [key, title] of Object.entries(routeMap)) {
+    if (clean === key || clean.startsWith(key + '/')) {
+      return title;
+    }
+  }
+
+  // Fallback: parse last segment into clean Title Case
+  const lastSeg = clean.split('/').pop() || 'Dashboard';
+  return lastSeg
+    .split(/[-_]/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
 };
 
 /** Map role_code to display label for navbar */
@@ -58,6 +138,13 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
   const navigate = useNavigate();
   const pageTitle = getPageTitle(location.pathname);
   const { selectedTenant, setSelectedTenant, clearSelectedTenant } = useTenantStore();
+
+  // Keep browser tab title in sync with current page
+  useEffect(() => {
+    if (pageTitle) {
+      document.title = `${pageTitle} | NetFix`;
+    }
+  }, [pageTitle]);
   const { user, balance, refreshMe, logout } = useAuthStore();
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [smsBalance, setSmsBalance] = useState<number | null>(null);
@@ -530,9 +617,9 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
       </div>
 
       {/* Center: Page title + ISP Badge */}
-      <div className="hidden lg:flex items-center gap-2 lg:gap-4 flex-shrink-0">
+      <div className="hidden md:flex items-center gap-2 lg:gap-4 flex-shrink-0">
         {/* Page title */}
-        <h2 className="text-base lg:text-lg font-semibold text-text-primary truncate max-w-[12rem] xl:max-w-none">
+        <h2 className="text-base lg:text-lg font-bold text-slate-900 dark:text-slate-100 truncate max-w-[14rem] xl:max-w-none">
           {pageTitle}
         </h2>
 

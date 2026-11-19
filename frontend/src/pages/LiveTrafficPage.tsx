@@ -509,7 +509,7 @@ export default function LiveTrafficPage() {
                   : 'hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
-              Bar Graph (Demo)
+              Bar Graph
             </button>
             <button
               onClick={() => setChartType('area')}

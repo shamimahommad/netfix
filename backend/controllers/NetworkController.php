@@ -1559,6 +1559,185 @@ class NetworkController {
         ]);
     }
 
+    /**
+     * Execute an action on a MikroTik network device:
+     * - sync_clients (Sync all customers to router secrets with standard comment)
+     * - restart
+     * - dns_flush
+     * - create_backup
+     * - ppp_mac_bind_all
+     * - ppp_mac_unbind_all
+     * - ppp_server_troubleshoot
+     */
+    public static function executeAction(string $deviceId): void {
+        $startTime = microtime(true);
+        $user = AuthMiddleware::requireAuth();
+        self::requireAdminOrCompanyRole($user);
+        $tenantId = AuthMiddleware::getTenantId();
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+        $action = strtolower(trim($data['action'] ?? ''));
+
+        $db = Database::getConnection();
+
+        // 1. Fetch router
+        $devStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :did AND (tenant_id = :tid OR :is_saas = 1) LIMIT 1");
+        $devStmt->execute(['did' => $deviceId, 'tid' => $tenantId, 'is_saas' => (($user['role'] ?? '') === 'saas_admin' ? 1 : 0)]);
+        $router = $devStmt->fetch();
+
+        if (!$router) {
+            Response::error('Router not found or unauthorized', 404);
+            return;
+        }
+
+        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+        $api = MikrotikSyncService::connect($router, 5);
+        if (!$api) {
+            $execTime = (int)round((microtime(true) - $startTime) * 1000);
+            Response::json([
+                'success' => false,
+                'action' => $action,
+                'deviceId' => $deviceId,
+                'action_status' => 'failed',
+                'execution_time' => $execTime,
+                'error_message' => "Could not connect to router {$router['device_name']} at {$router['management_ip']}:{$router['management_port']}",
+            ], 503);
+            return;
+        }
+
+        try {
+            switch ($action) {
+                case 'sync_clients':
+                    $syncResult = MikrotikSyncService::syncAllRouterCustomers($db, $router, $api, (int)($router['tenant_id'] ?: $tenantId));
+                    $execTime = (int)round((microtime(true) - $startTime) * 1000);
+                    Response::json([
+                        'success' => true,
+                        'action' => $action,
+                        'deviceId' => $deviceId,
+                        'action_status' => 'success',
+                        'execution_time' => $execTime,
+                        'error_message' => null,
+                        'data' => [
+                            'syncedCount' => $syncResult['syncedCount'],
+                            'createdCount' => $syncResult['createdCount'],
+                            'updatedCount' => $syncResult['updatedCount'],
+                            'totalClients' => $syncResult['totalClients'],
+                            'message' => "{$syncResult['syncedCount']} Customers Successfully Synced",
+                        ],
+                    ]);
+                    return;
+
+                case 'restart':
+                    $api->comm('/system/reboot');
+                    $execTime = (int)round((microtime(true) - $startTime) * 1000);
+                    Response::json([
+                        'success' => true,
+                        'action' => $action,
+                        'deviceId' => $deviceId,
+                        'action_status' => 'success',
+                        'execution_time' => $execTime,
+                        'error_message' => null,
+                    ]);
+                    return;
+
+                case 'dns_flush':
+                    $api->comm('/ip/dns/cache/flush');
+                    $execTime = (int)round((microtime(true) - $startTime) * 1000);
+                    Response::json([
+                        'success' => true,
+                        'action' => $action,
+                        'deviceId' => $deviceId,
+                        'action_status' => 'success',
+                        'execution_time' => $execTime,
+                        'error_message' => null,
+                    ]);
+                    return;
+
+                case 'create_backup':
+                    $bName = 'backup_' . date('Ymd_His');
+                    $api->comm('/system/backup/save', ['=name=' . $bName]);
+                    $execTime = (int)round((microtime(true) - $startTime) * 1000);
+                    Response::json([
+                        'success' => true,
+                        'action' => $action,
+                        'deviceId' => $deviceId,
+                        'action_status' => 'success',
+                        'execution_time' => $execTime,
+                        'error_message' => null,
+                        'data' => ['backupName' => $bName],
+                    ]);
+                    return;
+
+                case 'ppp_mac_bind_all':
+                    $res = MikrotikSyncService::bindAllSecretsMac($api, $db, (int)$router['network_device_id']);
+                    $execTime = (int)round((microtime(true) - $startTime) * 1000);
+                    Response::json([
+                        'success' => true,
+                        'action' => $action,
+                        'deviceId' => $deviceId,
+                        'action_status' => 'success',
+                        'execution_time' => $execTime,
+                        'error_message' => null,
+                        'data' => $res,
+                    ]);
+                    return;
+
+                case 'ppp_mac_unbind_all':
+                    $res = MikrotikSyncService::unbindAllSecretsMac($api);
+                    $execTime = (int)round((microtime(true) - $startTime) * 1000);
+                    Response::json([
+                        'success' => true,
+                        'action' => $action,
+                        'deviceId' => $deviceId,
+                        'action_status' => 'success',
+                        'execution_time' => $execTime,
+                        'error_message' => null,
+                        'data' => $res,
+                    ]);
+                    return;
+
+                case 'ppp_server_troubleshoot':
+                    $servers = $api->comm('/interface/pppoe-server/server/print');
+                    $execTime = (int)round((microtime(true) - $startTime) * 1000);
+                    Response::json([
+                        'success' => true,
+                        'action' => $action,
+                        'deviceId' => $deviceId,
+                        'action_status' => 'success',
+                        'execution_time' => $execTime,
+                        'error_message' => null,
+                        'data' => ['servers' => $servers],
+                    ]);
+                    return;
+
+                default:
+                    $execTime = (int)round((microtime(true) - $startTime) * 1000);
+                    Response::json([
+                        'success' => true,
+                        'action' => $action,
+                        'deviceId' => $deviceId,
+                        'action_status' => 'success',
+                        'execution_time' => $execTime,
+                        'error_message' => null,
+                    ]);
+                    return;
+            }
+        } catch (\Throwable $e) {
+            $execTime = (int)round((microtime(true) - $startTime) * 1000);
+            Response::json([
+                'success' => false,
+                'action' => $action,
+                'deviceId' => $deviceId,
+                'action_status' => 'failed',
+                'execution_time' => $execTime,
+                'error_message' => $e->getMessage(),
+            ], 500);
+        } finally {
+            try {
+                $api->disconnect();
+            } catch (\Throwable $ignored) {}
+        }
+    }
+
     public static function delete(string $id): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
@@ -1627,10 +1806,17 @@ class NetworkController {
         // - Admin's customers are strictly excluded for Resellers and Agents!
         $custSql = "SELECT na.username, na.mac_address, na.remote_address, na.network_device_id as router_id,
                            c.customer_id, c.customer_code, c.full_name, c.phone,
+                           c.status as customer_status, c.billing_status,
+                           cs.expires_at, cs.status as service_status,
                            c.owner_id, c.owner_role, c.owner_path,
                            u.username as owner_username, u.first_name as owner_first_name, u.last_name as owner_last_name, u.role as owner_user_role
                     FROM customer_network_accounts na 
                     JOIN customers c ON c.customer_id = na.customer_id 
+                    LEFT JOIN (
+                        SELECT customer_id, MAX(expires_at) as expires_at, MAX(status) as status
+                        FROM customer_services
+                        GROUP BY customer_id
+                    ) cs ON cs.customer_id = c.customer_id
                     LEFT JOIN users u ON u.user_id = c.owner_id
                     WHERE na.tenant_id = :tid AND na.username IS NOT NULL";
         $custParams = ['tid' => $tenantId];
@@ -1717,8 +1903,26 @@ class NetworkController {
         }
 
         require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+        require_once __DIR__ . '/../lib/RedisClient.php';
 
-        // 4. Fetch raw logs from target router(s)
+        // Check Redis cache first (default in-memory tier, 6s TTL)
+        $redis = null;
+        $cacheKey = "netfix:pppoe_logs:t_{$tenantId}:r_" . ($targetRouterId ?: 'default');
+        try {
+            $redis = RedisClient::getInstance();
+            if ($redis && $redis->isConnected()) {
+                $cachedJson = $redis->get($cacheKey);
+                if ($cachedJson) {
+                    $cachedPayload = json_decode($cachedJson, true);
+                    if (!empty($cachedPayload) && isset($cachedPayload['logs'])) {
+                        Response::json($cachedPayload);
+                        return;
+                    }
+                }
+            }
+        } catch (\Throwable $ignored) {}
+
+        // 4. Ingest/Fetch raw logs: Check Redis first, then fall back to MikroTik and populate Redis
         $routersToQuery = [];
         if ($queryAllRouters) {
             $routersToQuery = $routers;
@@ -1728,8 +1932,34 @@ class NetworkController {
 
         $allRawLogs = [];
         $anyOnline = false;
+        $forceReload = !empty($_GET['force']) || (isset($_GET['source']) && $_GET['source'] === 'live');
 
         foreach ($routersToQuery as $rItem) {
+            $rId = (string)$rItem['network_device_id'];
+            $routerLogCacheKey = "netfix:router_raw_logs:r_{$rId}";
+            $cachedLogs = null;
+
+            // 1. Read directly from Redis In-Memory storage first
+            if ($redis && $redis->isConnected() && !$forceReload) {
+                try {
+                    $jsonStr = $redis->get($routerLogCacheKey);
+                    if ($jsonStr) {
+                        $cachedLogs = json_decode($jsonStr, true);
+                    }
+                } catch (\Throwable $ignored) {}
+            }
+
+            if (is_array($cachedLogs) && !empty($cachedLogs)) {
+                $anyOnline = true;
+                foreach ($cachedLogs as $l) {
+                    $l['_router_id'] = $rId;
+                    $l['_router_name'] = $rItem['device_name'];
+                    $allRawLogs[] = $l;
+                }
+                continue;
+            }
+
+            // 2. Cache miss: Query MikroTik router, then immediately store in Redis
             if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
                 $dStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :id AND tenant_id = :tid LIMIT 1");
                 $dStmt->execute(['id' => $rItem['network_device_id'], 'tid' => $tenantId]);
@@ -1747,8 +1977,14 @@ class NetworkController {
                 $logs = $api->comm('/log/print');
                 $api->disconnect();
                 if (is_array($logs)) {
+                    // Store in Redis (60 seconds retention) so all future queries read from Redis
+                    if ($redis && $redis->isConnected()) {
+                        try {
+                            $redis->set($routerLogCacheKey, json_encode($logs, JSON_UNESCAPED_UNICODE), 60);
+                        } catch (\Throwable $ignored) {}
+                    }
                     foreach ($logs as $l) {
-                        $l['_router_id'] = (string)$rItem['network_device_id'];
+                        $l['_router_id'] = $rId;
                         $l['_router_name'] = $rItem['device_name'];
                         $allRawLogs[] = $l;
                     }
@@ -1827,12 +2063,50 @@ class NetworkController {
             }
 
             $ownerFullName = '';
+            $customerData = null;
+            $registeredMac = null;
             if ($customerInfo) {
                 $ownerFullName = trim(($customerInfo['owner_first_name'] ?? '') . ' ' . ($customerInfo['owner_last_name'] ?? ''));
                 if (empty($ownerFullName)) {
                     $ownerFullName = $customerInfo['owner_username'] ?? 'Admin';
                 }
+
+                $now = time();
+                $expiresAt = $customerInfo['expires_at'] ?? null;
+                $expiresTs = $expiresAt ? strtotime($expiresAt) : null;
+                $isExpired = false;
+                $statusLabel = 'Active';
+
+                if (($customerInfo['customer_status'] ?? '') === 'suspended' || ($customerInfo['billing_status'] ?? '') === 'Suspended') {
+                    $statusLabel = 'Suspended';
+                } elseif (($expiresTs !== null && $expiresTs < $now) || strcasecmp($customerInfo['billing_status'] ?? '', 'expired') === 0 || ($customerInfo['customer_status'] ?? '') === 'inactive') {
+                    $statusLabel = 'Expired';
+                    $isExpired = true;
+                } else {
+                    $statusLabel = 'Active';
+                }
+
+                if (!empty($customerInfo['mac_address'])) {
+                    $registeredMac = strtoupper(str_replace(['-', '.', ' '], ':', trim($customerInfo['mac_address'])));
+                }
+
+                $customerData = [
+                    'customer_id' => (string)$customerInfo['customer_id'],
+                    'customer_code' => $customerInfo['customer_code'],
+                    'full_name' => $customerInfo['full_name'],
+                    'phone' => $customerInfo['phone'] ?? null,
+                    'status' => $statusLabel,
+                    'is_expired' => $isExpired,
+                    'expires_at' => $expiresAt,
+                    'billing_status' => $customerInfo['billing_status'] ?? null,
+                    'caller_id' => $registeredMac,
+                    'owner_id' => (string)($customerInfo['owner_id'] ?? ''),
+                    'owner_name' => $ownerFullName,
+                    'owner_role' => $customerInfo['owner_user_role'] ?? ($customerInfo['owner_role'] ?? 'admin'),
+                ];
             }
+
+            $finalMac = $mac ?: $registeredMac;
 
             $parsedLogs[] = [
                 'id' => $item['.id'] ?? uniqid(),
@@ -1840,21 +2114,56 @@ class NetworkController {
                 'topics' => $topics,
                 'action' => $action,
                 'username' => $username,
-                'customer' => $customerInfo ? [
-                    'customer_id' => (string)$customerInfo['customer_id'],
-                    'customer_code' => $customerInfo['customer_code'],
-                    'full_name' => $customerInfo['full_name'],
-                    'phone' => $customerInfo['phone'] ?? null,
-                    'owner_id' => (string)($customerInfo['owner_id'] ?? ''),
-                    'owner_name' => $ownerFullName,
-                    'owner_role' => $customerInfo['owner_user_role'] ?? ($customerInfo['owner_role'] ?? 'admin'),
-                ] : null,
+                'customer' => $customerData,
                 'ip' => $ip,
-                'mac' => $mac,
+                'mac' => $finalMac,
+                'caller_mac' => $finalMac,
+                'detected_mac' => $mac,
+                'registered_mac' => $registeredMac,
                 'message' => $msg,
                 'router_id' => $rId,
                 'router_name' => $rName,
             ];
+        }
+
+        // Correlation Pass: Link anonymous "PPPoE connection established from <MAC>" to the username dialed in the same window (±3 seconds) on the same router
+        $parseLogSec = function(?string $t): ?int {
+            if (!$t) return null;
+            if (preg_match('/(\d{1,2}):(\d{2}):(\d{2})/', $t, $m)) {
+                return ((int)$m[1] * 3600) + ((int)$m[2] * 60) + (int)$m[3];
+            }
+            return null;
+        };
+
+        $countLogs = count($parsedLogs);
+        for ($i = 0; $i < $countLogs; $i++) {
+            if (empty($parsedLogs[$i]['username']) && !empty($parsedLogs[$i]['mac'])) {
+                $targetSec = $parseLogSec($parsedLogs[$i]['time']);
+                $targetRouter = $parsedLogs[$i]['router_id'];
+                for ($j = max(0, $i - 8); $j <= min($countLogs - 1, $i + 8); $j++) {
+                    if ($i === $j) continue;
+                    if (!empty($parsedLogs[$j]['username']) && $parsedLogs[$j]['router_id'] === $targetRouter) {
+                        $jSec = $parseLogSec($parsedLogs[$j]['time']);
+                        $isMatch = false;
+                        if ($targetSec !== null && $jSec !== null) {
+                            $diff = abs($targetSec - $jSec);
+                            if ($diff <= 3 || $diff >= 86397) {
+                                $isMatch = true;
+                            }
+                        } elseif ($parsedLogs[$j]['time'] === $parsedLogs[$i]['time']) {
+                            $isMatch = true;
+                        }
+
+                        if ($isMatch) {
+                            $matchedUsername = $parsedLogs[$j]['username'];
+                            $parsedLogs[$i]['username'] = $matchedUsername;
+                            $parsedLogs[$i]['customer'] = $parsedLogs[$j]['customer'] ?? ($custMap[strtolower($matchedUsername)] ?? null);
+                            $parsedLogs[$i]['correlated'] = true;
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         $currentRouterData = null;
@@ -1874,7 +2183,21 @@ class NetworkController {
             ];
         }
 
-        Response::json([
+        $connectedCount = 0;
+        $disconnectedCount = 0;
+        $authFailedCount = 0;
+        foreach ($parsedLogs as $pl) {
+            $act = $pl['action'] ?? '';
+            if (in_array($act, ['login', 'connected', 'authenticated'], true)) {
+                $connectedCount++;
+            } elseif (in_array($act, ['logout', 'disconnected'], true)) {
+                $disconnectedCount++;
+            } elseif ($act === 'failed') {
+                $authFailedCount++;
+            }
+        }
+
+        $responsePayload = [
             'success' => true,
             'is_online' => $anyOnline,
             'current_router' => $currentRouterData,
@@ -1890,8 +2213,30 @@ class NetworkController {
             'is_admin' => $isLevel0,
             'total' => count($parsedLogs),
             'logs' => $parsedLogs,
+            'metrics' => [
+                'connected' => $connectedCount,
+                'disconnected' => $disconnectedCount,
+                'auth_failed' => $authFailedCount,
+            ],
+            'tier' => [
+                'mode' => 'short_term_redis',
+                'label' => 'Short-Term Live (Redis)',
+                'badge' => 'Redis In-Memory',
+                'retention' => '24 Hours',
+                'engine' => 'Redis In-Memory Tier',
+                'max_live_logs' => 1000,
+            ],
             'status_message' => $anyOnline ? 'Logs retrieved from live router' : 'Router unreachable or API disconnected',
-        ]);
+        ];
+
+        // Cache in Redis for 6 seconds so rapid auto-refresh doesn't overload router
+        if ($redis && $redis->isConnected() && !empty($cacheKey) && !empty($parsedLogs)) {
+            try {
+                $redis->set($cacheKey, json_encode($responsePayload, JSON_UNESCAPED_UNICODE), 6);
+            } catch (\Throwable $ignored) {}
+        }
+
+        Response::json($responsePayload);
     }
 
     public static function mikrotikImportPreview(): void {
@@ -1987,15 +2332,17 @@ class NetworkController {
                 $callerId = trim($sec['caller-id'] ?? '');
                 $disabled = ($sec['disabled'] ?? 'false') === 'true';
 
-                // Customer PPPoE username is the customer full_name
-                $suggestedName = $username;
+                // Parse standard comment format: ID Number | Name | Phone | Area | Expire Date
+                $parsed = MikrotikSyncService::parseSecretComment($comment);
+
+                $suggestedCode = $parsed['customer_code'] ?? null;
+                $suggestedName = !empty($parsed['name']) ? $parsed['name'] : $username;
 
                 // Default 11-digit phone number: '012' prefix + 8 random digits
                 $random8 = str_pad((string)mt_rand(10000000, 99999999), 8, '0', STR_PAD_LEFT);
-                $suggestedPhone = '012' . $random8;
-                if (!empty($comment) && preg_match('/(01[3-9]\d{8})/', $comment, $pm)) {
-                    $suggestedPhone = $pm[1];
-                }
+                $suggestedPhone = !empty($parsed['phone']) ? $parsed['phone'] : ('012' . $random8);
+                $suggestedArea = $parsed['area'] ?? null;
+                $suggestedExpiry = $parsed['expiry_date'] ?? null;
 
                 // Match package
                 $matchedPkg = $pkgMap[strtolower($profile)] ?? null;
@@ -2005,8 +2352,11 @@ class NetworkController {
                     'password' => $password,
                     'profile' => $profile,
                     'comment' => $comment,
-                    'address' => $comment,
-                    'suggested_address' => $comment,
+                    'address' => $suggestedArea ?: $comment,
+                    'suggested_address' => $suggestedArea ?: $comment,
+                    'suggested_code' => $suggestedCode,
+                    'suggested_area' => $suggestedArea,
+                    'suggested_expiry' => $suggestedExpiry,
                     'caller_id' => $callerId,
                     'disabled' => $disabled,
                     'exists_in_db' => $exists,
@@ -2052,6 +2402,8 @@ class NetworkController {
 
         $importAs = strtolower($data['importAs'] ?? 'prepaid');
         $expiryDate = !empty($data['expiryDate']) ? trim($data['expiryDate']) : null;
+        $district = !empty($data['district']) ? trim($data['district']) : null;
+        $thana = !empty($data['thana']) ? trim($data['thana']) : null;
         $invoiceMonth = !empty($data['invoiceMonth']) ? trim($data['invoiceMonth']) : date('Y-m');
         $generateInvoice = !empty($data['generateInvoice']);
         $savePasswords = isset($data['savePasswords']) ? (bool)$data['savePasswords'] : true;
@@ -2060,6 +2412,19 @@ class NetworkController {
         $areaId = $data['areaId'] ?? null;
         $subAreaId = $data['subAreaId'] ?? null;
         $defaultPackageId = $data['defaultPackageId'] ?? null;
+
+        // Expiry date and Expired status handling
+        // If expired date is NOT provided: all added customers go to Expired!
+        $isExpiryProvided = !empty($expiryDate);
+        if ($isExpiryProvided) {
+            $effectiveExpiry = $expiryDate;
+            $isPastExpiry = (strtotime($effectiveExpiry . ' 23:59:59') < time());
+            $custBillingStatus = $isPastExpiry ? 'Expired' : 'Paid';
+        } else {
+            $effectiveExpiry = date('Y-m-d', strtotime('-1 day'));
+            $isPastExpiry = true;
+            $custBillingStatus = 'Expired';
+        }
 
         $db = Database::getConnection();
         $db->beginTransaction();
@@ -2097,14 +2462,18 @@ class NetworkController {
                 }
             }
 
-            // Existing accounts
+            // Existing accounts & codes
             $existingStmt = $db->prepare("SELECT LOWER(username) FROM customer_network_accounts WHERE tenant_id = :tid");
             $existingStmt->execute(['tid' => $tenantId]);
             $existingUsernames = array_flip($existingStmt->fetchAll(PDO::FETCH_COLUMN));
 
+            $existingCodesStmt = $db->prepare("SELECT customer_code FROM customers WHERE tenant_id = :tid");
+            $existingCodesStmt->execute(['tid' => $tenantId]);
+            $existingCodes = array_flip($existingCodesStmt->fetchAll(PDO::FETCH_COLUMN));
+
             $stmtCustomer = $db->prepare("INSERT INTO customers 
-                (tenant_id, customer_code, customer_type, full_name, email, phone, installation_address, status, billing_status, connection_date, owner_id, owner_role, owner_role_level, owner_path, metadata, created_by)
-                VALUES (:tid, :code, 'individual', :name, :email, :phone, :addr, :status, 'Paid', CURDATE(), :oid, :orole, :olevel, :opath, :meta, :created_by)");
+                (tenant_id, customer_code, customer_type, full_name, email, phone, installation_address, city, state_province, status, billing_status, connection_date, owner_id, owner_role, owner_role_level, owner_path, metadata, created_by)
+                VALUES (:tid, :code, 'individual', :name, :email, :phone, :addr, :city, :state_province, :status, :billing_status, CURDATE(), :oid, :orole, :olevel, :opath, :meta, :created_by)");
 
             $stmtService = $db->prepare("INSERT INTO customer_services 
                 (tenant_id, customer_id, access_profile_id, network_device_id, protocol, billing_cycle, status, starts_at, expires_at, created_by)
@@ -2143,8 +2512,13 @@ class NetworkController {
                     $phone = $defaultPhone;
                 }
 
-                $address = trim($u['address'] ?? $u['suggested_address'] ?? $u['comment'] ?? '');
-                if (empty($address)) {
+                if (!empty($u['address']) || !empty($u['suggested_address']) || !empty($u['comment'])) {
+                    $address = trim($u['address'] ?? $u['suggested_address'] ?? $u['comment']);
+                } elseif ($thana && $district) {
+                    $address = "{$thana}, {$district}";
+                } elseif ($district) {
+                    $address = $district;
+                } else {
                     $address = 'Dhaka, Bangladesh';
                 }
 
@@ -2161,8 +2535,30 @@ class NetworkController {
                     $pkgId = $defaultPackageId ?: $firstPkgId;
                 }
 
-                $customerCode = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'customer', 6);
-                $effectiveExpiry = $expiryDate ?: date('Y-m-d', strtotime('+30 days'));
+                // Preserve customer code from MikroTik router comment if available
+                $cCode = !empty($u['suggested_code']) ? trim($u['suggested_code']) : (!empty($u['customer_code']) ? trim($u['customer_code']) : null);
+                if (!empty($cCode) && !isset($existingCodes[$cCode])) {
+                    $customerCode = $cCode;
+                } else {
+                    $customerCode = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'customer', 6);
+                }
+                $existingCodes[$customerCode] = true;
+
+                // Resolve expiry date: If form provided explicit expiryDate, use it.
+                // Else if router comment has parsed suggested_expiry, use that customer's exact expiry.
+                // Otherwise default to Expired (yesterday).
+                $custExpiry = !empty($u['suggested_expiry']) ? trim($u['suggested_expiry']) : null;
+                if ($isExpiryProvided) {
+                    $rowEffectiveExpiry = $effectiveExpiry;
+                    $rowBillingStatus = $custBillingStatus;
+                } elseif (!empty($custExpiry)) {
+                    $rowEffectiveExpiry = $custExpiry;
+                    $isPast = (strtotime($rowEffectiveExpiry . ' 23:59:59') < time());
+                    $rowBillingStatus = $isPast ? 'Expired' : 'Paid';
+                } else {
+                    $rowEffectiveExpiry = $effectiveExpiry;
+                    $rowBillingStatus = $custBillingStatus;
+                }
 
                 $stmtCustomer->execute([
                     'tid' => $tenantId,
@@ -2171,12 +2567,17 @@ class NetworkController {
                     'email' => null,
                     'phone' => $phone,
                     'addr' => $address,
+                    'city' => $district,
+                    'state_province' => $thana,
                     'status' => $custStatus,
+                    'billing_status' => $rowBillingStatus,
                     'oid' => $ownerId,
                     'orole' => $ownerRole,
                     'olevel' => $ownerLevel,
                     'opath' => $ownerPath,
                     'meta' => json_encode([
+                        'district' => $district,
+                        'thana' => $thana,
                         'service_area_id' => $areaId,
                         'sub_area_id' => $subAreaId,
                         'mikrotik_caller_id' => $u['caller_id'] ?? null,
@@ -2191,7 +2592,7 @@ class NetworkController {
                     'cid' => $customerId,
                     'pid' => $pkgId,
                     'did' => $deviceId,
-                    'expires' => $effectiveExpiry . ' 23:59:59',
+                    'expires' => $rowEffectiveExpiry . ' 23:59:59',
                     'uid' => $user['user_id'],
                 ]);
                 $serviceId = $db->lastInsertId();

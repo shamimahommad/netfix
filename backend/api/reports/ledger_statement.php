@@ -19,8 +19,36 @@ try {
     $currentUserId = (int)$authUser['user_id'];
     $tenantId = (int)AuthMiddleware::getTenantId();
 
+    // Auto self-healing: ensure any wallet_transactions exist in wallet_ledger
+    try {
+        $db->exec("INSERT INTO wallet_ledger (tenant_id, wallet_id, user_id, txn_group_id, type, amount, opening_balance, closing_balance, purpose, description, created_at)
+            SELECT wt.tenant_id, wt.wallet_id, wt.user_id, 
+                   COALESCE(NULLIF(wt.reference_id, ''), CONCAT('TXG-WT-', wt.transaction_id)), 
+                   wt.type, wt.amount, wt.balance_before, wt.balance_after,
+                   CASE 
+                       WHEN UPPER(wt.reference_type) = 'CUSTOMER_RECHARGE' THEN 'package_deduction'
+                       WHEN UPPER(wt.reference_type) IN ('COMMISSION_MARGIN', 'UPSTREAM_COMMISSION') THEN 'commission_margin'
+                       WHEN UPPER(wt.reference_type) = 'CUSTOMER_PAYMENT' THEN 'customer_payment'
+                       ELSE 'wallet_recharge'
+                   END,
+                   wt.description, wt.created_at
+            FROM wallet_transactions wt
+            WHERE wt.tenant_id = {$tenantId}
+              AND NOT EXISTS (
+                  SELECT 1 FROM wallet_ledger wl 
+                  WHERE wl.tenant_id = wt.tenant_id 
+                    AND wl.user_id = wt.user_id 
+                    AND wl.txn_group_id = COALESCE(NULLIF(wt.reference_id, ''), CONCAT('TXG-WT-', wt.transaction_id))
+              )");
+    } catch (Throwable $syncEx) {
+        error_log("wallet_ledger auto-sync: " . $syncEx->getMessage());
+    }
+
     // Query filters
-    $requestedUserId = isset($_GET['user_id']) && is_numeric($_GET['user_id']) ? (int)$_GET['user_id'] : $currentUserId;
+    $requestedUserIdRaw = isset($_GET['user_id']) ? trim($_GET['user_id']) : '';
+    $isAllAccounts = ($requestedUserIdRaw === 'all');
+    $isIspAdmin = HierarchySecurityService::isIspAdmin($authUser);
+
     $startDate = !empty($_GET['start_date']) ? trim($_GET['start_date']) : null;
     $endDate = !empty($_GET['end_date']) ? trim($_GET['end_date']) : null;
     $purpose = !empty($_GET['purpose']) ? trim($_GET['purpose']) : null;
@@ -29,46 +57,72 @@ try {
     $limit = min(200, max(10, (int)($_GET['limit'] ?? 50)));
     $offset = ($page - 1) * $limit;
 
-    // 1. Security Check: Downward scope verification
-    if ($requestedUserId !== $currentUserId) {
-        if (!HierarchySecurityService::canAccessUser($currentUserId, $requestedUserId)) {
+    if ($isAllAccounts) {
+        if (!$isIspAdmin) {
             http_response_code(403);
             echo json_encode([
                 'success' => false,
-                'message' => 'Forbidden: You do not have permission to view ledger statements outside your hierarchy branch.'
+                'message' => 'Forbidden: Only administrators can view tenant-wide combined statements.'
             ]);
             exit;
         }
+        $targetUser = [
+            'user_id' => 0,
+            'username' => 'all',
+            'full_name' => 'All Tenant Accounts (Combined)',
+            'role' => 'admin',
+        ];
+        $stmtTotBal = $db->prepare("SELECT SUM(balance) FROM wallets WHERE tenant_id = :tid");
+        $stmtTotBal->execute(['tid' => $tenantId]);
+        $currentBalance = (float)($stmtTotBal->fetchColumn() ?: 0.00);
+        $wallet = ['balance' => $currentBalance, 'currency' => 'BDT', 'status' => 'active'];
+
+        $where = ["wl.tenant_id = :tid"];
+        $params = ['tid' => $tenantId];
+    } else {
+        $requestedUserId = (is_numeric($requestedUserIdRaw) && (int)$requestedUserIdRaw > 0) ? (int)$requestedUserIdRaw : $currentUserId;
+
+        // 1. Security Check: Downward scope verification
+        if ($requestedUserId !== $currentUserId && !$isIspAdmin) {
+            if (!HierarchySecurityService::canAccessUser($currentUserId, $requestedUserId)) {
+                http_response_code(403);
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Forbidden: You do not have permission to view ledger statements outside your hierarchy branch.'
+                ]);
+                exit;
+            }
+        }
+
+        // Target user info
+        $stmtTarget = $db->prepare("SELECT user_id, username, first_name, last_name, 
+            TRIM(CONCAT(COALESCE(first_name, ''), ' ', COALESCE(last_name, ''))) AS full_name, 
+            role, hierarchy_path 
+            FROM users WHERE user_id = :uid LIMIT 1");
+        $stmtTarget->execute(['uid' => $requestedUserId]);
+        $targetUser = $stmtTarget->fetch(PDO::FETCH_ASSOC);
+        $stmtTarget->closeCursor();
+
+        if (!$targetUser) {
+            http_response_code(404);
+            echo json_encode(['success' => false, 'message' => 'Target user not found']);
+            exit;
+        }
+
+        // 2. Fetch current wallet balance
+        $stmtBal = $db->prepare("SELECT balance, status, currency FROM wallets WHERE user_id = :uid LIMIT 1");
+        $stmtBal->execute(['uid' => $requestedUserId]);
+        $wallet = $stmtBal->fetch(PDO::FETCH_ASSOC);
+        $stmtBal->closeCursor();
+        $currentBalance = $wallet ? (float)$wallet['balance'] : 0.00;
+
+        // 3. Build WHERE criteria
+        $where = ["wl.tenant_id = :tid", "wl.user_id = :uid"];
+        $params = [
+            'tid' => $tenantId,
+            'uid' => $requestedUserId,
+        ];
     }
-
-    // Target user info
-    $stmtTarget = $db->prepare("SELECT user_id, username, first_name, last_name, 
-        TRIM(CONCAT(COALESCE(first_name, ''), ' ', COALESCE(last_name, ''))) AS full_name, 
-        role, hierarchy_path 
-        FROM users WHERE user_id = :uid LIMIT 1");
-    $stmtTarget->execute(['uid' => $requestedUserId]);
-    $targetUser = $stmtTarget->fetch(PDO::FETCH_ASSOC);
-    $stmtTarget->closeCursor();
-
-    if (!$targetUser) {
-        http_response_code(404);
-        echo json_encode(['success' => false, 'message' => 'Target user not found']);
-        exit;
-    }
-
-    // 2. Fetch current wallet balance
-    $stmtBal = $db->prepare("SELECT balance, status, currency FROM wallets WHERE user_id = :uid LIMIT 1");
-    $stmtBal->execute(['uid' => $requestedUserId]);
-    $wallet = $stmtBal->fetch(PDO::FETCH_ASSOC);
-    $stmtBal->closeCursor();
-    $currentBalance = $wallet ? (float)$wallet['balance'] : 0.00;
-
-    // 3. Build WHERE criteria
-    $where = ["wl.tenant_id = :tid", "wl.user_id = :uid"];
-    $params = [
-        'tid' => $tenantId,
-        'uid' => $requestedUserId,
-    ];
 
     if ($startDate) {
         $where[] = "wl.created_at >= :sdate";

@@ -236,16 +236,43 @@ class BillingController {
         $db->beginTransaction();
 
         try {
+            $billingCycle = $data['billing_cycle'] ?? (isset($data['selected_days']) && (int)$data['selected_days'] < 30 ? 'Day-based' : 'Monthly');
+            $isDayBased = ($billingCycle === 'Day-based' || (isset($data['selected_days']) && (int)$data['selected_days'] > 0 && empty($data['no_of_month'])));
+
             $months = max(1, (int)($data['billing_cycle_months'] ?? $data['no_of_month'] ?? 1));
-            $days = isset($data['selected_days']) ? (int)$data['selected_days'] : ($months * 30);
+            $days = isset($data['selected_days']) && (int)$data['selected_days'] > 0 ? (int)$data['selected_days'] : ($months * 30);
             $planId = $data['package_id'] ?? $data['plan_id'] ?? 1;
 
             // Fetch plan price
             $stmtPkg = $db->prepare("SELECT * FROM access_profiles WHERE access_profile_id = :pid");
             $stmtPkg->execute(['pid' => $planId]);
             $package = $stmtPkg->fetch();
-            $price = (float)($data['plan_price'] ?? $package['price'] ?? 500);
-            $totalAmount = $price * $months;
+            $monthlyPrice = (float)($data['plan_price'] ?? $package['price'] ?? 500);
+
+            if ($isDayBased) {
+                // Pro-rated day-based price: respect explicit bill_amount from frontend, or calculate (monthlyPrice / 30) * days
+                if (isset($data['bill_amount']) && (float)$data['bill_amount'] > 0) {
+                    $totalAmount = (float)$data['bill_amount'];
+                } else {
+                    $calc = ($monthlyPrice / 30) * $days;
+                    $totalAmount = (float)round($calc);
+                    if ($totalAmount < 1) {
+                        $totalAmount = round($calc, 2);
+                    }
+                }
+                $renewDaysParam = $days;
+                $renewMonthsParam = 1;
+                $renewNotes = "Day-based Renewal: {$days} Day(s) (Package: " . ($package['profile_name'] ?? 'Plan') . ")";
+                $renewMode = 'DAY_RENEW';
+                $bCycleDb = 'custom';
+            } else {
+                $totalAmount = round($monthlyPrice * $months, 2);
+                $renewDaysParam = null;
+                $renewMonthsParam = $months;
+                $renewNotes = "Monthly Renewal: {$months} Month(s) (Package: " . ($package['profile_name'] ?? 'Plan') . ")";
+                $renewMode = 'RENEW';
+                $bCycleDb = 'monthly';
+            }
 
             // Calculate new expiry date
             $stmtCs = $db->prepare("SELECT * FROM customer_services WHERE customer_id = :cid ORDER BY customer_service_id DESC LIMIT 1");
@@ -261,10 +288,11 @@ class BillingController {
 
             // Update or insert customer service
             if ($currentService) {
-                $stmtUpdate = $db->prepare("UPDATE customer_services SET expires_at = :exp, status = 'active', access_profile_id = :pid WHERE customer_service_id = :sid");
+                $stmtUpdate = $db->prepare("UPDATE customer_services SET expires_at = :exp, status = 'active', access_profile_id = :pid, billing_cycle = :bc WHERE customer_service_id = :sid");
                 $stmtUpdate->execute([
                     'exp' => $newExpireDate,
                     'pid' => $planId,
+                    'bc' => $bCycleDb,
                     'sid' => $currentService['customer_service_id'],
                 ]);
             }
@@ -293,15 +321,18 @@ class BillingController {
                     (int)$planId,
                     $invNumber,
                     $tenantId ? (int)$tenantId : null,
-                    $months
+                    $renewMonthsParam,
+                    $renewDaysParam
                 );
                 $rechargeRef = $rechargeResult['recharge_ref'] ?? null;
                 $actorDeduction = (float)($rechargeResult['actor_deduction'] ?? $totalAmount);
             }
 
+            $finalNotes = $rechargeRef ? "{$renewNotes} • Ref: {$rechargeRef}" : $renewNotes;
+
             $stmtInv = $db->prepare("INSERT INTO invoices 
                 (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, collected_by, charged_user_id, renew_mode, notes, previous_expire_date, created_by)
-                VALUES (:tid, :cid, :sid, :inv_num, CURDATE(), CURDATE(), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :coll, :chg, 'RENEW', :notes, :prev_exp, :uid)");
+                VALUES (:tid, :cid, :sid, :inv_num, CURDATE(), CURDATE(), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :coll, :chg, :renew_mode, :notes, :prev_exp, :uid)");
             $stmtInv->execute([
                 'tid' => $tenantId,
                 'cid' => $customerId,
@@ -314,7 +345,8 @@ class BillingController {
                 'sell' => $totalAmount,
                 'coll' => $user['user_id'],
                 'chg' => $user['user_id'],
-                'notes' => $rechargeRef ? "Recharge Ref: {$rechargeRef}" : null,
+                'renew_mode' => $renewMode,
+                'notes' => $finalNotes,
                 'prev_exp' => $currentService['expires_at'] ?? null,
                 'uid' => $user['user_id'],
             ]);
@@ -323,15 +355,16 @@ class BillingController {
             $trxRef = 'TRX-RENEW-' . strtoupper(bin2hex(random_bytes(4)));
             $stmtTrx = $db->prepare("INSERT INTO transactions 
                 (tenant_id, customer_id, transaction_ref, transaction_type, amount, method, initiator_user_id, initiator_role, collector_user_id, description)
-                VALUES (:tid, :cid, :ref, 'RENEW_DEBIT', :amt, 'system', :uid, :role, :coll, 'Customer subscription renewal')");
+                VALUES (:tid, :cid, :ref, 'RENEW_DEBIT', :amt, 'system', :uid, :role, :coll, :descr)");
             $stmtTrx->execute([
                 'tid' => $tenantId,
                 'cid' => $customerId,
                 'ref' => $trxRef,
-                'amt' => $actorDeduction,
+                'amt' => $totalAmount,
                 'uid' => $user['user_id'],
                 'role' => $user['role'],
                 'coll' => $user['user_id'],
+                'descr' => $isDayBased ? "Customer subscription renewal ({$days} Days)" : "Customer subscription renewal ({$months} Months)",
             ]);
 
             $db->commit();

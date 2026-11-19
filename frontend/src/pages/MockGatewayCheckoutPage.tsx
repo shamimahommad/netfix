@@ -132,7 +132,7 @@ export default function MockGatewayCheckoutPage() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  bKash PIN (Sandbox Demo: 12345)
+                  bKash PIN (Sandbox: 12345)
                 </label>
                 <input
                   type="password"
@@ -159,7 +159,7 @@ export default function MockGatewayCheckoutPage() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Verification OTP (Demo: 123456)
+                  Verification OTP (Sandbox: 123456)
                 </label>
                 <input
                   type="password"

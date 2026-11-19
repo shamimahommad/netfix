@@ -25,6 +25,7 @@ import {
   Radio,
   CheckCheck,
   HardDrive,
+  ChevronDown,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { PageHeader, MetricCard, ModernCheckbox } from '@/components/common';
@@ -47,6 +48,11 @@ interface LogCustomer {
   owner_id?: string;
   owner_name?: string;
   owner_role?: string;
+  status?: string;
+  is_expired?: boolean;
+  expires_at?: string | null;
+  billing_status?: string | null;
+  caller_id?: string | null;
 }
 
 interface PppoeLogItem {
@@ -62,6 +68,8 @@ interface PppoeLogItem {
   ip: string | null;
   caller_mac?: string | null;
   mac: string | null;
+  registered_mac?: string | null;
+  detected_mac?: string | null;
   interface_name?: string | null;
   session_time_seconds?: number | null;
   bytes_uploaded?: number | null;
@@ -71,6 +79,7 @@ interface PppoeLogItem {
   raw_message?: string;
   router_id?: string;
   router_name?: string;
+  correlated?: boolean;
 }
 
 interface PppoeLogsResponse {
@@ -192,7 +201,7 @@ export default function PppoeLogsPage() {
 
   // UI state
   const [copiedText, setCopiedText] = useState<string | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
+  const [refreshInterval, setRefreshInterval] = useState<number>(60); // Default: 1 min
 
   // Setup Modal State & 1-Click Trigger
   const [showSetupModal, setShowSetupModal] = useState<boolean>(false);
@@ -204,8 +213,8 @@ export default function PppoeLogsPage() {
   const [autoSetupSuccess, setAutoSetupSuccess] = useState<string | null>(null);
   const [autoSetupError, setAutoSetupError] = useState<string | null>(null);
 
-  // Fetch Logs from High-Throughput Engine
-  const fetchLogs = useCallback(async (isSilent = false) => {
+  // Fetch Logs from High-Throughput Engine (Reads 100% from Redis)
+  const fetchLogs = useCallback(async (isSilent = false, isForce = false) => {
     if (!isSilent) setIsLoading(true);
     else setIsRefreshing(true);
     setError(null);
@@ -215,6 +224,10 @@ export default function PppoeLogsPage() {
         page,
         per_page: perPage,
       };
+
+      if (isForce) {
+        params.force = 1;
+      }
 
       if (selectedRouterId && selectedRouterId !== 'all') {
         params.router_id = selectedRouterId;
@@ -293,7 +306,7 @@ export default function PppoeLogsPage() {
       // Fallback
       try {
         const fallbackRes = await api.get<PppoeLogsResponse>('/network/pppoe-logs', { 
-          params: { router_id: selectedRouterId } 
+          params: { router_id: selectedRouterId, ...(isForce ? { force: 1 } : {}) } 
         });
         if (fallbackRes.data.success) {
           setLogs(fallbackRes.data.logs || []);
@@ -320,14 +333,14 @@ export default function PppoeLogsPage() {
     setSelectedLogIds(new Set());
   }, [page, perPage, selectedRouterId, eventTypeFilter, userFilter, searchQuery]);
 
-  // Auto-refresh interval (every 6 seconds if enabled)
+  // Auto-refresh interval (based on selected interval, e.g. 1 min, 2 min, etc.)
   useEffect(() => {
-    if (!autoRefresh) return;
+    if (!refreshInterval || refreshInterval <= 0) return;
     const interval = setInterval(() => {
       fetchLogs(true);
-    }, 6000);
+    }, refreshInterval * 1000);
     return () => clearInterval(interval);
-  }, [autoRefresh, fetchLogs]);
+  }, [refreshInterval, fetchLogs]);
 
   // Fetch Syslog Setup Script with Auto-Detected IP & Token
   const fetchSetupScript = useCallback(async (rId: string, overrideHost?: string) => {
@@ -582,24 +595,32 @@ export default function PppoeLogsPage() {
               <span>Setup Syslog Stream</span>
             </button>
 
-            {/* Modern Checkbox Auto Refresh Toggle */}
-            <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer select-none bg-white dark:bg-slate-800 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 shadow-xs hover:border-slate-300 dark:hover:border-slate-600 transition-colors">
-              <ModernCheckbox
-                checked={autoRefresh}
-                onChange={(checked) => setAutoRefresh(checked)}
-                size="sm"
-                ariaLabel="Toggle auto-refresh"
-              />
-              <span className="flex items-center gap-1.5">
-                <span>Auto Refresh (6s)</span>
-                {autoRefresh && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
-              </span>
-            </label>
+            {/* Auto Refresh Interval Dropdown */}
+            <div className="relative inline-flex items-center">
+              <select
+                value={refreshInterval}
+                onChange={(e) => setRefreshInterval(Number(e.target.value))}
+                className="appearance-none text-xs font-semibold px-3 py-2 pr-7 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 shadow-xs hover:border-slate-300 dark:hover:border-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 cursor-pointer transition-colors"
+                title="Select Auto-Refresh Interval"
+              >
+                <option value={60}>Refresh: 1 min</option>
+                <option value={120}>Refresh: 2 min</option>
+                <option value={300}>Refresh: 5 min</option>
+                <option value={900}>Refresh: 15 min</option>
+                <option value={0}>Refresh: Off</option>
+              </select>
+              <div className="pointer-events-none absolute right-2.5 flex items-center gap-1 text-slate-400">
+                {refreshInterval > 0 && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                )}
+                <ChevronDown className="w-3.5 h-3.5" />
+              </div>
+            </div>
 
-            {/* Refresh Button */}
+            {/* Refresh Button (Forces fresh pull into Redis) */}
             <button
               type="button"
-              onClick={() => fetchLogs(false)}
+              onClick={() => fetchLogs(false, true)}
               disabled={isLoading || isRefreshing}
               className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 shadow-xs active:scale-95 transition-all disabled:opacity-50"
             >
@@ -1063,7 +1084,7 @@ export default function PppoeLogsPage() {
                       <td className="py-3 px-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         {item.username ? (
                           <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <button
                                 type="button"
                                 onClick={() => handleFilterByUser(item.username!)}
@@ -1082,12 +1103,44 @@ export default function PppoeLogsPage() {
                                   <ExternalLink className="w-3 h-3" />
                                 </Link>
                               )}
+                              {/* Customer Active / Expired / Suspended Status Badge */}
+                              {item.customer && (
+                                item.customer.status === 'Expired' || item.customer.is_expired ? (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30" title={item.customer.expires_at ? `Expired: ${item.customer.expires_at}` : 'Subscription Expired'}>
+                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                                    EXPIRED
+                                  </span>
+                                ) : item.customer.status === 'Suspended' ? (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30" title="Account Suspended">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                    SUSPENDED
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30" title={item.customer.expires_at ? `Expires: ${item.customer.expires_at}` : 'Active Account'}>
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                    ACTIVE
+                                  </span>
+                                )
+                              )}
+                              {item.correlated && (
+                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-mono font-semibold bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800" title="Matched via adjacent connection telemetry">
+                                  Dialed User
+                                </span>
+                              )}
                             </div>
                             {item.customer && (
                               <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5 flex-wrap">
                                 <span className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[150px]">
                                   {item.customer.full_name}
                                 </span>
+                                {item.customer.expires_at && (
+                                  <>
+                                    <span>•</span>
+                                    <span className={`text-[10px] font-mono ${item.customer.is_expired ? 'text-rose-500 font-semibold' : 'text-slate-400'}`}>
+                                      {item.customer.is_expired ? 'Exp: ' : 'Valid: '}{item.customer.expires_at.split(' ')[0]}
+                                    </span>
+                                  </>
+                                )}
                                 {item.customer.owner_name && (
                                   <>
                                     <span>•</span>
@@ -1126,21 +1179,36 @@ export default function PppoeLogsPage() {
                         )}
                       </td>
 
-                      {/* MAC Address Cell */}
+                      {/* MAC Address (Caller ID) Cell */}
                       <td className="py-3 px-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         {macAddr ? (
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 rounded-md font-semibold border border-indigo-200 dark:border-indigo-800">
+                                {macAddr}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => copyToClipboard(macAddr, `Copied MAC: ${macAddr}`)}
+                                title="Copy MAC"
+                                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
+                              >
+                                {copiedText === macAddr ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                            {item.customer?.caller_id && item.customer.caller_id.toUpperCase() !== macAddr.toUpperCase() && (
+                              <div className="flex items-center gap-1 text-[10px] font-mono text-amber-600 dark:text-amber-400 font-semibold" title="Device MAC does not match registered Caller ID">
+                                <span>CallerID:</span>
+                                <span>{item.customer.caller_id}</span>
+                              </div>
+                            )}
+                          </div>
+                        ) : item.customer?.caller_id ? (
                           <div className="flex items-center gap-1.5">
-                            <span className="font-mono text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 rounded-md font-semibold border border-indigo-200 dark:border-indigo-800">
-                              {macAddr}
+                            <span className="font-mono text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 rounded-md font-semibold border border-indigo-200 dark:border-indigo-800" title="Registered Customer Caller ID">
+                              {item.customer.caller_id}
                             </span>
-                            <button
-                              type="button"
-                              onClick={() => copyToClipboard(macAddr, `Copied MAC: ${macAddr}`)}
-                              title="Copy MAC"
-                              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
-                            >
-                              {copiedText === macAddr ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                            </button>
+                            <span className="text-[10px] text-slate-400 font-semibold">(Caller ID)</span>
                           </div>
                         ) : (
                           <span className="text-slate-400 text-xs">—</span>

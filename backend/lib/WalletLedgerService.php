@@ -99,6 +99,8 @@ class WalletLedgerService {
             $upStmt = $db->prepare("UPDATE wallets SET balance = :bal, updated_at = NOW() WHERE wallet_id = :wid");
             $upStmt->execute(['bal' => $balanceAfter, 'wid' => $wallet['wallet_id']]);
 
+            $topupRef = 'TOPUP-' . strtoupper(bin2hex(random_bytes(4)));
+
             // Insert audit record in wallet_transactions
             $txStmt = $db->prepare("INSERT INTO wallet_transactions 
                 (tenant_id, wallet_id, user_id, type, amount, balance_before, balance_after, reference_type, reference_id, description, created_by)
@@ -110,10 +112,27 @@ class WalletLedgerService {
                 'amt' => $amount,
                 'bb' => $balanceBefore,
                 'ba' => $balanceAfter,
-                'ref' => 'TOPUP-' . strtoupper(bin2hex(random_bytes(4))),
+                'ref' => $topupRef,
                 'desc' => $notes,
                 'cb' => $actorUserId,
             ]);
+
+            // Keep immutable double-entry wallet_ledger in sync
+            try {
+                $db->prepare("INSERT INTO wallet_ledger 
+                    (tenant_id, wallet_id, user_id, txn_group_id, type, amount, opening_balance, closing_balance, purpose, description, created_at)
+                    VALUES (:tid, :wid, :uid, :tgid, 'credit', :amt, :bb, :ba, 'wallet_recharge', :desc, NOW())")
+                    ->execute([
+                        'tid' => $effectiveTenantId,
+                        'wid' => $wallet['wallet_id'],
+                        'uid' => $targetUserId,
+                        'tgid' => $topupRef,
+                        'amt' => $amount,
+                        'bb' => $balanceBefore,
+                        'ba' => $balanceAfter,
+                        'desc' => $notes,
+                    ]);
+            } catch (Throwable $ignore) {}
 
             // Keep legacy reseller_ledger in sync
             $rlStmt = $db->prepare("INSERT INTO reseller_ledger 
@@ -247,6 +266,37 @@ class WalletLedgerService {
                     'cb' => $actorUserId,
                 ]);
 
+            // Keep immutable double-entry wallet_ledger in sync
+            try {
+                $db->prepare("INSERT INTO wallet_ledger 
+                    (tenant_id, wallet_id, user_id, txn_group_id, type, amount, opening_balance, closing_balance, purpose, description, created_at)
+                    VALUES (:tid, :wid, :uid, :tgid, 'debit', :amt, :bb, :ba, 'package_deduction', :desc, NOW())")
+                    ->execute([
+                        'tid' => $senderWallet['tenant_id'],
+                        'wid' => $senderWallet['wallet_id'],
+                        'uid' => $fromUserId,
+                        'tgid' => $txRef,
+                        'amt' => $amount,
+                        'bb' => $senderBal,
+                        'ba' => $senderAfter,
+                        'desc' => "Transfer to user #{$toUserId}: {$notes}",
+                    ]);
+
+                $db->prepare("INSERT INTO wallet_ledger 
+                    (tenant_id, wallet_id, user_id, txn_group_id, type, amount, opening_balance, closing_balance, purpose, description, created_at)
+                    VALUES (:tid, :wid, :uid, :tgid, 'credit', :amt, :bb, :ba, 'wallet_recharge', :desc, NOW())")
+                    ->execute([
+                        'tid' => $receiverWallet['tenant_id'],
+                        'wid' => $receiverWallet['wallet_id'],
+                        'uid' => $toUserId,
+                        'tgid' => $txRef,
+                        'amt' => $amount,
+                        'bb' => $receiverBal,
+                        'ba' => $receiverAfter,
+                        'desc' => "Transfer from user #{$fromUserId}: {$notes}",
+                    ]);
+            } catch (Throwable $ignore) {}
+
             // Keep legacy reseller_ledger in sync
             $db->prepare("INSERT INTO reseller_ledger (tenant_id, user_id, debit, reference_type, notes, created_by)
                 VALUES (:tid, :uid, :amt, 'TRANSFER_OUT', :notes, :cb)")
@@ -298,7 +348,8 @@ class WalletLedgerService {
         int $packageId,
         ?string $invoiceNumber = null,
         ?int $tenantId = null,
-        int $months = 1
+        int $months = 1,
+        ?int $days = null
     ): array {
         $db = Database::getConnection();
         $actorUser = HierarchySecurityService::getUser($actorUserId);
@@ -346,8 +397,16 @@ class WalletLedgerService {
             }
         }
 
-        $months = max(1, $months);
-        $actorCost = round($actorCost * $months, 2);
+        $isDayBased = ($days !== null && $days > 0);
+        if ($isDayBased) {
+            $durationFactor = $days / 30.0;
+            $actorCost = round($actorCost * $durationFactor, 2);
+            $periodLabel = "{$days} Day(s)";
+        } else {
+            $months = max(1, $months);
+            $actorCost = round($actorCost * $months, 2);
+            $periodLabel = "{$months} Month(s)";
+        }
 
         $isNested = $db->inTransaction();
         if (!$isNested) {
@@ -404,7 +463,7 @@ class WalletLedgerService {
                         'bb' => $actorBalBefore,
                         'ba' => $actorBalAfter,
                         'ref' => $rechargeRef,
-                        'desc' => "Subscription recharge for customer #{$customerId} (Package: {$pkg['profile_name']})",
+                        'desc' => "Subscription recharge for customer #{$customerId} ({$periodLabel}) (Package: {$pkg['profile_name']})",
                         'cb' => $actorUserId,
                     ]);
 
@@ -417,9 +476,27 @@ class WalletLedgerService {
                         'uid' => $actorUserId,
                         'amt' => $actorCost,
                         'ref' => $rechargeRef,
-                        'notes' => "Recharge customer #{$customerId} [{$pkg['profile_name']}]",
+                        'notes' => "Recharge customer #{$customerId} [{$pkg['profile_name']}, {$periodLabel}]",
                         'cb' => $actorUserId,
                     ]);
+
+                // Double-entry record in wallet_ledger
+                try {
+                    $db->prepare("INSERT INTO wallet_ledger 
+                        (tenant_id, wallet_id, user_id, txn_group_id, type, amount, opening_balance, closing_balance, purpose, source_customer_id, description, created_at)
+                        VALUES (:tid, :wid, :uid, :tgid, 'debit', :amt, :bb, :ba, 'package_deduction', :cid, :desc, NOW())")
+                        ->execute([
+                            'tid' => $effectiveTenantId,
+                            'wid' => $actorWallet['wallet_id'],
+                            'uid' => $actorUserId,
+                            'tgid' => $rechargeRef,
+                            'amt' => $actorCost,
+                            'bb' => $actorBalBefore,
+                            'ba' => $actorBalAfter,
+                            'cid' => $customerId,
+                            'desc' => "Subscription recharge for customer #{$customerId} ({$periodLabel}) (Package: {$pkg['profile_name']})",
+                        ]);
+                } catch (Throwable $ignore) {}
             }
 
             // 2. Cascade Upstream Pass-Through Margins
@@ -447,7 +524,11 @@ class WalletLedgerService {
                 $pCostVal = $pCostStmt->fetchColumn();
 
                 $parentCost = $pCostVal !== false ? (float)$pCostVal : 0.00;
-                $parentCost = round($parentCost * $months, 2);
+                if ($isDayBased) {
+                    $parentCost = round($parentCost * $durationFactor, 2);
+                } else {
+                    $parentCost = round($parentCost * $months, 2);
+                }
                 $marginProfit = round($currentChildCost - $parentCost, 2);
 
                 if ($marginProfit > 0) {
@@ -494,6 +575,24 @@ class WalletLedgerService {
                                 'notes' => "Pass-through margin (৳{$marginProfit}) from downline #{$actorUserId}",
                                 'cb' => $actorUserId,
                             ]);
+
+                        // Double-entry record in wallet_ledger
+                        try {
+                            $db->prepare("INSERT INTO wallet_ledger 
+                                (tenant_id, wallet_id, user_id, txn_group_id, type, amount, opening_balance, closing_balance, purpose, source_customer_id, description, created_at)
+                                VALUES (:tid, :wid, :uid, :tgid, 'credit', :amt, :bb, :ba, 'commission_margin', :cid, :desc, NOW())")
+                                ->execute([
+                                    'tid' => $effectiveTenantId,
+                                    'wid' => $pWallet['wallet_id'],
+                                    'uid' => $currentParentId,
+                                    'tgid' => $rechargeRef,
+                                    'amt' => $marginProfit,
+                                    'bb' => $pBalBefore,
+                                    'ba' => $pBalAfter,
+                                    'cid' => $customerId,
+                                    'desc' => "Pass-through margin from downline user {$actorUser['username']} on customer recharge #{$customerId}",
+                                ]);
+                        } catch (Throwable $ignore) {}
 
                         $cascadedMargins[] = [
                             'user_id' => $currentParentId,

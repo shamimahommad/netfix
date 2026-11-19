@@ -35,7 +35,6 @@ export default function CustomerLoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [demoFilled, setDemoFilled] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
@@ -100,13 +99,6 @@ export default function CustomerLoginPage() {
     }
   };
 
-  const fillDemoCustomer = () => {
-    setError(null);
-    setLogin('100001');
-    setPhone('01774581701');
-    setDemoFilled(true);
-    setTimeout(() => setDemoFilled(false), 2500);
-  };
 
   return (
     <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col justify-between relative overflow-x-hidden select-none">
@@ -297,27 +289,6 @@ export default function CustomerLoginPage() {
                 </p>
               </div>
 
-              {/* 1-Tap Quick Demo Credentials */}
-              <div className="mb-5 p-3 rounded-2xl bg-slate-950/70 border border-slate-800/80">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Zap className="w-3 h-3 text-cyan-400" /> Quick Demo Fill:
-                  </span>
-                  {demoFilled && (
-                    <span className="text-[10px] font-semibold text-cyan-400 flex items-center gap-1 animate-pulse">
-                      <CheckCircle2 className="w-3 h-3" /> Filled Demo Customer!
-                    </span>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={fillDemoCustomer}
-                  className="w-full py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-700 border border-slate-800 hover:border-slate-700 text-xs font-medium text-slate-200 transition-all text-center flex items-center justify-center gap-2"
-                >
-                  <span>👤</span>
-                  <span>Demo Subscriber (ID: 100001 / Phone: 01774581701)</span>
-                </button>
-              </div>
 
               {/* Error Alert */}
               <AnimatePresence>
@@ -563,14 +534,6 @@ export default function CustomerLoginPage() {
                   </ul>
                 </div>
 
-                <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
-                  <h4 className="font-bold text-white mb-1">Testing Demo Subscriber:</h4>
-                  <p className="text-slate-400 text-[11px]">
-                    Customer ID: <code className="text-cyan-400 font-mono">100001</code>
-                    <br />
-                    Mobile: <code className="text-cyan-400 font-mono">01774581701</code>
-                  </p>
-                </div>
 
                 <div className="p-3 rounded-2xl bg-emerald-950/30 border border-emerald-800/40 text-emerald-300 text-[11px]">
                   <strong>Need instant recharge without login?</strong> You can pay directly via bKash/Nagad on the{' '}

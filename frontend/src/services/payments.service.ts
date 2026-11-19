@@ -36,6 +36,24 @@ export interface RecordPaymentResponse {
   };
 }
 
+export interface GatewaySummaryItem {
+  gateway: string;
+  label: string;
+  today: number;
+  yesterday: number;
+  thisMonth: number;
+  lastMonth: number;
+  filteredTotal: number;
+}
+
+export interface PopInChargeItem {
+  user_id: number;
+  username: string;
+  first_name: string | null;
+  last_name: string | null;
+  role: string;
+}
+
 export interface OnlineTransactionItem {
   paymentIntentId: string;
   merchantInvoiceNumber: string;
@@ -45,12 +63,18 @@ export interface OnlineTransactionItem {
   gatewayPaymentId: string | null;
   amount: number;
   status: 'PENDING' | 'PAID' | 'FAILED' | 'EXPIRED';
+  processed?: string;
+  payType?: string;
+  retry?: number;
+  bankTxn?: string;
   customerId: string;
   payeeName: string;
   payeeMobile: string;
   createdAt: string;
+  reqTime?: string;
   updatedAt: string;
   paidAt: string | null;
+  payTime?: string | null;
 }
 
 export interface OnlineTransactionsSummary {
@@ -67,12 +91,16 @@ export interface OnlineTransactionsResponse {
     items: OnlineTransactionItem[];
     total: number;
     summary: OnlineTransactionsSummary;
+    gatewaySummaries?: GatewaySummaryItem[];
+    popList?: PopInChargeItem[];
   };
 }
 
 export interface OnlineTransactionsParams {
   status?: string;
   gateway?: string;
+  type?: string;
+  popInCharge?: string | number;
   dateFrom?: string;
   dateTo?: string;
   search?: string;
@@ -179,6 +207,8 @@ export const paymentsService = {
     const searchParams = new URLSearchParams();
     if (params.status != null) searchParams.set('status', params.status);
     if (params.gateway != null) searchParams.set('gateway', params.gateway);
+    if (params.type != null) searchParams.set('type', params.type);
+    if (params.popInCharge != null) searchParams.set('popInCharge', String(params.popInCharge));
     if (params.dateFrom != null) searchParams.set('dateFrom', params.dateFrom);
     if (params.dateTo != null) searchParams.set('dateTo', params.dateTo);
     if (params.search != null) searchParams.set('search', params.search);

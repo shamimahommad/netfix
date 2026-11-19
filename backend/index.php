@@ -499,6 +499,9 @@ if ($method === 'GET' && preg_match('#^/network/devices/([^/]+)/onus$#', $uri, $
 if ($method === 'POST' && preg_match('#^/network/devices/([^/]+)/sync-olt$#', $uri, $m)) {
     NetworkController::syncOlt($m[1]);
 }
+if ($method === 'POST' && preg_match('#^/network/devices/([^/]+)/action$#', $uri, $m)) {
+    NetworkController::executeAction($m[1]);
+}
 if ($method === 'POST' && preg_match('#^/network/devices/([^/]+)/ping-now$#', $uri, $m)) {
     NetworkController::pingNow($m[1]);
 }

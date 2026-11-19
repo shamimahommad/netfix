@@ -719,6 +719,7 @@ export default function CustomerDetailPage() {
         selected_days: renewForm.billing_cycle === 'Day-based' ? renewForm.selected_days : undefined,
         plan_id: renewForm.plan_id,
         plan_price: renewForm.plan_price,
+        bill_amount: Number(billAmount),
         send_sms: renewForm.send_sms,
         renew_as_reseller: renewForm.renew_as_reseller,
         pay_from_customer_balance: hasCustomerBalance ? renewForm.pay_from_customer_balance : false,

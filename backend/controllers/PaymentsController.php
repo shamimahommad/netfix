@@ -125,6 +125,8 @@ class PaymentsController {
 
         $statusFilter = strtolower(trim($_GET['status'] ?? 'all'));
         $gatewayFilter = strtolower(trim($_GET['gateway'] ?? 'all'));
+        $typeFilter = strtolower(trim($_GET['type'] ?? 'all'));
+        $popInCharge = !empty($_GET['popInCharge']) ? (int)$_GET['popInCharge'] : null;
         $dateFrom = !empty($_GET['dateFrom']) ? trim($_GET['dateFrom']) : null;
         $dateTo = !empty($_GET['dateTo']) ? trim($_GET['dateTo']) : null;
         $search = !empty($_GET['search']) ? trim($_GET['search']) : null;
@@ -164,6 +166,19 @@ class PaymentsController {
             $params['gw'] = $gatewayFilter;
         }
 
+        if ($typeFilter !== 'all' && $typeFilter !== '') {
+            if ($typeFilter === 'customer') {
+                $where[] = "pi.customer_id IS NOT NULL";
+            } elseif ($typeFilter === 'reseller' || $typeFilter === 'topup') {
+                $where[] = "pi.customer_id IS NULL";
+            }
+        }
+
+        if ($popInCharge) {
+            $where[] = "(c.owner_id = :popInCharge OR CAST(JSON_UNQUOTE(JSON_EXTRACT(pi.metadata, '$.user_id')) AS UNSIGNED) = :popInCharge)";
+            $params['popInCharge'] = $popInCharge;
+        }
+
         if ($dateFrom) {
             $where[] = "DATE(pi.created_at) >= :dateFrom";
             $params['dateFrom'] = $dateFrom;
@@ -195,7 +210,7 @@ class PaymentsController {
         $stmt = $db->prepare("SELECT 
             pi.id as paymentIntentId,
             COALESCE(pi.transaction_ref, pi.gateway_payment_id, CONCAT('PI-', pi.id)) as merchantInvoiceNumber,
-            COALESCE(i.invoice_number, pi.transaction_ref, CONCAT('PI-', pi.id)) as invoiceNumber,
+            COALESCE(i.invoice_number, pi.transaction_ref, CONCAT('R', pi.id)) as invoiceNumber,
             pi.invoice_id as invoiceId,
             pi.gateway as gateway,
             COALESCE(pi.gateway_payment_id, pi.transaction_ref) as gatewayPaymentId,
@@ -206,6 +221,29 @@ class PaymentsController {
                 WHEN pi.status = 'expired' THEN 'EXPIRED'
                 ELSE 'PENDING'
             END as status,
+            CASE 
+                WHEN pi.status = 'completed' OR tr.transaction_id IS NOT NULL THEN 'Done'
+                WHEN pi.status IN ('failed', 'cancelled', 'expired') THEN 'Failed'
+                ELSE 'Pending'
+            END as processed,
+            COALESCE(
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(pi.metadata, '$.payment_method')), ''),
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(pi.metadata, '$.channel')), ''),
+                CASE 
+                    WHEN LOWER(pi.gateway) = 'bkash' THEN 'bKash'
+                    WHEN LOWER(pi.gateway) = 'surjopay' OR LOWER(pi.gateway) = 'shurjopay' THEN 'Nagad'
+                    WHEN LOWER(pi.gateway) = 'nagad' THEN 'Nagad'
+                    WHEN LOWER(pi.gateway) = 'ssl' OR LOWER(pi.gateway) = 'sslcommerz' THEN 'Cards'
+                    ELSE pi.gateway
+                END
+            ) as payType,
+            0 as retry,
+            COALESCE(
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(pi.metadata, '$.bank_trx_id')), ''),
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(pi.metadata, '$.trxID')), ''),
+                tr.transaction_ref,
+                pi.gateway_payment_id
+            ) as bankTxn,
             pi.customer_id as customerId,
             COALESCE(
                 NULLIF(c.full_name, ''),
@@ -219,8 +257,10 @@ class PaymentsController {
                 '—'
             ) as payeeMobile,
             pi.created_at as createdAt,
+            pi.created_at as reqTime,
             pi.created_at as updatedAt,
-            CASE WHEN pi.status = 'completed' OR tr.transaction_id IS NOT NULL THEN pi.created_at ELSE NULL END as paidAt
+            CASE WHEN pi.status = 'completed' OR tr.transaction_id IS NOT NULL THEN pi.created_at ELSE NULL END as paidAt,
+            CASE WHEN pi.status = 'completed' OR tr.transaction_id IS NOT NULL THEN pi.created_at ELSE NULL END as payTime
             FROM payment_intents pi
             LEFT JOIN customers c ON c.customer_id = pi.customer_id
             LEFT JOIN users u_owner ON u_owner.user_id = c.owner_id
@@ -233,7 +273,7 @@ class PaymentsController {
         $stmt->execute($params);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Calculate summary
+        // Overall Summary
         $stmtSum = $db->prepare("SELECT 
             SUM(CASE WHEN DATE(pi.created_at) = CURDATE() AND (pi.status = 'completed' OR tr.transaction_id IS NOT NULL) THEN pi.amount ELSE 0 END) as today,
             SUM(CASE WHEN DATE(pi.created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY) AND (pi.status = 'completed' OR tr.transaction_id IS NOT NULL) THEN pi.amount ELSE 0 END) as yesterday,
@@ -249,6 +289,72 @@ class PaymentsController {
         $stmtSum->execute($params);
         $sum = $stmtSum->fetch(PDO::FETCH_ASSOC) ?: [];
 
+        // Gateway-wise Summaries (grouped by gateway)
+        $stmtSumByGw = $db->prepare("SELECT 
+            LOWER(pi.gateway) as gateway,
+            SUM(CASE WHEN DATE(pi.created_at) = CURDATE() AND (pi.status = 'completed' OR tr.transaction_id IS NOT NULL) THEN pi.amount ELSE 0 END) as today,
+            SUM(CASE WHEN DATE(pi.created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY) AND (pi.status = 'completed' OR tr.transaction_id IS NOT NULL) THEN pi.amount ELSE 0 END) as yesterday,
+            SUM(CASE WHEN pi.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01') AND (pi.status = 'completed' OR tr.transaction_id IS NOT NULL) THEN pi.amount ELSE 0 END) as this_month,
+            SUM(CASE WHEN pi.created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) AND pi.created_at < DATE_FORMAT(NOW(), '%Y-%m-01') AND (pi.status = 'completed' OR tr.transaction_id IS NOT NULL) THEN pi.amount ELSE 0 END) as last_month,
+            SUM(CASE WHEN pi.status = 'completed' OR tr.transaction_id IS NOT NULL THEN pi.amount ELSE 0 END) as filtered_total
+            FROM payment_intents pi
+            LEFT JOIN customers c ON c.customer_id = pi.customer_id
+            LEFT JOIN users u_owner ON u_owner.user_id = c.owner_id
+            LEFT JOIN users u_meta ON u_meta.user_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(pi.metadata, '$.user_id')) AS UNSIGNED)
+            LEFT JOIN transactions tr ON (tr.transaction_ref = pi.transaction_ref OR tr.transaction_ref = pi.gateway_payment_id)
+            WHERE {$whereSql}
+            GROUP BY LOWER(pi.gateway)");
+        $stmtSumByGw->execute($params);
+        $gwSums = $stmtSumByGw->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $gwSumMap = [];
+        foreach ($gwSums as $row) {
+            $gwSumMap[strtolower($row['gateway'])] = $row;
+        }
+
+        // Active/Configured gateways in payment_gateway_settings for tenant
+        $stmtPg = $db->prepare("SELECT gateway, is_active FROM payment_gateway_settings WHERE tenant_id = :tid ORDER BY id ASC");
+        $stmtPg->execute(['tid' => $tenantId]);
+        $pgSettings = $stmtPg->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $gatewaysToShow = [];
+        foreach ($pgSettings as $pg) {
+            $gw = strtolower(trim($pg['gateway']));
+            if (!empty($pg['is_active'])) {
+                $gatewaysToShow[$gw] = true;
+            }
+        }
+
+        // Also check if any gateways have transaction totals in payment_intents
+        foreach ($gwSumMap as $gw => $row) {
+            if ((float)($row['filtered_total'] ?? 0) > 0 || (float)($row['this_month'] ?? 0) > 0) {
+                $gatewaysToShow[$gw] = true;
+            }
+        }
+
+        // Fallback default if none active
+        if (empty($gatewaysToShow)) {
+            $gatewaysToShow['bkash'] = true;
+        }
+
+        $gatewaySummaries = [];
+        foreach (array_keys($gatewaysToShow) as $gwCode) {
+            $stats = $gwSumMap[$gwCode] ?? [];
+            $gatewaySummaries[] = [
+                'gateway' => $gwCode,
+                'label' => ($gwCode === 'bkash' ? 'bKash' : ($gwCode === 'surjopay' || $gwCode === 'shurjopay' ? 'shurjopay' : ($gwCode === 'nagad' ? 'Nagad' : ($gwCode === 'ssl' || $gwCode === 'sslcommerz' ? 'SSLCommerz' : ucfirst($gwCode))))),
+                'today' => (float)($stats['today'] ?? 0),
+                'yesterday' => (float)($stats['yesterday'] ?? 0),
+                'thisMonth' => (float)($stats['this_month'] ?? 0),
+                'lastMonth' => (float)($stats['last_month'] ?? 0),
+                'filteredTotal' => (float)($stats['filtered_total'] ?? 0),
+            ];
+        }
+
+        // POP In Charge list for filter dropdown
+        $stmtPops = $db->prepare("SELECT user_id, username, first_name, last_name, role FROM users WHERE tenant_id = :tid AND role IN ('staff', 'reseller', 'pop_in_charge', 'admin') ORDER BY username ASC");
+        $stmtPops->execute(['tid' => $tenantId]);
+        $popList = $stmtPops->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
         Response::json([
             'success' => true,
             'data' => [
@@ -261,6 +367,8 @@ class PaymentsController {
                     'lastMonth' => (float)($sum['last_month'] ?? 0),
                     'filteredTotal' => (float)($sum['filtered_total'] ?? 0),
                 ],
+                'gatewaySummaries' => $gatewaySummaries,
+                'popList' => $popList,
             ],
             'meta' => [
                 'total' => $total,

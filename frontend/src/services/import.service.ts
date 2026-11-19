@@ -16,6 +16,9 @@ export interface MikrotikPreviewUser {
   } | null;
   suggested_name?: string;
   suggested_phone?: string;
+  suggested_code?: string;
+  suggested_area?: string;
+  suggested_expiry?: string;
   matched_package_id?: string | number | null;
   matched_package_name?: string | null;
   matched_package_price?: number;
@@ -38,6 +41,8 @@ export interface MikrotikImportPayload {
   deviceId: string;
   importAs: 'prepaid' | 'postpaid';
   expiryDate?: string;
+  district?: string;
+  thana?: string;
   invoiceMonth?: string;
   generateInvoice?: boolean;
   deductResellerBalance?: boolean;
@@ -53,6 +58,10 @@ export interface MikrotikImportPayload {
     profile?: string;
     name?: string;
     phone?: string;
+    suggested_code?: string;
+    suggested_area?: string;
+    suggested_expiry?: string;
+    address?: string;
     packageId?: string | number | null;
     caller_id?: string;
     comment?: string;
@@ -92,6 +101,8 @@ export interface BatchClientsImportPayload {
   importTarget: 'admin' | string | number;
   importAs: 'prepaid' | 'postpaid';
   expiryDate?: string;
+  district?: string;
+  thana?: string;
   invoiceMonth?: string;
   createInvoice?: boolean;
   defaultDeviceId?: string;

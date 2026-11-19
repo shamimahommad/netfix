@@ -338,11 +338,14 @@ class MikrotikSyncService {
      */
     public static function syncCustomer(PDO $db, $customerId, ?int $tenantId = null, bool $allowProvision = false): array {
         // Fetch customer and network account
-        $stmt = $db->prepare("SELECT c.*, na.username, na.password, na.mac_address, na.current_ip, na.network_device_id, na.protocol, cs.access_profile_id, COALESCE(ap.mikrotik_profile_name, ap.profile_name) as profile_name
+        $stmt = $db->prepare("SELECT c.*, na.username, na.password, na.mac_address, na.current_ip, na.network_device_id, na.protocol, cs.access_profile_id, cs.expires_at, COALESCE(ap.mikrotik_profile_name, ap.profile_name) as profile_name,
+                sa.name as area_name, sub.name as sub_area_name
             FROM customers c
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
             LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id
             LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
+            LEFT JOIN service_areas sa ON sa.service_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) AS UNSIGNED)
+            LEFT JOIN sub_areas sub ON sub.sub_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.sub_area_id')) AS UNSIGNED)
             WHERE c.customer_id = :cid LIMIT 1");
         $stmt->execute(['cid' => $customerId]);
         $cust = $stmt->fetch();
@@ -452,7 +455,7 @@ class MikrotikSyncService {
                     '=profile=' . $pkgProfile,
                     '=service=pppoe',
                     '=disabled=no',
-                    '=comment=' . "{$cust['full_name']} | {$cust['customer_code']}",
+                    '=comment=' . self::formatSecretComment($cust),
                 ]);
                 $lines[] = "PPPoE Secret: Successfully created on router with profile '{$pkgProfile}'";
                 $secretExists = true;
@@ -806,11 +809,14 @@ class MikrotikSyncService {
      * Automatic MikroTik renewal: Unblock, apply profile, refresh session
      */
     public static function renewCustomer(PDO $db, $customerId, ?int $planId = null): array {
-        $stmt = $db->prepare("SELECT c.*, na.username, na.password, cs.access_profile_id, COALESCE(ap.mikrotik_profile_name, ap.profile_name) as profile_name
+        $stmt = $db->prepare("SELECT c.*, na.username, na.password, cs.access_profile_id, cs.expires_at, COALESCE(ap.mikrotik_profile_name, ap.profile_name) as profile_name,
+                sa.name as area_name, sub.name as sub_area_name
             FROM customers c
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
             LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id
             LEFT JOIN access_profiles ap ON ap.access_profile_id = COALESCE(:pid, cs.access_profile_id)
+            LEFT JOIN service_areas sa ON sa.service_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) AS UNSIGNED)
+            LEFT JOIN sub_areas sub ON sub.sub_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.sub_area_id')) AS UNSIGNED)
             WHERE c.customer_id = :cid LIMIT 1");
         $stmt->execute(['pid' => $planId, 'cid' => $customerId]);
         $cust = $stmt->fetch();
@@ -854,13 +860,15 @@ class MikrotikSyncService {
                 }
             }
 
-            // 2. Secret check and set/add with disabled=no
+            // 2. Secret check and set/add with disabled=no and updated standard comment
             $secList = $api->comm('/ppp/secret/print', ['?name' => $username]);
+            $comment = self::formatSecretComment($cust);
             if (!empty($secList)) {
                 $sec = $secList[0];
                 $setParams = [
                     '=.id=' . $sec['.id'],
                     '=disabled=no',
+                    '=comment=' . $comment,
                 ];
                 if (!empty($profileName)) {
                     $setParams[] = '=profile=' . $profileName;
@@ -874,7 +882,7 @@ class MikrotikSyncService {
                     '=profile=' . $profileName,
                     '=service=pppoe',
                     '=disabled=no',
-                    '=comment=' . "{$cust['full_name']} | {$cust['customer_code']}",
+                    '=comment=' . $comment,
                 ]);
             }
 
@@ -1289,5 +1297,438 @@ class MikrotikSyncService {
             'totalOfflineUpdated' => $totalOfflineUpdated,
             'errors' => $errors,
         ];
+    }
+
+    /**
+     * Format standard PPPoE Secret Comment:
+     * Format: ID Number | Name | Phone | Area | Expire Date
+     * Example: 105896 | Shamim | 01774581701 | Kutubpur | 29/11/26
+     */
+    public static function formatSecretComment(array $customer): string {
+        $code = trim(str_replace('|', '', (string)($customer['customer_code'] ?? '0')));
+        if (empty($code)) $code = '0';
+
+        $name = trim(str_replace('|', '', (string)($customer['full_name'] ?? $customer['name'] ?? 'Customer')));
+        if (empty($name)) $name = 'Customer';
+
+        $phone = trim(str_replace('|', '', (string)($customer['phone'] ?? $customer['mobile'] ?? '')));
+        if (empty($phone)) $phone = '01700000000';
+
+        $area = trim(str_replace('|', '', (string)($customer['sub_area_name'] ?? $customer['area_name'] ?? $customer['area'] ?? $customer['state_province'] ?? $customer['city'] ?? '')));
+        if (empty($area) || $area === 'Dhaka, Bangladesh') {
+            $area = 'General';
+        }
+
+        $rawExpiry = $customer['expires_at'] ?? $customer['expiry_date'] ?? null;
+        if (!empty($rawExpiry)) {
+            $ts = strtotime($rawExpiry);
+            $expiry = $ts ? date('d/m/y', $ts) : date('d/m/y', strtotime('+30 days'));
+        } else {
+            $expiry = date('d/m/y', strtotime('+30 days'));
+        }
+
+        return "{$code} | {$name} | {$phone} | {$area} | {$expiry}";
+    }
+
+    /**
+     * Parse standard PPPoE Secret Comment:
+     * ID Number | Name | Phone | Area | Expire Date
+     */
+    public static function parseSecretComment(string $comment): array {
+        $comment = trim($comment);
+        $result = [
+            'customer_code' => null,
+            'name' => null,
+            'phone' => null,
+            'area' => null,
+            'expiry_date' => null,
+        ];
+
+        if (empty($comment)) {
+            return $result;
+        }
+
+        if (strpos($comment, '|') !== false) {
+            $parts = array_values(array_filter(array_map('trim', explode('|', $comment))));
+            if (count($parts) >= 5) {
+                // 105896 | Shamim | 01774581701 | Kutubpur | 29/11/26
+                $result['customer_code'] = $parts[0];
+                $result['name'] = $parts[1];
+                $result['phone'] = $parts[2];
+                $result['area'] = $parts[3];
+                $result['expiry_date'] = self::normalizeCommentDate($parts[4]);
+                return $result;
+            } elseif (count($parts) === 4) {
+                if (preg_match('/^\d{4,8}$/', $parts[0])) {
+                    $result['customer_code'] = $parts[0];
+                    $result['name'] = $parts[1];
+                    $result['phone'] = $parts[2];
+                    $result['expiry_date'] = self::normalizeCommentDate($parts[3]);
+                } else {
+                    $result['name'] = $parts[0];
+                    $result['phone'] = $parts[1];
+                    $result['area'] = $parts[2];
+                    $result['expiry_date'] = self::normalizeCommentDate($parts[3]);
+                }
+                return $result;
+            } elseif (count($parts) === 3) {
+                if (preg_match('/^\d{4,8}$/', $parts[0])) {
+                    $result['customer_code'] = $parts[0];
+                    $result['name'] = $parts[1];
+                    $result['phone'] = $parts[2];
+                } else {
+                    $result['name'] = $parts[0];
+                    $result['phone'] = $parts[1];
+                    $result['expiry_date'] = self::normalizeCommentDate($parts[2]);
+                }
+                return $result;
+            } elseif (count($parts) === 2) {
+                if (preg_match('/^01[3-9]\d{8}$/', $parts[1])) {
+                    $result['name'] = $parts[0];
+                    $result['phone'] = $parts[1];
+                } elseif (preg_match('/^\d{4,8}$/', $parts[1])) {
+                    $result['name'] = $parts[0];
+                    $result['customer_code'] = $parts[1];
+                } elseif (preg_match('/^\d{4,8}$/', $parts[0])) {
+                    $result['customer_code'] = $parts[0];
+                    $result['name'] = $parts[1];
+                } else {
+                    $result['name'] = $parts[0];
+                }
+                return $result;
+            }
+        }
+
+        // Fallback: Regex extraction
+        if (preg_match('/(01[3-9]\d{8})/', $comment, $pm)) {
+            $result['phone'] = $pm[1];
+        }
+        if (preg_match('#(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})#', $comment, $dm)) {
+            $result['expiry_date'] = self::normalizeCommentDate($dm[1]);
+        }
+        if (preg_match('/\b(\d{5,7})\b/', $comment, $cm)) {
+            if ($cm[1] !== ($result['phone'] ?? '')) {
+                $result['customer_code'] = $cm[1];
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Normalize various date formats to Y-m-d (e.g. 29/11/26 -> 2026-11-29)
+     */
+    public static function normalizeCommentDate(?string $raw): ?string {
+        if (empty($raw)) return null;
+        $raw = trim($raw);
+
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw)) {
+            return $raw;
+        }
+
+        if (preg_match('#^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$#', $raw, $m)) {
+            $day = str_pad($m[1], 2, '0', STR_PAD_LEFT);
+            $month = str_pad($m[2], 2, '0', STR_PAD_LEFT);
+            $year = $m[3];
+            if (strlen($year) === 2) {
+                $year = '20' . $year;
+            }
+            return "{$year}-{$month}-{$day}";
+        }
+
+        $ts = strtotime($raw);
+        if ($ts && $ts > 0) {
+            return date('Y-m-d', $ts);
+        }
+        return null;
+    }
+
+    /**
+     * Synchronize all customers assigned to a specific MikroTik router.
+     * Pushes secret credentials, profiles, enabled/disabled state, and
+     * standardized comment: ID Number | Name | Phone | Area | Expire Date
+     */
+    public static function syncAllRouterCustomers(PDO $db, array $router, object $api, int $tenantId): array {
+        $deviceId = (int)$router['network_device_id'];
+
+        $stmt = $db->prepare("SELECT 
+                c.customer_id, 
+                c.customer_code, 
+                c.full_name, 
+                c.phone, 
+                c.city,
+                c.state_province,
+                c.status as customer_status, 
+                c.billing_status,
+                c.metadata,
+                na.username, 
+                na.password, 
+                na.caller_id,
+                cs.access_profile_id, 
+                cs.expires_at, 
+                cs.status as service_status,
+                COALESCE(ap.mikrotik_profile_name, ap.profile_name, 'default') as profile_name,
+                sa.name as area_name,
+                sub.name as sub_area_name
+            FROM customer_network_accounts na
+            JOIN customers c ON c.customer_id = na.customer_id
+            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id
+            LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
+            LEFT JOIN service_areas sa ON sa.service_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) AS UNSIGNED)
+            LEFT JOIN sub_areas sub ON sub.sub_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.sub_area_id')) AS UNSIGNED)
+            WHERE na.network_device_id = :did AND na.protocol = 'pppoe' AND na.username IS NOT NULL AND na.username != ''");
+        $stmt->execute(['did' => $deviceId]);
+        $clients = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $secrets = $api->comm('/ppp/secret/print');
+        $secretMap = [];
+        if (is_array($secrets)) {
+            foreach ($secrets as $s) {
+                if (!empty($s['name'])) {
+                    $secretMap[strtolower(trim($s['name']))] = $s;
+                }
+            }
+        }
+
+        $routerProfiles = $api->comm('/ppp/profile/print');
+        $profileSet = [];
+        if (is_array($routerProfiles)) {
+            foreach ($routerProfiles as $rp) {
+                if (!empty($rp['name'])) {
+                    $profileSet[strtolower(trim($rp['name']))] = $rp['name'];
+                }
+            }
+        }
+
+        $createdCount = 0;
+        $updatedCount = 0;
+
+        foreach ($clients as $c) {
+            $username = trim($c['username']);
+            if (empty($username)) continue;
+
+            $lowerUname = strtolower($username);
+            $comment = self::formatSecretComment($c);
+
+            $rawProf = trim($c['profile_name'] ?: 'default');
+            $profile = isset($profileSet[strtolower($rawProf)]) ? $profileSet[strtolower($rawProf)] : 'default';
+
+            $isSuspended = ($c['customer_status'] === 'suspended' || 
+                            $c['billing_status'] === 'Expired' || 
+                            $c['service_status'] === 'suspended' ||
+                            (!empty($c['expires_at']) && strtotime($c['expires_at']) < time()));
+            $disabledVal = $isSuspended ? 'yes' : 'no';
+
+            $password = !empty($c['password']) ? $c['password'] : '123456';
+
+            if (isset($secretMap[$lowerUname])) {
+                $sec = $secretMap[$lowerUname];
+                $secId = $sec['.id'];
+
+                $updateParams = [
+                    '=.id=' . $secId,
+                    '=comment=' . $comment,
+                    '=disabled=' . $disabledVal,
+                ];
+                if (!empty($password) && ($sec['password'] ?? '') !== $password) {
+                    $updateParams[] = '=password=' . $password;
+                }
+                if (!empty($profile) && strtolower($sec['profile'] ?? '') !== strtolower($profile)) {
+                    $updateParams[] = '=profile=' . $profile;
+                }
+
+                $api->comm('/ppp/secret/set', $updateParams);
+                $updatedCount++;
+            } else {
+                $addParams = [
+                    '=name=' . $username,
+                    '=password=' . $password,
+                    '=profile=' . $profile,
+                    '=service=pppoe',
+                    '=comment=' . $comment,
+                    '=disabled=' . $disabledVal,
+                ];
+                $api->comm('/ppp/secret/add', $addParams);
+                $createdCount++;
+            }
+        }
+
+        return [
+            'totalClients' => count($clients),
+            'createdCount' => $createdCount,
+            'updatedCount' => $updatedCount,
+            'syncedCount' => $createdCount + $updatedCount,
+        ];
+    }
+
+    /**
+     * Automatically provision/sync single customer PPPoE secret on MikroTik router
+     */
+    public static function provisionCustomerSecret(PDO $db, int $customerId, ?int $tenantId = null): array {
+        $stmt = $db->prepare("SELECT 
+                c.customer_id, 
+                c.customer_code, 
+                c.full_name, 
+                c.phone, 
+                c.city,
+                c.state_province,
+                c.status as customer_status, 
+                c.billing_status,
+                c.metadata,
+                c.tenant_id,
+                na.username, 
+                na.password, 
+                na.network_device_id,
+                cs.access_profile_id, 
+                cs.expires_at, 
+                cs.status as service_status,
+                COALESCE(ap.mikrotik_profile_name, ap.profile_name, 'default') as profile_name,
+                sa.name as area_name,
+                sub.name as sub_area_name
+            FROM customers c
+            LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
+            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id
+            LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
+            LEFT JOIN service_areas sa ON sa.service_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) AS UNSIGNED)
+            LEFT JOIN sub_areas sub ON sub.sub_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.sub_area_id')) AS UNSIGNED)
+            WHERE c.customer_id = :cid
+            LIMIT 1");
+        $stmt->execute(['cid' => $customerId]);
+        $c = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$c || empty($c['username'])) {
+            return ['success' => false, 'message' => 'Customer or PPPoE username not found'];
+        }
+
+        $router = self::getRouter($db, $customerId, $tenantId ?: (int)$c['tenant_id']);
+        if (!$router) {
+            return ['success' => false, 'message' => 'No active router configured for customer'];
+        }
+
+        $api = self::connect($router, 4);
+        if (!$api) {
+            return ['success' => false, 'message' => "Could not connect to router {$router['device_name']}"];
+        }
+
+        try {
+            $username = trim($c['username']);
+            $comment = self::formatSecretComment($c);
+
+            $routerProfiles = $api->comm('/ppp/profile/print');
+            $profileSet = [];
+            if (is_array($routerProfiles)) {
+                foreach ($routerProfiles as $rp) {
+                    if (!empty($rp['name'])) {
+                        $profileSet[strtolower(trim($rp['name']))] = $rp['name'];
+                    }
+                }
+            }
+            $rawProf = trim($c['profile_name'] ?: 'default');
+            $profile = isset($profileSet[strtolower($rawProf)]) ? $profileSet[strtolower($rawProf)] : 'default';
+
+            $isSuspended = ($c['customer_status'] === 'suspended' || 
+                            $c['billing_status'] === 'Expired' || 
+                            $c['service_status'] === 'suspended' ||
+                            (!empty($c['expires_at']) && strtotime($c['expires_at']) < time()));
+            $disabledVal = $isSuspended ? 'yes' : 'no';
+
+            $password = !empty($c['password']) ? $c['password'] : '123456';
+
+            $secList = $api->comm('/ppp/secret/print', ['?name' => $username]);
+            if (!empty($secList[0])) {
+                $sec = $secList[0];
+                $api->comm('/ppp/secret/set', [
+                    '=.id=' . $sec['.id'],
+                    '=comment=' . $comment,
+                    '=password=' . $password,
+                    '=profile=' . $profile,
+                    '=disabled=' . $disabledVal,
+                ]);
+            } else {
+                $api->comm('/ppp/secret/add', [
+                    '=name=' . $username,
+                    '=password=' . $password,
+                    '=profile=' . $profile,
+                    '=service=pppoe',
+                    '=comment=' . $comment,
+                    '=disabled=' . $disabledVal,
+                ]);
+            }
+
+            return ['success' => true, 'message' => "Secret for '{$username}' successfully provisioned on router"];
+        } finally {
+            $api->disconnect();
+        }
+    }
+
+    /**
+     * Bind MAC address for all secrets on router
+     */
+    public static function bindAllSecretsMac(object $api, PDO $db, int $deviceId): array {
+        $secrets = $api->comm('/ppp/secret/print');
+        $activeSessions = $api->comm('/ppp/active/print');
+        $activeMacMap = [];
+        if (is_array($activeSessions)) {
+            foreach ($activeSessions as $act) {
+                if (!empty($act['name']) && !empty($act['caller-id'])) {
+                    $activeMacMap[strtolower(trim($act['name']))] = trim($act['caller-id']);
+                }
+            }
+        }
+
+        $stmtNet = $db->prepare("SELECT LOWER(username) as uname, mac_address FROM customer_network_accounts WHERE network_device_id = :did AND mac_address IS NOT NULL AND mac_address != ''");
+        $stmtNet->execute(['did' => $deviceId]);
+        $dbMacMap = [];
+        while ($r = $stmtNet->fetch()) {
+            $dbMacMap[$r['uname']] = trim($r['mac_address']);
+        }
+
+        $bound = 0;
+        $total = 0;
+        if (is_array($secrets)) {
+            $total = count($secrets);
+            foreach ($secrets as $s) {
+                $name = strtolower(trim($s['name'] ?? ''));
+                if (empty($name)) continue;
+
+                $currentCallerId = trim($s['caller-id'] ?? '');
+                if (!empty($currentCallerId)) continue;
+
+                $targetMac = $activeMacMap[$name] ?? ($dbMacMap[$name] ?? trim($s['last-caller-id'] ?? ''));
+                if (!empty($targetMac)) {
+                    $cleanMac = strtoupper(str_replace(['-', '.', ' '], ':', $targetMac));
+                    $api->comm('/ppp/secret/set', [
+                        '=.id=' . $s['.id'],
+                        '=caller-id=' . $cleanMac,
+                    ]);
+                    $bound++;
+                }
+            }
+        }
+
+        return ['bound' => $bound, 'total' => $total];
+    }
+
+    /**
+     * Clear / Unbind MAC address for all secrets on router
+     */
+    public static function unbindAllSecretsMac(object $api): array {
+        $secrets = $api->comm('/ppp/secret/print');
+        $unbound = 0;
+        $total = 0;
+        if (is_array($secrets)) {
+            $total = count($secrets);
+            foreach ($secrets as $s) {
+                $currentCallerId = trim($s['caller-id'] ?? '');
+                if (!empty($currentCallerId)) {
+                    $api->comm('/ppp/secret/set', [
+                        '=.id=' . $s['.id'],
+                        '=caller-id=',
+                    ]);
+                    $unbound++;
+                }
+            }
+        }
+        return ['unbound' => $unbound, 'total' => $total];
     }
 }

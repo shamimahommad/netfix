@@ -227,12 +227,12 @@ class CustomersController {
             $expiresAtTs = !empty($row['expiry_date']) ? strtotime($row['expiry_date']) : null;
             $dueAmount = (float)($row['balance_due'] ?? 0);
 
-            if ($row['status'] === 'suspended') {
-                $billingStatus = 'Suspended';
-            } elseif ($row['status'] === 'cancelled') {
+            if ($row['status'] === 'cancelled') {
                 $billingStatus = 'Left';
-            } elseif (($expiresAtTs !== null && $expiresAtTs < $now) || strcasecmp($row['raw_billing_status'] ?? '', 'expired') === 0) {
+            } elseif (strcasecmp($row['raw_billing_status'] ?? '', 'expired') === 0 || ($expiresAtTs !== null && $expiresAtTs < $now)) {
                 $billingStatus = 'Expired';
+            } elseif ($row['status'] === 'suspended') {
+                $billingStatus = 'Suspended';
             } elseif ($dueAmount > 0) {
                 $billingStatus = 'Pending';
             } else {
@@ -769,10 +769,6 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             $leaseToken = trim($data['leaseToken'] ?? $data['lease_token'] ?? $data['session_token'] ?? '');
             CustomerIdReservationService::markUsed($db, $customerCode, $leaseToken ?: null);
 
-            require_once __DIR__ . '/../lib/CustomerIdReservationService.php';
-            $leaseToken = trim($data['leaseToken'] ?? $data['lease_token'] ?? $data['session_token'] ?? '');
-            CustomerIdReservationService::markUsed($db, $customerCode, $leaseToken ?: null);
-
             Response::json([
                 'success' => true,
                 'message' => 'Customer created successfully',
@@ -987,6 +983,15 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             require_once __DIR__ . '/../lib/CustomerIdReservationService.php';
             $leaseToken = trim($data['leaseToken'] ?? $data['lease_token'] ?? $data['session_token'] ?? '');
             CustomerIdReservationService::markUsed($db, $customerCode, $leaseToken ?: null);
+
+            // Auto-provision PPPoE secret on MikroTik Router with standard comment:
+            // Format: ID Number | Name | Phone | Area | Expire Date
+            try {
+                require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+                MikrotikSyncService::provisionCustomerSecret($db, (int)$customerId, (int)$tenantId);
+            } catch (\Throwable $mkErr) {
+                error_log("MikroTik auto-provision notice on customer creation: " . $mkErr->getMessage());
+            }
 
             Response::json([
                 'success' => true,
