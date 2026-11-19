@@ -49,7 +49,10 @@ class PaymentGatewayController {
         }
 
         // Priority 4: Host header with dev port rewrite
-        $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
+        $isHttps = (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https')
+            || (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || (!empty($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443);
+        $protocol = $isHttps ? 'https://' : 'http://';
         $host = $_SERVER['HTTP_HOST'] ?? 'localhost:4001';
         if (strpos($host, ':4000') !== false) {
             $host = str_replace(':4000', ':4001', $host);
@@ -298,19 +301,22 @@ class PaymentGatewayController {
         // Find intent
         $stmtIntent = $db->prepare("SELECT * FROM payment_intents 
             WHERE (gateway_payment_id = :gpid OR transaction_ref = :ref OR id = :iid) 
-            AND tenant_id = :tid LIMIT 1");
+            AND (tenant_id = :tid OR :tid2 = 0) LIMIT 1");
         $stmtIntent->execute([
             'gpid' => $paymentId,
             'ref' => $paymentId,
             'iid' => is_numeric($paymentId) ? (int)$paymentId : 0,
             'tid' => $tenantId,
+            'tid2' => $tenantId,
         ]);
         $intent = $stmtIntent->fetch();
 
-        if (!$intent) {
+        if ($intent) {
+            $tenantId = (int)$intent['tenant_id'];
+        } else {
             // Check if already settled
-            $stmtTrx = $db->prepare("SELECT * FROM transactions WHERE transaction_ref = :ref AND tenant_id = :tid LIMIT 1");
-            $stmtTrx->execute(['ref' => $paymentId, 'tid' => $tenantId]);
+            $stmtTrx = $db->prepare("SELECT * FROM transactions WHERE transaction_ref = :ref LIMIT 1");
+            $stmtTrx->execute(['ref' => $paymentId]);
             if ($stmtTrx->fetch()) {
                 Response::json(['success' => true, 'message' => 'Payment already verified and settled.']);
                 return;
@@ -441,19 +447,22 @@ class PaymentGatewayController {
         // Find intent
         $stmtIntent = $db->prepare("SELECT * FROM payment_intents 
             WHERE (gateway_payment_id = :gpid OR transaction_ref = :ref OR id = :iid) 
-            AND tenant_id = :tid LIMIT 1");
+            AND (tenant_id = :tid OR :tid2 = 0) LIMIT 1");
         $stmtIntent->execute([
             'gpid' => $paymentId,
             'ref' => $paymentId,
             'iid' => is_numeric($paymentId) ? (int)$paymentId : 0,
             'tid' => $tenantId,
+            'tid2' => $tenantId,
         ]);
         $intent = $stmtIntent->fetch();
 
-        if (!$intent) {
+        if ($intent) {
+            $tenantId = (int)$intent['tenant_id'];
+        } else {
             // Check if already settled
-            $stmtTrx = $db->prepare("SELECT * FROM transactions WHERE transaction_ref = :ref AND tenant_id = :tid LIMIT 1");
-            $stmtTrx->execute(['ref' => $paymentId, 'tid' => $tenantId]);
+            $stmtTrx = $db->prepare("SELECT * FROM transactions WHERE transaction_ref = :ref LIMIT 1");
+            $stmtTrx->execute(['ref' => $paymentId]);
             if ($stmtTrx->fetch()) {
                 require_once __DIR__ . '/../lib/WalletLedgerService.php';
                 $curBal = WalletLedgerService::getBalance($userId);

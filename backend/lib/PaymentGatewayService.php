@@ -11,7 +11,15 @@ class PaymentGatewayService {
         $stmt = $db->prepare("SELECT * FROM payment_gateway_settings WHERE tenant_id = :tid AND gateway = :gw LIMIT 1");
         $stmt->execute(['tid' => $tenantId, 'gw' => strtolower($gateway)]);
         $row = $stmt->fetch();
-        return $row ?: null;
+        if ($row && !empty($row['app_key']) && $row['app_key'] !== 'sandbox_key') {
+            return $row;
+        }
+
+        // Fallback: If tenant does not have active custom credentials, inherit active platform gateway settings
+        $stmtFallback = $db->prepare("SELECT * FROM payment_gateway_settings WHERE gateway = :gw AND is_active = 1 AND app_key IS NOT NULL AND app_key != '' AND app_key NOT LIKE '%sandbox_key%' ORDER BY id ASC LIMIT 1");
+        $stmtFallback->execute(['gw' => strtolower($gateway)]);
+        $fallback = $stmtFallback->fetch();
+        return $fallback ?: ($row ?: null);
     }
 
     /**
@@ -20,7 +28,15 @@ class PaymentGatewayService {
     public static function getActiveGateways(PDO $db, int $tenantId): array {
         $stmt = $db->prepare("SELECT * FROM payment_gateway_settings WHERE tenant_id = :tid AND is_active = 1");
         $stmt->execute(['tid' => $tenantId]);
-        return $stmt->fetchAll() ?: [];
+        $rows = $stmt->fetchAll();
+        if (!empty($rows)) {
+            return $rows;
+        }
+
+        // Fallback to active platform gateways
+        $stmtFallback = $db->prepare("SELECT * FROM payment_gateway_settings WHERE is_active = 1 AND app_key IS NOT NULL AND app_key != '' AND app_key NOT LIKE '%sandbox_key%' GROUP BY gateway ORDER BY id ASC");
+        $stmtFallback->execute();
+        return $stmtFallback->fetchAll() ?: [];
     }
 
     /**

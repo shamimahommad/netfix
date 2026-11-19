@@ -164,7 +164,7 @@ function markExpiredInDb(PDO $db, int $customerId, ?int $customerServiceId): voi
 
         // Service
         if ($customerServiceId) {
-            $db->prepare("UPDATE customer_services SET status = 'expired', updated_at = NOW() WHERE customer_service_id = :sid")
+            $db->prepare("UPDATE customer_services SET status = 'suspended', updated_at = NOW() WHERE customer_service_id = :sid")
                ->execute(['sid' => $customerServiceId]);
         }
 

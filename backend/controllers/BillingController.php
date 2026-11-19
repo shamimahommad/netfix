@@ -885,18 +885,19 @@ class BillingController {
                     $newExp = date('Y-m-d H:i:s', strtotime('-30 days', strtotime($cs['expires_at'])));
                 }
 
-                $newStatus = strtotime($newExp) < time() ? 'expired' : $cs['status'];
+                $isPastExpiry = strtotime($newExp) < time();
+                $newCsStatus = $isPastExpiry ? 'suspended' : ($cs['status'] === 'active' ? 'active' : 'inactive');
 
                 $db->prepare("UPDATE customer_services SET expires_at = :exp, status = :st, updated_at = NOW() WHERE customer_service_id = :sid")
                    ->execute([
                        'exp' => $newExp,
-                       'st' => $newStatus,
+                       'st' => $newCsStatus,
                        'sid' => $cs['customer_service_id'],
                    ]);
 
                 // Update MikroTik Router if expired
-                if ($newStatus === 'expired') {
-                    $db->prepare("UPDATE customers SET status = 'expired', billing_status = 'Unpaid' WHERE customer_id = :cid")
+                if ($isPastExpiry) {
+                    $db->prepare("UPDATE customers SET status = 'suspended', billing_status = 'Expired', updated_at = NOW() WHERE customer_id = :cid")
                        ->execute(['cid' => $customerId]);
                     try {
                         require_once __DIR__ . '/../lib/MikrotikSyncService.php';

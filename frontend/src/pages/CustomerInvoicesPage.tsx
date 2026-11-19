@@ -157,14 +157,7 @@ export default function CustomerInvoicesPage() {
   const isPaid = (inv: InvoiceDto) => (inv.status || '').toLowerCase() === 'paid';
   const canCancelOrReturn = (inv: InvoiceDto) => isPaid(inv) && inv.isLastPaidInvoice === true;
 
-  const isInvoiceExpired = (inv: InvoiceDto) => {
-    if (!inv.dueDate) return false;
-    const due = new Date(inv.dueDate);
-    due.setHours(23, 59, 59, 999);
-    return due.getTime() < Date.now();
-  };
-
-  const showCancelReturnButtons = (inv: InvoiceDto) => canCancelOrReturn(inv) && !isInvoiceExpired(inv);
+  const showCancelReturnButtons = (inv: InvoiceDto) => canCancelOrReturn(inv);
 
   const handleCancel = async (inv: InvoiceDto) => {
     if (!canCancelOrReturn(inv)) return;

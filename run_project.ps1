@@ -34,11 +34,16 @@ function Start-DetachedProcess {
 $mysqlConn = Get-NetTCPConnection -LocalPort 3306 -State Listen -ErrorAction SilentlyContinue
 if (-not $mysqlConn) {
     Write-Host "[*] Booting MySQL / MariaDB on port 3306..." -ForegroundColor Yellow
+    $scoopMysqld = "$env:USERPROFILE\scoop\apps\mariadb\current\bin\mysqld.exe"
     if (Test-Path "C:\xampp\mysql\bin\mysqld.exe") {
         Start-DetachedProcess -CommandLine 'C:\xampp\mysql\bin\mysqld.exe --defaults-file=C:\xampp\mysql\bin\my.ini --standalone' -CurrentDirectory "C:\xampp"
         Start-Sleep -Milliseconds 1000
+    } elseif (Test-Path $scoopMysqld) {
+        $mariadbDir = "$env:USERPROFILE\scoop\apps\mariadb\current"
+        Start-DetachedProcess -CommandLine "$scoopMysqld --console" -CurrentDirectory $mariadbDir
+        Start-Sleep -Milliseconds 1200
     } else {
-        Write-Host "[!] C:\xampp\mysql\bin\mysqld.exe not found. Start MySQL via XAMPP." -ForegroundColor Red
+        Write-Host "[!] MySQL / MariaDB not found. Start MySQL via XAMPP or Scoop." -ForegroundColor Red
     }
 } else {
     Write-Host "[OK] MySQL Database is active on port 3306." -ForegroundColor Green
@@ -48,7 +53,8 @@ if (-not $mysqlConn) {
 $phpConn = Get-NetTCPConnection -LocalPort 4000 -State Listen -ErrorAction SilentlyContinue
 if (-not $phpConn) {
     Write-Host "[*] Booting PHP REST API on http://127.0.0.1:4000..." -ForegroundColor Yellow
-    $phpExe = if (Test-Path "C:\xampp\php\php.exe") { "C:\xampp\php\php.exe" } else { "php.exe" }
+    $scoopPhp = "$env:USERPROFILE\scoop\apps\php\current\php.exe"
+    $phpExe = if (Test-Path "C:\xampp\php\php.exe") { "C:\xampp\php\php.exe" } elseif (Test-Path $scoopPhp) { $scoopPhp } else { "php.exe" }
     Start-DetachedProcess -CommandLine "$phpExe -S 0.0.0.0:4000 index.php" -CurrentDirectory "$projectRoot\backend"
     Start-Sleep -Milliseconds 800
 } else {
@@ -59,7 +65,8 @@ if (-not $phpConn) {
 $viteConn = Get-NetTCPConnection -LocalPort 4001 -State Listen -ErrorAction SilentlyContinue
 if (-not $viteConn) {
     Write-Host "[*] Booting Vite Frontend on http://localhost:4001..." -ForegroundColor Yellow
-    $nodeExe = if (Test-Path "C:\PROGRA~1\nodejs\node.exe") { "C:\PROGRA~1\nodejs\node.exe" } else { "node.exe" }
+    $scoopNode = "$env:USERPROFILE\scoop\apps\nodejs-lts\current\node.exe"
+    $nodeExe = if (Test-Path "C:\PROGRA~1\nodejs\node.exe") { "C:\PROGRA~1\nodejs\node.exe" } elseif (Test-Path $scoopNode) { $scoopNode } else { "node.exe" }
     Start-DetachedProcess -CommandLine "$nodeExe node_modules/vite/bin/vite.js" -CurrentDirectory "$projectRoot\frontend"
     Start-Sleep -Milliseconds 1500
 } else {
