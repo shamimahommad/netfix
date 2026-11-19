@@ -1083,8 +1083,8 @@ class NetworkController {
         $cacheKey = 'ping_status_' . ($tenantId ?? 'all');
         $cacheFile = $cacheDir . '/' . $cacheKey . '.json';
 
-        // Fast path: Return cached status if verified within last 20 seconds
-        if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < 20)) {
+        // Fast path: Return cached status if verified within last 4 seconds
+        if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < 4)) {
             $cached = @json_decode(file_get_contents($cacheFile), true);
             if (!empty($cached) && is_array($cached)) {
                 Response::json([

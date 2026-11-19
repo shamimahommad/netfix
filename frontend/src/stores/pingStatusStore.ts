@@ -21,7 +21,7 @@ export const usePingStatusStore = create<PingStatusState>((set, get) => ({
   setPingStatus: (deviceId: string, status: PingStatus) => {
     set((state) => {
       const newMap = new Map(state.pingStatuses);
-      newMap.set(deviceId, status);
+      newMap.set(String(deviceId), status);
       return { pingStatuses: newMap };
     });
   },
@@ -30,14 +30,16 @@ export const usePingStatusStore = create<PingStatusState>((set, get) => ({
     set((state) => {
       const newMap = new Map(state.pingStatuses);
       statuses.forEach((status) => {
-        newMap.set(status.deviceId, status);
+        if (status && status.deviceId) {
+          newMap.set(String(status.deviceId), status);
+        }
       });
       return { pingStatuses: newMap };
     });
   },
 
   getPingStatus: (deviceId: string) => {
-    return get().pingStatuses.get(deviceId) || null;
+    return get().pingStatuses.get(String(deviceId)) || null;
   },
 
   clearPingStatuses: () => {

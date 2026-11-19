@@ -33,21 +33,31 @@ const getStatusLabel = (status: NetworkDevice['status']): string => {
 };
 
 // Memoized Ping Status Component
-const PingStatusIndicator = memo(({ deviceId }: { deviceId: string }) => {
-  const pingStatus = usePingStatusStore((state) => state.getPingStatus(deviceId));
+const PingStatusIndicator = memo(({
+  deviceId,
+  fallbackStatus,
+  fallbackLatency,
+}: {
+  deviceId: string;
+  fallbackStatus?: string;
+  fallbackLatency?: number | null;
+}) => {
+  const liveStatus = usePingStatusStore((state) => state.getPingStatus(deviceId));
+  const effectiveStatus = liveStatus?.pingStatus || fallbackStatus || null;
+  const effectiveLatency = liveStatus?.latencyMs !== undefined ? liveStatus.latencyMs : (fallbackLatency ?? null);
 
-  if (pingStatus?.pingStatus === 'online') {
+  if (effectiveStatus === 'online') {
     return (
       <div className="flex items-center gap-2">
         <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
         <span className="text-sm text-slate-700 dark:text-slate-300 font-medium">
-          {pingStatus.latencyMs !== null ? `${pingStatus.latencyMs}ms` : 'Online'}
+          {effectiveLatency !== null ? `${effectiveLatency}ms` : 'Online'}
         </span>
       </div>
     );
   }
 
-  if (pingStatus?.pingStatus === 'auth_failed') {
+  if (effectiveStatus === 'auth_failed') {
     return (
       <div className="flex items-center gap-2">
         <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
@@ -56,7 +66,7 @@ const PingStatusIndicator = memo(({ deviceId }: { deviceId: string }) => {
     );
   }
 
-  if (pingStatus?.pingStatus === 'offline') {
+  if (effectiveStatus === 'offline') {
     return (
       <div className="flex items-center gap-2">
         <div className="w-2 h-2 rounded-full bg-red-500"></div>
@@ -333,8 +343,15 @@ export default function MikroTikPage() {
   }, []);
 
   // Use ping status hook for real-time updates (doesn't reload device list)
-  const deviceIds = devices.map((d) => d.networkDeviceId);
-  usePingStatus(deviceIds, devices.length > 0);
+  const deviceIds = useMemo(() => devices.map((d) => d.networkDeviceId), [devices]);
+  const minInterval = useMemo(() => {
+    const intervals = devices
+      .map((d) => d.customPingInterval)
+      .filter((v): v is number => typeof v === 'number' && v > 0);
+    return intervals.length > 0 ? Math.min(...intervals) : 10;
+  }, [devices]);
+
+  usePingStatus(deviceIds, devices.length > 0, minInterval);
 
 
   const loadDevices = async () => {
@@ -1845,7 +1862,11 @@ export default function MikroTikPage() {
                         </span>
                       </td>
                       <td className="px-3 py-4">
-                        <PingStatusIndicator deviceId={device.networkDeviceId} />
+                        <PingStatusIndicator 
+                          deviceId={device.networkDeviceId} 
+                          fallbackStatus={device.pingStatus} 
+                          fallbackLatency={device.latencyMs} 
+                        />
                       </td>
                       <td className="px-3 py-4 text-sm text-slate-600 dark:text-slate-400 truncate" title={device.managementIp || undefined}>
                         {device.managementIp || '—'}

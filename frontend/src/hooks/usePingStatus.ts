@@ -2,7 +2,11 @@ import { useEffect, useRef } from 'react';
 import { networkService } from '@/services/network.service';
 import { usePingStatusStore } from '@/stores/pingStatusStore';
 
-export function usePingStatus(deviceIds: string[], enabled: boolean = true) {
+export function usePingStatus(
+  deviceIds: string[], 
+  enabled: boolean = true,
+  intervalSeconds: number = 10
+) {
   const { setPingStatuses } = usePingStatusStore();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -10,6 +14,8 @@ export function usePingStatus(deviceIds: string[], enabled: boolean = true) {
     if (!enabled || deviceIds.length === 0) {
       return;
     }
+
+    const pollMs = Math.max(5000, (intervalSeconds || 10) * 1000);
 
     // Initial fetch
     const fetchPingStatuses = async () => {
@@ -26,15 +32,15 @@ export function usePingStatus(deviceIds: string[], enabled: boolean = true) {
 
     fetchPingStatuses();
 
-    // Set up polling every 30 seconds
+    // Set up polling dynamically based on intervalSeconds
     intervalRef.current = setInterval(() => {
       fetchPingStatuses();
-    }, 30000);
+    }, pollMs);
 
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
     };
-  }, [deviceIds.join(','), enabled, setPingStatuses]);
+  }, [deviceIds.join(','), enabled, intervalSeconds, setPingStatuses]);
 }
