@@ -253,7 +253,9 @@ CREATE TABLE `customers` (
   KEY `idx_customer_status` (`status`),
   KEY `idx_customer_owner` (`owner_id`),
   KEY `idx_customer_phone` (`phone`),
-  KEY `idx_customers_owner_path` (`owner_path`)
+  KEY `idx_customers_owner_path` (`owner_path`),
+  KEY `idx_cust_tenant_owner_path` (`tenant_id`,`owner_path`),
+  KEY `idx_cust_tenant_owner` (`tenant_id`,`owner_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=91214 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -902,7 +904,8 @@ CREATE TABLE `users` (
   KEY `idx_users_email` (`email`),
   KEY `idx_users_parent` (`parent_id`),
   KEY `idx_users_role` (`role`),
-  KEY `idx_users_hierarchy_path` (`hierarchy_path`)
+  KEY `idx_users_hierarchy_path` (`hierarchy_path`),
+  KEY `idx_users_tenant_hierarchy` (`tenant_id`,`hierarchy_path`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1001 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
