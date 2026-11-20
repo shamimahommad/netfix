@@ -6,6 +6,7 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
 require_once __DIR__ . '/../lib/AuthMiddleware.php';
+require_once __DIR__ . '/../lib/SmsService.php';
 
 class SmsController {
     public static function getTemplates(): void {
@@ -129,32 +130,14 @@ class SmsController {
 
         if (empty($toNumbers) || empty($message)) {
             Response::error('Recipients and message body are required', 400);
+            return;
         }
 
         $db = Database::getConnection();
-        $stmt = $db->prepare("INSERT INTO sms_log (tenant_id, provider_name, to_number, message, status, trxn_id)
-            VALUES (:tid, 'mim_sms', :to, :msg, 'success', :trx)");
+        $smsType = $data['smsType'] ?? 'general';
+        $res = SmsService::sendBulk($db, $tenantId, $toNumbers, $message, $smsType);
 
-        $results = [];
-        $sent = 0;
-        foreach ($toNumbers as $num) {
-            $trx = 'SMS-' . strtoupper(bin2hex(random_bytes(4)));
-            $stmt->execute([
-                'tid' => $tenantId,
-                'to' => $num,
-                'msg' => $message,
-                'trx' => $trx,
-            ]);
-            $results[] = ['to' => $num, 'success' => true];
-            $sent++;
-        }
-
-        Response::json([
-            'sent' => $sent,
-            'failed' => 0,
-            'total' => count($toNumbers),
-            'results' => $results,
-        ]);
+        Response::json($res);
     }
 
     public static function getBalance(): void {

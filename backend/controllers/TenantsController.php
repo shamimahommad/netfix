@@ -473,10 +473,17 @@ class TenantsController {
         $tStmt->execute(['tid' => $tenantId]);
         $tInfo = $tStmt->fetch(PDO::FETCH_ASSOC);
 
+        // Fetch settings from tenant_settings table
+        $stmtSet = $db->prepare("SELECT setting_key, setting_value FROM tenant_settings WHERE tenant_id = :tid");
+        $stmtSet->execute(['tid' => $tenantId]);
+        $settingsRows = $stmtSet->fetchAll(PDO::FETCH_KEY_PAIR) ?: [];
+
         Response::json([
             'success' => true,
             'data' => [
                 'settings' => [
+                    'tenantSettingsId' => (string)$tenantId,
+                    'tenantId' => (string)$tenantId,
                     'currency' => 'BDT',
                     'timezone' => 'Asia/Dhaka',
                     'companyName' => $tInfo['tenant_name'] ?? 'Star Network',
@@ -485,6 +492,12 @@ class TenantsController {
                     'ownerPhone' => $tInfo['business_phone'] ?? '',
                     'supportPhone' => $tInfo['support_phone'] ?? '',
                     'address' => $tInfo['business_address'] ?? '',
+                    'mapEnabled' => isset($settingsRows['map_enabled']) ? (bool)$settingsRows['map_enabled'] : true,
+                    'monitoringEnabled' => isset($settingsRows['monitoring_enabled']) ? (bool)$settingsRows['monitoring_enabled'] : true,
+                    'smsEnabled' => isset($settingsRows['sms_enabled']) ? (bool)$settingsRows['sms_enabled'] : true,
+                    'paymentBkashEnabled' => isset($settingsRows['payment_bkash_enabled']) ? (bool)$settingsRows['payment_bkash_enabled'] : false,
+                    'paymentSurjopayEnabled' => isset($settingsRows['payment_surjopay_enabled']) ? (bool)$settingsRows['payment_surjopay_enabled'] : false,
+                    'paymentSslEnabled' => isset($settingsRows['payment_ssl_enabled']) ? (bool)$settingsRows['payment_ssl_enabled'] : false,
                 ],
                 'paymentGateways' => $pgs,
                 'smsGateways' => $sms,

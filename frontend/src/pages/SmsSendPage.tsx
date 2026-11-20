@@ -62,6 +62,7 @@ export default function SmsSendPage() {
   const [selectedTemplate, setSelectedTemplate] = useState<string>('custom');
   const [message, setMessage] = useState('');
   const [selectedCustomers, setSelectedCustomers] = useState<SearchCustomerResult[]>([]);
+  const [manualNumbers, setManualNumbers] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchCustomerResult[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -104,9 +105,10 @@ export default function SmsSendPage() {
   const messageLen = message.length;
 
   const toNumbers = useMemo(() => {
-    const phones = selectedCustomers.map((c) => normalizePhone(c.phone)).filter(Boolean);
-    return Array.from(new Set(phones)).slice(0, MAX_RECIPIENTS);
-  }, [selectedCustomers]);
+    const custPhones = selectedCustomers.map((c) => normalizePhone(c.phone)).filter(Boolean);
+    const manPhones = manualNumbers.map(normalizePhone).filter(Boolean);
+    return Array.from(new Set([...custPhones, ...manPhones])).slice(0, MAX_RECIPIENTS);
+  }, [selectedCustomers, manualNumbers]);
 
   const canSend = toNumbers.length > 0 && message.trim().length > 0 && messageLen <= MAX_MESSAGE_LENGTH;
 
@@ -128,6 +130,18 @@ export default function SmsSendPage() {
     setSelectedCustomers((prev) => prev.filter((c) => c.customerId !== customerId));
   }, []);
 
+  const addManualNumbers = useCallback((raw: string) => {
+    const parts = raw.split(/[\s,;]+/).map((s) => s.trim()).filter((s) => s.length >= 10);
+    if (parts.length === 0) return;
+    setManualNumbers((prev) => Array.from(new Set([...prev, ...parts])));
+    setSearchQuery('');
+    setSearchOpen(false);
+  }, []);
+
+  const removeManualNumber = useCallback((num: string) => {
+    setManualNumbers((prev) => prev.filter((n) => n !== num));
+  }, []);
+
   const handleSend = async () => {
     if (!canSend || isSending) return;
     setIsSending(true);
@@ -142,6 +156,7 @@ export default function SmsSendPage() {
         toast.success(`SMS sent to ${result.sent} recipient(s).`);
         setMessage('');
         setSelectedCustomers([]);
+        setManualNumbers([]);
       } else if (result.sent === 0) {
         toast.error('All SMS failed. Check gateway config and numbers.');
       } else {
@@ -233,16 +248,46 @@ export default function SmsSendPage() {
                   setSearchOpen(true);
                 }}
                 onFocus={() => setSearchOpen(true)}
-                placeholder="Search customers by name, phone or username to add..."
+                placeholder="Search customer, or type mobile number (01XXXXXXXXX) & press Enter..."
                 className="w-full bg-transparent text-sm text-slate-800 dark:text-slate-200 outline-none placeholder:text-slate-400"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (searchQuery.trim().length >= 10) {
+                      addManualNumbers(searchQuery.trim());
+                    }
+                  }
+                }}
               />
+              {searchQuery.trim().length >= 10 && (
+                <button
+                  type="button"
+                  onClick={() => addManualNumbers(searchQuery.trim())}
+                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-semibold shrink-0"
+                >
+                  Add
+                </button>
+              )}
               {searching && <Loader2 className="w-4 h-4 text-blue-600 animate-spin shrink-0" />}
             </div>
 
-            {searchOpen && searchResults.length > 0 && (
+            {searchOpen && (
               <>
                 <div className="fixed inset-0 z-10" aria-hidden onClick={() => setSearchOpen(false)} />
                 <div className="absolute left-0 right-0 top-full mt-1.5 z-20 max-h-56 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl py-1">
+                  {searchQuery.trim().length >= 10 && (
+                    <button
+                      type="button"
+                      onClick={() => addManualNumbers(searchQuery.trim())}
+                      className="w-full px-4 py-2 text-left bg-blue-50/50 dark:bg-blue-900/20 hover:bg-blue-100/60 dark:hover:bg-blue-900/40 transition-colors flex items-center justify-between text-sm border-b border-slate-100 dark:border-slate-700/50"
+                    >
+                      <div>
+                        <span className="font-semibold text-blue-600 dark:text-blue-400">Direct Number:</span>
+                        <span className="text-slate-700 dark:text-slate-300 ml-2 font-mono font-bold">{searchQuery.trim()}</span>
+                      </div>
+                      <span className="text-xs text-blue-600 dark:text-blue-400 font-semibold">+ Add Number</span>
+                    </button>
+                  )}
                   {searchResults.map((c) => (
                     <button
                       key={c.customerId}
@@ -262,8 +307,8 @@ export default function SmsSendPage() {
             )}
           </div>
 
-          {/* Selected Customer Tags */}
-          {selectedCustomers.length > 0 && (
+          {/* Selected Customer & Manual Number Tags */}
+          {(selectedCustomers.length > 0 || manualNumbers.length > 0) && (
             <div className="flex flex-wrap gap-2 mt-2.5">
               {selectedCustomers.map((c) => (
                 <span
@@ -275,6 +320,22 @@ export default function SmsSendPage() {
                   <button
                     type="button"
                     onClick={() => removeCustomer(c.customerId)}
+                    className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors ml-0.5"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </span>
+              ))}
+              {manualNumbers.map((num) => (
+                <span
+                  key={num}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 text-xs font-medium border border-emerald-100 dark:border-emerald-800"
+                >
+                  <span className="text-[10px] uppercase font-bold tracking-wider px-1 bg-emerald-200/60 dark:bg-emerald-800/60 rounded">Direct</span>
+                  <span className="font-mono text-[11px]">{num}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeManualNumber(num)}
                     className="hover:text-rose-600 dark:hover:text-rose-400 transition-colors ml-0.5"
                   >
                     <X className="w-3.5 h-3.5" />

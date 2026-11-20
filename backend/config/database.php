@@ -175,6 +175,49 @@ class Database {
 
             self::ensureColumn($pdo, 'payment_gateway_settings', 'api_context_root', 'VARCHAR(255) DEFAULT NULL');
 
+            // Ensure sms_gateway_settings table
+            $pdo->exec("CREATE TABLE IF NOT EXISTS `sms_gateway_settings` (
+                `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `tenant_id` BIGINT UNSIGNED NOT NULL,
+                `provider` VARCHAR(50) NOT NULL DEFAULT 'mim_sms',
+                `api_key` VARCHAR(255) DEFAULT NULL,
+                `sender_id` VARCHAR(100) DEFAULT NULL,
+                `balance` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+                `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                KEY `idx_sms_gw_tenant` (`tenant_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+            // Ensure sms_log table
+            $pdo->exec("CREATE TABLE IF NOT EXISTS `sms_log` (
+                `sms_log_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `tenant_id` BIGINT UNSIGNED NOT NULL,
+                `provider_name` VARCHAR(100) NOT NULL,
+                `to_number` VARCHAR(20) NOT NULL,
+                `message` TEXT NOT NULL,
+                `status` VARCHAR(20) NOT NULL,
+                `sms_type` VARCHAR(50) DEFAULT NULL,
+                `trxn_id` VARCHAR(100) DEFAULT NULL,
+                `error_message` VARCHAR(500) DEFAULT NULL,
+                `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`sms_log_id`),
+                KEY `idx_sms_log_tenant` (`tenant_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+            // Ensure sms_templates table
+            $pdo->exec("CREATE TABLE IF NOT EXISTS `sms_templates` (
+                `sms_template_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `tenant_id` BIGINT UNSIGNED NOT NULL,
+                `template_key` VARCHAR(80) NOT NULL,
+                `is_enabled` TINYINT(1) NOT NULL DEFAULT 1,
+                `body` TEXT NOT NULL,
+                `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`sms_template_id`),
+                UNIQUE KEY `uk_tenant_tpl_key` (`tenant_id`, `template_key`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
             // Ensure syslog_token on network_devices
             self::ensureColumn($pdo, 'network_devices', 'syslog_token', 'VARCHAR(64) DEFAULT NULL UNIQUE');
 

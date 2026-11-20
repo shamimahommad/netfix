@@ -113,9 +113,9 @@ export default function TenantLayout() {
       },
     );
 
-    // Only show SMS menu if enabled and not agent
+    // SMS Module: Show for Admin, Manager, Reseller
     const isAgent = (user?.role_code ?? '').toLowerCase() === 'agent';
-    if (isSmsEnabled && !isAgent) {
+    if (!isAgent && isSmsEnabled !== false) {
       items.push({
         label: 'SMS',
         icon: <SMSIcon />,

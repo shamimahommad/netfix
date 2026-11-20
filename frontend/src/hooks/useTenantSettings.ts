@@ -61,9 +61,9 @@ export function useFeatureAvailability() {
   const { settings, paymentGateways } = useTenantSettings();
 
   return {
-    isMapEnabled: settings?.mapEnabled ?? false,
-    isMonitoringEnabled: settings?.monitoringEnabled ?? false,
-    isSmsEnabled: settings?.smsEnabled ?? false,
+    isMapEnabled: settings ? (settings.mapEnabled ?? true) : true,
+    isMonitoringEnabled: settings ? (settings.monitoringEnabled ?? true) : true,
+    isSmsEnabled: settings ? (settings.smsEnabled ?? true) : true,
     enabledPaymentGateways: paymentGateways.filter((pg) => pg.isEnabled).map((pg) => pg.gateway),
     getPaymentGateway: (gateway: 'bkash' | 'surjopay' | 'ssl') =>
       paymentGateways.find((pg) => pg.gateway === gateway),
