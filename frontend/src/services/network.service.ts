@@ -49,8 +49,10 @@ export const networkService = {
     return response.data;
   },
 
-  async getNetworkDevices(type?: 'mikrotik' | 'olt'): Promise<NetworkDevicesResponse> {
-    const params = type ? { type } : {};
+  async getNetworkDevices(type?: 'mikrotik' | 'olt', tenantId?: string): Promise<NetworkDevicesResponse> {
+    const params: Record<string, string> = {};
+    if (type) params.type = type;
+    if (tenantId) params.tenant_id = tenantId;
     const response = await api.get<NetworkDevicesResponse>('/network/devices', { params });
     return response.data;
   },
@@ -118,8 +120,10 @@ export const networkService = {
     return response.data;
   },
 
-  async getNextDeviceCode(): Promise<{ deviceCode: string }> {
-    const response = await api.get<{ deviceCode: string }>('/network/devices/next-code');
+  async getNextDeviceCode(tenantId?: string): Promise<{ deviceCode: string }> {
+    const params: Record<string, string> = {};
+    if (tenantId) params.tenant_id = tenantId;
+    const response = await api.get<{ deviceCode: string }>('/network/devices/next-code', { params });
     return response.data;
   },
 

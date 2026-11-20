@@ -12,7 +12,11 @@ import { ActionDropdown } from '@/components/ui/ActionDropdown';
 import { usePingStatus } from '@/hooks/usePingStatus';
 import { usePingStatusStore } from '@/stores/pingStatusStore';
 import { PageHeader } from '@/components/common';
-import { Lock, Zap, Radio, Key, RefreshCw, X, CheckCircle2, AlertTriangle, Globe, Terminal } from 'lucide-react';
+import { Lock, Zap, Radio, Key, RefreshCw, X, CheckCircle2, AlertTriangle, Globe, Terminal, Building2 } from 'lucide-react';
+import { useAuthStore } from '@/stores/authStore';
+import { useTenantStore } from '@/stores/tenantStore';
+import { tenantsService } from '@/services/tenants.service';
+import { Tenant } from '@/types/tenant.types';
 
 const getStatusBadgeClass = (status: NetworkDevice['status']): string => {
   const classes: Record<NetworkDevice['status'], string> = {
@@ -98,6 +102,13 @@ const getCachedOltDevices = (): NetworkDevice[] => {
 export default function OltPage() {
   const navigate = useNavigate();
   const toast = useToastContext();
+  const { user } = useAuthStore();
+  const { selectedTenant, setSelectedTenant } = useTenantStore();
+  const isSaas = user?.user_type === 'saas' || user?.role_code === 'saas_admin' || (user as any)?.role === 'saas_admin';
+  const [tenantsList, setTenantsList] = useState<Tenant[]>([]);
+  const [selectedTenantFilter, setSelectedTenantFilter] = useState<string>(() => {
+    return selectedTenant?.tenantId || 'all';
+  });
   const initialCached = getCachedOltDevices();
   const [devices, setDevices] = useState<NetworkDevice[]>(initialCached);
   const [isLoading, setIsLoading] = useState(initialCached.length === 0);
@@ -110,6 +121,22 @@ export default function OltPage() {
   const [openPingMenuId, setOpenPingMenuId] = useState<string | null>(null);
   const pingMenuRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const { setPingStatus } = usePingStatusStore();
+
+  useEffect(() => {
+    if (isSaas) {
+      tenantsService.getTenants().then((res) => {
+        if (res?.success && res.data) {
+          setTenantsList(res.data);
+        }
+      }).catch(() => {});
+    }
+  }, [isSaas]);
+
+  useEffect(() => {
+    if (isSaas && selectedTenant?.tenantId && selectedTenant.tenantId !== selectedTenantFilter) {
+      setSelectedTenantFilter(selectedTenant.tenantId);
+    }
+  }, [isSaas, selectedTenant?.tenantId]);
 
   const [formData, setFormData] = useState<CreateOltDevicePayload & {
     vendor?: string;
@@ -227,8 +254,8 @@ export default function OltPage() {
   };
 
   useEffect(() => {
-    loadDevices();
-  }, []);
+    loadDevices(selectedTenantFilter);
+  }, [selectedTenantFilter]);
 
   const deviceIds = useMemo(() => devices.map((d) => d.networkDeviceId), [devices]);
   const minInterval = useMemo(() => {
@@ -240,7 +267,7 @@ export default function OltPage() {
 
   usePingStatus(deviceIds, devices.length > 0, minInterval);
 
-  const loadDevices = async () => {
+  const loadDevices = async (tenantFilter?: string) => {
     if (devices.length === 0) {
       setIsLoading(true);
     } else {
@@ -248,7 +275,8 @@ export default function OltPage() {
     }
     setError(null);
     try {
-      const response = await networkService.getNetworkDevices('olt');
+      const activeFilter = tenantFilter !== undefined ? tenantFilter : selectedTenantFilter;
+      const response = await networkService.getNetworkDevices('olt', activeFilter);
       const list = response.data || [];
       setDevices(list);
       try {
@@ -282,9 +310,16 @@ export default function OltPage() {
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateForm(false)) return;
+
+    if (isSaas && !formData.tenantId) {
+      toast.error('Please select an ISP for this OLT');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       await networkService.createOltDevice({
+        tenantId: formData.tenantId,
         deviceCode: formData.deviceCode.trim(),
         deviceName: formData.deviceName.trim(),
         vendor: formData.vendor || 'vsol',
@@ -500,6 +535,10 @@ export default function OltPage() {
   };
 
   const resetForm = () => {
+    const defaultTenantId = selectedTenantFilter !== 'all' 
+      ? selectedTenantFilter 
+      : (selectedTenant?.tenantId || (tenantsList[0]?.tenantId || ''));
+
     setFormData({
       deviceCode: '',
       deviceName: '',
@@ -515,13 +554,14 @@ export default function OltPage() {
       apiUsername: 'admin',
       apiPassword: '',
       isProduction: true,
+      tenantId: isSaas ? defaultTenantId : undefined,
     });
     setFormErrors({});
     setBdcomMode('web');
     setTestResult(null);
     setIsTestingPing(false);
     setIsTestingLogin(false);
-    networkService.getNextDeviceCode().then((res) => {
+    networkService.getNextDeviceCode(isSaas ? defaultTenantId : undefined).then((res) => {
       if (res?.deviceCode) {
         setFormData((prev) => ({ ...prev, deviceCode: res.deviceCode }));
       }
@@ -565,6 +605,55 @@ export default function OltPage() {
         }
       />
 
+      {/* SaaS Admin ISP Filter Bar */}
+      {isSaas && (
+        <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-md rounded-2xl border border-slate-200/60 dark:border-slate-700/60 p-4 shadow-sm flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-teal-50 dark:bg-teal-900/40 text-teal-600 dark:text-teal-400 flex items-center justify-center">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">ISP Tenant Scope</h4>
+              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {selectedTenantFilter === 'all' 
+                  ? 'Showing OLTs across All ISPs' 
+                  : `Showing OLTs for: ${tenantsList.find(t => String(t.tenantId) === String(selectedTenantFilter))?.tenantName || selectedTenant?.name || 'Selected ISP'}`
+                }
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Filter ISP:</span>
+            <select
+              value={selectedTenantFilter}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedTenantFilter(val);
+                if (val !== 'all') {
+                  const matched = tenantsList.find(t => String(t.tenantId) === val);
+                  if (matched) {
+                    setSelectedTenant({
+                      tenantId: String(matched.tenantId),
+                      name: matched.tenantName,
+                      code: matched.tenantCode || '',
+                      domain: matched.tenantSlug || '',
+                    });
+                  }
+                }
+              }}
+              className="px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all cursor-pointer shadow-sm"
+            >
+              <option value="all">🌐 All ISPs (Global List)</option>
+              {tenantsList.map((t) => (
+                <option key={t.tenantId} value={String(t.tenantId)}>
+                  🏢 {t.tenantName} ({t.tenantCode || `ID: ${t.tenantId}`})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+
         {/* Add OLT Modal */}
         {showAddModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -597,6 +686,39 @@ export default function OltPage() {
               {/* Form Body */}
               <form onSubmit={handleAddSubmit} className="p-5 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* SaaS Admin: Select ISP */}
+                  {isSaas && (
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                        Assigned ISP / Tenant Organization <span className="text-red-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <select
+                          required
+                          value={formData.tenantId || ''}
+                          onChange={(e) => {
+                            const tid = e.target.value;
+                            setFormData((prev) => ({ ...prev, tenantId: tid }));
+                            networkService.getNextDeviceCode(tid).then((res) => {
+                              if (res?.deviceCode) {
+                                setFormData((prev) => ({ ...prev, deviceCode: res.deviceCode }));
+                              }
+                            }).catch(() => {});
+                          }}
+                          className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all cursor-pointer"
+                        >
+                          <option value="" disabled>-- Select ISP / Tenant Organization --</option>
+                          {tenantsList.map((t) => (
+                            <option key={t.tenantId} value={t.tenantId}>
+                              {t.tenantName} ({t.tenantCode || `ID: ${t.tenantId}`})
+                            </option>
+                          ))}
+                        </select>
+                        <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      </div>
+                    </div>
+                  )}
+
                   {/* Device ID */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
@@ -1359,6 +1481,14 @@ export default function OltPage() {
                           >
                             {device.deviceName}
                           </button>
+                          {device.tenantName && (
+                            <div className="mt-1">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-50 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800" title={`ISP: ${device.tenantName} (${device.tenantCode || device.tenantId})`}>
+                                <Building2 className="w-2.5 h-2.5 flex-shrink-0" />
+                                <span className="truncate max-w-[130px]">{device.tenantName}</span>
+                              </span>
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-4 text-xs">
                           <span className="font-semibold text-blue-600 dark:text-blue-400">{vendorLabel}</span>

@@ -21,6 +21,9 @@ export interface NetworkDevice {
   pingStatus: 'online' | 'auth_failed' | 'offline' | null;
   latencyMs: number | null;
   lastCheckedAt: string | null;
+  tenantId?: string | null;
+  tenantName?: string | null;
+  tenantCode?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -38,6 +41,7 @@ export interface CreateNetworkDevicePayload {
   vendor?: 'mikrotik';
   deviceType?: 'router';
   isProduction?: boolean;
+  tenantId?: string;
 }
 
 export interface CreateOltDevicePayload {
@@ -55,6 +59,7 @@ export interface CreateOltDevicePayload {
   apiUsername?: string;
   apiPassword?: string;
   isProduction?: boolean;
+  tenantId?: string;
 }
 
 export interface UpdateNetworkDevicePayload {

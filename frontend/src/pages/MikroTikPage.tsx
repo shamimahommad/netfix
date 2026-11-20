@@ -8,7 +8,11 @@ import { ActionDropdown } from '@/components/ui/ActionDropdown';
 import { usePingStatus } from '@/hooks/usePingStatus';
 import { usePingStatusStore } from '@/stores/pingStatusStore';
 import { PageHeader } from '@/components/common';
-import { Lock, Activity, Server, Cpu, RefreshCw, X, Users, Clock, AlertTriangle, CheckCircle2, Radio, Key } from 'lucide-react';
+import { Lock, Activity, Server, Cpu, RefreshCw, X, Users, Clock, AlertTriangle, CheckCircle2, Radio, Key, Building2 } from 'lucide-react';
+import { useAuthStore } from '@/stores/authStore';
+import { useTenantStore } from '@/stores/tenantStore';
+import { tenantsService } from '@/services/tenants.service';
+import { Tenant } from '@/types/tenant.types';
 
 const getStatusBadgeClass = (status: NetworkDevice['status']): string => {
   const classes: Record<NetworkDevice['status'], string> = {
@@ -88,6 +92,13 @@ PingStatusIndicator.displayName = 'PingStatusIndicator';
 export default function MikroTikPage() {
   const navigate = useNavigate();
   const toast = useToastContext();
+  const { user } = useAuthStore();
+  const { selectedTenant, setSelectedTenant } = useTenantStore();
+  const isSaas = user?.user_type === 'saas' || user?.role_code === 'saas_admin' || (user as any)?.role === 'saas_admin';
+  const [tenantsList, setTenantsList] = useState<Tenant[]>([]);
+  const [selectedTenantFilter, setSelectedTenantFilter] = useState<string>(() => {
+    return selectedTenant?.tenantId || 'all';
+  });
   const [devices, setDevices] = useState<NetworkDevice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -98,6 +109,22 @@ export default function MikroTikPage() {
   const [openPingMenuId, setOpenPingMenuId] = useState<string | null>(null);
   const pingMenuRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const { setPingStatus } = usePingStatusStore();
+
+  useEffect(() => {
+    if (isSaas) {
+      tenantsService.getTenants().then((res) => {
+        if (res?.success && res.data) {
+          setTenantsList(res.data);
+        }
+      }).catch(() => {});
+    }
+  }, [isSaas]);
+
+  useEffect(() => {
+    if (isSaas && selectedTenant?.tenantId && selectedTenant.tenantId !== selectedTenantFilter) {
+      setSelectedTenantFilter(selectedTenant.tenantId);
+    }
+  }, [isSaas, selectedTenant?.tenantId]);
   const [formData, setFormData] = useState<CreateNetworkDevicePayload>({
     deviceCode: '',
     deviceName: '',
@@ -339,8 +366,8 @@ export default function MikroTikPage() {
   }, []);
 
   useEffect(() => {
-    loadDevices();
-  }, []);
+    loadDevices(selectedTenantFilter);
+  }, [selectedTenantFilter]);
 
   // Use ping status hook for real-time updates (doesn't reload device list)
   const deviceIds = useMemo(() => devices.map((d) => d.networkDeviceId), [devices]);
@@ -353,12 +380,12 @@ export default function MikroTikPage() {
 
   usePingStatus(deviceIds, devices.length > 0, minInterval);
 
-
-  const loadDevices = async () => {
+  const loadDevices = async (tenantFilter?: string) => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await networkService.getNetworkDevices('mikrotik');
+      const activeFilter = tenantFilter !== undefined ? tenantFilter : selectedTenantFilter;
+      const response = await networkService.getNetworkDevices('mikrotik', activeFilter);
       setDevices(response.data || []);
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to load MikroTik devices';
@@ -413,6 +440,11 @@ export default function MikroTikPage() {
     e.preventDefault();
 
     if (!validateForm(false)) {
+      return;
+    }
+
+    if (isSaas && !formData.tenantId) {
+      toast.error('Please select an ISP for this router');
       return;
     }
 
@@ -788,6 +820,10 @@ export default function MikroTikPage() {
   };
 
   const resetForm = () => {
+    const defaultTenantId = selectedTenantFilter !== 'all' 
+      ? selectedTenantFilter 
+      : (selectedTenant?.tenantId || (tenantsList[0]?.tenantId || ''));
+
     setFormData({
       deviceCode: '',
       deviceName: '',
@@ -801,6 +837,7 @@ export default function MikroTikPage() {
       vendor: 'mikrotik',
       deviceType: 'router',
       isProduction: false,
+      tenantId: isSaas ? defaultTenantId : undefined,
     });
     setUseSsl(false);
     setConnMode('api');
@@ -808,7 +845,7 @@ export default function MikroTikPage() {
     setTestResult(null);
     setIsTestingPing(false);
     setIsTestingLogin(false);
-    networkService.getNextDeviceCode().then((res) => {
+    networkService.getNextDeviceCode(isSaas ? defaultTenantId : undefined).then((res) => {
       if (res?.deviceCode) {
         setFormData((prev) => ({ ...prev, deviceCode: res.deviceCode }));
       }
@@ -842,6 +879,55 @@ export default function MikroTikPage() {
           </button>
         }
       />
+
+      {/* SaaS Admin ISP Filter Bar */}
+      {isSaas && (
+        <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-md rounded-2xl border border-slate-200/60 dark:border-slate-700/60 p-4 shadow-sm flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">ISP Tenant Scope</h4>
+              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {selectedTenantFilter === 'all' 
+                  ? 'Showing routers across All ISPs' 
+                  : `Showing routers for: ${tenantsList.find(t => String(t.tenantId) === String(selectedTenantFilter))?.tenantName || selectedTenant?.name || 'Selected ISP'}`
+                }
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Filter ISP:</span>
+            <select
+              value={selectedTenantFilter}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedTenantFilter(val);
+                if (val !== 'all') {
+                  const matched = tenantsList.find(t => String(t.tenantId) === val);
+                  if (matched) {
+                    setSelectedTenant({
+                      tenantId: String(matched.tenantId),
+                      name: matched.tenantName,
+                      code: matched.tenantCode || '',
+                      domain: matched.tenantSlug || '',
+                    });
+                  }
+                }
+              }}
+              className="px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all cursor-pointer shadow-sm"
+            >
+              <option value="all">🌐 All ISPs (Global List)</option>
+              {tenantsList.map((t) => (
+                <option key={t.tenantId} value={String(t.tenantId)}>
+                  🏢 {t.tenantName} ({t.tenantCode || `ID: ${t.tenantId}`})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
 
         {/* Add Server Modal */}
         {showAddModal && (
@@ -878,6 +964,39 @@ export default function MikroTikPage() {
               {/* Form Body */}
               <form onSubmit={handleAddSubmit} className="p-5 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* SaaS Admin: Select ISP */}
+                  {isSaas && (
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                        Assigned ISP / Tenant Organization <span className="text-red-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <select
+                          required
+                          value={formData.tenantId || ''}
+                          onChange={(e) => {
+                            const tid = e.target.value;
+                            setFormData((prev) => ({ ...prev, tenantId: tid }));
+                            networkService.getNextDeviceCode(tid).then((res) => {
+                              if (res?.deviceCode) {
+                                setFormData((prev) => ({ ...prev, deviceCode: res.deviceCode }));
+                              }
+                            }).catch(() => {});
+                          }}
+                          className="w-full pl-9 pr-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all cursor-pointer"
+                        >
+                          <option value="" disabled>-- Select ISP / Tenant Organization --</option>
+                          {tenantsList.map((t) => (
+                            <option key={t.tenantId} value={t.tenantId}>
+                              {t.tenantName} ({t.tenantCode || `ID: ${t.tenantId}`})
+                            </option>
+                          ))}
+                        </select>
+                        <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      </div>
+                    </div>
+                  )}
+
                   {/* Device ID */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
@@ -1855,6 +1974,14 @@ export default function MikroTikPage() {
                           <span>{device.deviceName}</span>
                           <span className="opacity-0 group-hover:opacity-100 text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-normal transition-opacity">Stats</span>
                         </button>
+                        {device.tenantName && (
+                          <div className="mt-1">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800" title={`ISP: ${device.tenantName} (${device.tenantCode || device.tenantId})`}>
+                              <Building2 className="w-2.5 h-2.5 flex-shrink-0" />
+                              <span className="truncate max-w-[130px]">{device.tenantName}</span>
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className="px-3 py-4">
                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border ${getStatusBadgeClass(device.status)}`}>

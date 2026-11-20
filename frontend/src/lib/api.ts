@@ -44,9 +44,10 @@ api.interceptors.request.use(
     const isSaas = authUser?.user_type === 'saas' || authUser?.role_code === 'saas_admin';
     const isPublicTopup = (config.url || '').includes('public/topup');
 
-    // SaaS Super Admin: allow context switching via tenantStore
+    // SaaS Super Admin: allow context switching via tenantStore or explicit params
     if (isSaas) {
-      const tenantId = useTenantStore.getState().getTenantId();
+      const explicitTenantId = config.params?.tenant_id;
+      const tenantId = explicitTenantId !== undefined ? explicitTenantId : useTenantStore.getState().getTenantId();
       if (tenantId && !isPublicTopup) {
         config.params = { ...(config.params || {}), tenant_id: tenantId };
         if (config.headers) {

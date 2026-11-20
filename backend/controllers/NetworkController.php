@@ -29,27 +29,40 @@ class NetworkController {
         $where = [];
         $params = [];
 
+        // Support explicit tenant_id query parameter (even for saas_admin)
+        if (isset($_GET['tenant_id'])) {
+            if ($_GET['tenant_id'] === 'all') {
+                $tenantId = null;
+            } elseif (!empty($_GET['tenant_id'])) {
+                $tenantId = (string)$_GET['tenant_id'];
+            }
+        }
+
         if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
             if ($tenantId === null) {
                 Response::json(['success' => true, 'data' => []]);
                 return;
             }
-            $where[] = "tenant_id = :tid";
+            $where[] = "nd.tenant_id = :tid";
             $params['tid'] = $tenantId;
         }
 
         if (!empty($_GET['type'])) {
             $type = $_GET['type'];
             if ($type === 'mikrotik') {
-                $where[] = "(vendor = 'mikrotik' OR device_type = 'router')";
+                $where[] = "(nd.vendor = 'mikrotik' OR nd.device_type = 'router')";
             } elseif ($type === 'olt') {
-                $where[] = "(device_type = 'olt' OR vendor = 'olt' OR vendor IN ('vsol', 'bdcom', 'huawei', 'zte', 'cdata', 'itlink', 'it-link', 'itcom', 'syrotech', 'focuscom', 'btpon', 'tbs', 'ip-com', 'atop'))";
+                $where[] = "(nd.device_type = 'olt' OR nd.vendor = 'olt' OR nd.vendor IN ('vsol', 'bdcom', 'huawei', 'zte', 'cdata', 'itlink', 'it-link', 'itcom', 'syrotech', 'focuscom', 'btpon', 'tbs', 'ip-com', 'atop'))";
             }
         }
 
         $whereSql = !empty($where) ? "WHERE " . implode(' AND ', $where) : "";
 
-        $stmt = $db->prepare("SELECT * FROM network_devices {$whereSql} ORDER BY network_device_id DESC");
+        $stmt = $db->prepare("SELECT nd.*, t.tenant_name, t.tenant_code 
+                              FROM network_devices nd 
+                              LEFT JOIN tenants t ON t.tenant_id = nd.tenant_id 
+                              {$whereSql} 
+                              ORDER BY nd.network_device_id DESC");
         $stmt->execute($params);
         $rows = $stmt->fetchAll();
 
@@ -78,6 +91,9 @@ class NetworkController {
                 'totalPonPorts' => (int)($r['total_pon_ports'] ?? 8),
                 'lastSyncAt' => $r['last_sync_at'],
                 'createdAt' => $r['created_at'],
+                'tenantId' => (string)$r['tenant_id'],
+                'tenantName' => $r['tenant_name'] ?? null,
+                'tenantCode' => $r['tenant_code'] ?? null,
                 // Real-time calculated status
                 'pingStatus' => ($r['status'] === 'active' || $r['status'] === 'online') ? 'online' : ($r['status'] === 'auth_failed' ? 'auth_failed' : 'offline'),
                 'latencyMs' => ($r['status'] === 'active' || $r['status'] === 'online') ? 12 : null,
@@ -214,9 +230,12 @@ class NetworkController {
     public static function nextCode(): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
+        if ($user['role'] === 'saas_admin' && !empty($_GET['tenant_id']) && $_GET['tenant_id'] !== 'all') {
+            $tenantId = (string)$_GET['tenant_id'];
+        }
         $db = Database::getConnection();
 
-        $code = TenantSequenceService::peekNextCode($db, (string)$tenantId, 'device', 6);
+        $code = TenantSequenceService::peekNextCode($db, (string)($tenantId ?? 1), 'device', 6);
         Response::json(['deviceCode' => $code]);
     }
 
@@ -225,11 +244,25 @@ class NetworkController {
         $tenantId = AuthMiddleware::getTenantId();
         $data = $overrideData ?? (json_decode(file_get_contents('php://input'), true) ?: []);
 
+        if ($user['role'] === 'saas_admin') {
+            if (!empty($data['tenantId'])) {
+                $tenantId = (string)$data['tenantId'];
+            } elseif (!empty($data['tenant_id'])) {
+                $tenantId = (string)$data['tenant_id'];
+            }
+        }
+
+        if (empty($tenantId)) {
+            Response::error('Please select an ISP for this device', 400);
+            return;
+        }
+
         $deviceName = trim($data['deviceName'] ?? $data['name'] ?? '');
         $ip = trim($data['managementIp'] ?? $data['ipAddress'] ?? '192.168.88.1');
 
         if (empty($deviceName)) {
             Response::error('Device name is required', 400);
+            return;
         }
 
         $db = Database::getConnection();
