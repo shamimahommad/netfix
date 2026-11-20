@@ -426,13 +426,21 @@ class PaymentGatewayService {
     // 3. SurjoPay (Shurjopay PGW v2)
     // ==========================================
 
-    public static function surjopayBaseUrl(bool $isSandbox): string {
+    public static function surjopayBaseUrl(bool $isSandbox, ?string $customContextRoot = null): string {
+        if (!empty($customContextRoot)) {
+            $root = rtrim(trim($customContextRoot), '/');
+            if (strpos($root, '/api') !== false) {
+                return $root;
+            }
+            return $root . '/api';
+        }
         return $isSandbox ? 'https://sandbox.shurjopayment.com/api' : 'https://engine.shurjopayment.com/api';
     }
 
     public static function surjopayGetToken(array $settings): array {
         $isSandbox = self::isSandboxMode($settings);
-        $baseUrl = self::surjopayBaseUrl($isSandbox);
+        $customContextRoot = $settings['api_context_root'] ?? ($settings['credentials']['apiContextRoot'] ?? null);
+        $baseUrl = self::surjopayBaseUrl($isSandbox, $customContextRoot);
         $url = $baseUrl . '/get_token';
 
         $username = trim($settings['username'] ?? '');
@@ -460,6 +468,8 @@ class PaymentGatewayService {
             return [
                 'success' => true,
                 'token' => $res['data']['token'],
+                'store_id' => $res['data']['store_id'] ?? null,
+                'execute_url' => $res['data']['execute_url'] ?? null,
                 'data' => $res['data'],
             ];
         }
@@ -493,9 +503,11 @@ class PaymentGatewayService {
         }
 
         $token = $tokenRes['token'];
+        $storeId = $tokenRes['store_id'] ?? ($tokenRes['data']['store_id'] ?? null);
         $isSandbox = self::isSandboxMode($settings);
-        $baseUrl = self::surjopayBaseUrl($isSandbox);
-        $url = $baseUrl . '/secret-pay';
+        $customContextRoot = $settings['api_context_root'] ?? ($settings['credentials']['apiContextRoot'] ?? null);
+        $baseUrl = self::surjopayBaseUrl($isSandbox, $customContextRoot);
+        $url = !empty($tokenRes['execute_url']) ? $tokenRes['execute_url'] : ($baseUrl . '/secret-pay');
 
         $prefix = !empty($settings['app_key']) ? trim($settings['app_key']) : 'NOK';
 
@@ -522,19 +534,36 @@ class PaymentGatewayService {
             'client_ip' => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
         ];
 
+        if (!empty($storeId)) {
+            $payload['store_id'] = $storeId;
+        }
+
         $res = self::httpRequest($url, 'POST', $payload, $headers);
         if ($res['data'] && !empty($res['data']['checkout_url'])) {
             return [
                 'success' => true,
                 'redirectURL' => $res['data']['checkout_url'],
-                'order_id' => $orderId,
+                'order_id' => $res['data']['sp_order_id'] ?? $orderId,
                 'data' => $res['data'],
             ];
         }
 
+        $errMsg = $res['data']['message'] ?? '';
+        if (is_array($res['data'])) {
+            foreach ($res['data'] as $k => $v) {
+                if (is_array($v) && !empty($v[0]) && is_string($v[0])) {
+                    $errMsg = $v[0];
+                    break;
+                }
+            }
+        }
+        if (empty($errMsg)) {
+            $errMsg = $res['error'] ?: 'SurjoPay checkout generation failed';
+        }
+
         return [
             'success' => false,
-            'message' => $res['data']['message'] ?? ($res['error'] ?: 'SurjoPay checkout generation failed'),
+            'message' => $errMsg,
             'raw' => $res,
         ];
     }
@@ -547,7 +576,8 @@ class PaymentGatewayService {
 
         $token = $tokenRes['token'];
         $isSandbox = self::isSandboxMode($settings);
-        $baseUrl = self::surjopayBaseUrl($isSandbox);
+        $customContextRoot = $settings['api_context_root'] ?? ($settings['credentials']['apiContextRoot'] ?? null);
+        $baseUrl = self::surjopayBaseUrl($isSandbox, $customContextRoot);
         $url = $baseUrl . '/verification';
 
         $headers = [
@@ -565,7 +595,7 @@ class PaymentGatewayService {
         $spCode = (string)($item['sp_code'] ?? '');
         $statusMsg = strtolower($item['sp_massage'] ?? ($item['bank_status'] ?? ''));
 
-        if ($spCode === '1000' || strpos($statusMsg, 'success') !== false) {
+        if ($spCode === '1000' || $spCode === '200' || strpos($statusMsg, 'success') !== false) {
             return [
                 'success' => true,
                 'trxID' => $item['bank_trx_id'] ?? ($item['sp_trx_id'] ?? $orderId),
@@ -577,7 +607,7 @@ class PaymentGatewayService {
 
         return [
             'success' => false,
-            'message' => $item['sp_massage'] ?? 'SurjoPay order verification failed',
+            'message' => $item['sp_massage'] ?? ($res['error'] ?: 'SurjoPay order verification failed'),
             'data' => $item,
         ];
     }
@@ -689,19 +719,20 @@ class PaymentGatewayService {
                 $gatewayError = $sslRes['message'] ?? 'SSLCommerz payment initialization failed';
             }
         } else if ($gw === 'surjopay') {
-            $prefix = !empty($settings['app_key']) ? $settings['app_key'] : 'NOK';
+            $prefix = !empty($settings['app_key']) ? trim($settings['app_key']) : 'NOK';
             $spOrderId = $prefix . date('ymdHis') . rand(10, 99);
+            $delim = strpos($callbackUrl, '?') !== false ? '&' : '?';
             $spRes = self::surjopayCreatePayment(
                 $settings,
                 $amount,
                 $spOrderId,
                 $custInfo,
-                $callbackUrl . '?status=success&paymentID=' . $spOrderId,
-                $callbackUrl . '?status=cancel&paymentID=' . $spOrderId
+                $callbackUrl . $delim . 'status=success&paymentID=' . $spOrderId,
+                $callbackUrl . $delim . 'status=cancel&paymentID=' . $spOrderId
             );
             if ($spRes['success']) {
                 $redirectUrl = $spRes['redirectURL'];
-                $paymentId = $spOrderId;
+                $paymentId = $spRes['order_id'] ?? $spOrderId;
             } else {
                 $gatewayError = $spRes['message'] ?? 'Shurjopay order creation failed';
             }
