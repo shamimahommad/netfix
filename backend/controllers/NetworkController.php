@@ -370,7 +370,7 @@ class NetworkController {
      * Measure real-time reachability using direct TCP socket connection on IP:PORT.
      * Prevents false-positive ICMP replies when management IP is hosted on upstream gateway router.
      */
-    public static function probeDevicePort(string $ip, array $portsToTry, float $timeout = 1.2): array {
+    public static function probeDevicePort(string $ip, array $portsToTry, float $timeout = 2.0): array {
         $ip = trim($ip);
         if (empty($ip)) {
             return [
@@ -408,6 +408,27 @@ class NetworkController {
             if ($errstr) $lastError = $errstr;
         }
 
+        // If TCP port probe failed, test ICMP Ping to give actionable diagnostic
+        $icmpAlive = false;
+        $icmpLatency = null;
+        if (function_exists('exec')) {
+            $isWin = PHP_OS_FAMILY === 'Windows';
+            $pingCmd = $isWin ? "ping -n 1 -w 1500 " . escapeshellarg($ip) : "ping -c 1 -W 2 " . escapeshellarg($ip) . " 2>&1";
+            @exec($pingCmd, $pingOutput, $pingCode);
+            if ($pingCode === 0) {
+                $icmpAlive = true;
+                $outputStr = implode(" ", $pingOutput ?? []);
+                if (preg_match('/time[=<](\d+(?:\.\d+)?)\s*ms/i', $outputStr, $m)) {
+                    $icmpLatency = (float)$m[1];
+                }
+            }
+        }
+
+        if ($icmpAlive) {
+            $portsStr = implode(', ', array_filter($portsToTry));
+            $lastError = "ICMP Ping replied ({$icmpLatency}ms), but TCP port [{$portsStr}] is unreachable/blocked. Check MikroTik /ip service or firewall rules.";
+        }
+
         return [
             'online' => false,
             'status' => 'offline',
@@ -415,6 +436,7 @@ class NetworkController {
             'port' => $portsToTry[0] ?? null,
             'error' => $lastError,
             'method' => 'tcp_socket',
+            'icmp_online' => $icmpAlive,
         ];
     }
 
@@ -482,7 +504,7 @@ class NetworkController {
 
         $ports = self::getDeviceTargetPorts($device);
         $startTime = microtime(true);
-        $probe = self::probeDevicePort($ip, $ports, 0.6);
+        $probe = self::probeDevicePort($ip, $ports, 2.0);
         $execTime = round(microtime(true) - $startTime, 3);
 
         $status = $probe['status'];
@@ -493,7 +515,7 @@ class NetworkController {
         if ($probe['online'] && strtolower($device['device_type'] ?? '') === 'router' && !empty($device['api_username'])) {
             try {
                 require_once __DIR__ . '/../lib/MikrotikSyncService.php';
-                $api = MikrotikSyncService::connect($device, 2);
+                $api = MikrotikSyncService::connect($device, 4, true);
                 if (!$api) {
                     $status = 'auth_failed';
                     $errorMessage = 'TCP port connected, but authentication failed (invalid credentials or service disabled)';
@@ -1125,8 +1147,8 @@ class NetworkController {
             $port = (int)($ports[0] ?? 80);
             $startTimes[$did] = microtime(true);
 
-            $ctx = stream_context_create(['socket' => ['connect_timeout' => 0.4]]);
-            $s = @stream_socket_client('tcp://' . $ip . ':' . $port, $errno, $errstr, 0.4, STREAM_CLIENT_ASYNC_CONNECT, $ctx);
+            $ctx = stream_context_create(['socket' => ['connect_timeout' => 1.2]]);
+            $s = @stream_socket_client('tcp://' . $ip . ':' . $port, $errno, $errstr, 1.2, STREAM_CLIENT_ASYNC_CONNECT, $ctx);
             if ($s) {
                 stream_set_blocking($s, false);
                 $sockets[$did] = ['socket' => $s, 'port' => $port, 'device' => $d];
@@ -1141,7 +1163,7 @@ class NetworkController {
             }
         }
 
-        // Parallel non-blocking socket wait (max 400ms for ALL devices combined)
+        // Parallel non-blocking socket wait (max 1.2s for ALL devices combined)
         if (!empty($sockets)) {
             $write = [];
             foreach ($sockets as $info) {
@@ -1149,7 +1171,7 @@ class NetworkController {
             }
             $read = null;
             $except = null;
-            @stream_select($read, $write, $except, 0, 400000);
+            @stream_select($read, $write, $except, 1, 200000);
 
             foreach ($sockets as $did => $info) {
                 $s = $info['socket'];
@@ -1172,11 +1194,11 @@ class NetworkController {
                     $status = 'auth_failed';
                 }
 
-                $newDbStatus = ($status === 'online') ? 'active' : (($status === 'auth_failed') ? 'auth_failed' : 'offline');
-                if ($d['status'] !== $newDbStatus) {
+                // If device responded online, ensure DB status is active
+                if ($isOnline && $d['status'] !== 'active') {
                     try {
-                        $u = $db->prepare("UPDATE network_devices SET status = :st WHERE network_device_id = :did");
-                        $u->execute(['st' => $newDbStatus, 'did' => $d['network_device_id']]);
+                        $u = $db->prepare("UPDATE network_devices SET status = 'active' WHERE network_device_id = :did");
+                        $u->execute(['did' => $d['network_device_id']]);
                     } catch (\Throwable $e) {}
                 }
 

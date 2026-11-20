@@ -2188,6 +2188,15 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         $routerId = !empty($_GET['router_id']) ? (int)$_GET['router_id'] : null;
         $result = MikrotikSyncService::syncAllActiveSessions($db, $tenantId, $routerId);
 
+        if ($result['totalActive'] === 0 && !empty($result['errors'])) {
+            Response::json([
+                'success' => false,
+                'message' => implode('; ', $result['errors']),
+                'data' => $result,
+            ], 400);
+            return;
+        }
+
         Response::json([
             'success' => true,
             'message' => "Synchronized {$result['totalActive']} active sessions from connected routers ({$result['totalOnlineUpdated']} online).",

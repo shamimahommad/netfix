@@ -111,13 +111,15 @@ class MikrotikSyncService {
         $port = (int)($router['management_port'] ?: 8728);
         $webPort = (int)($router['web_port'] ?? 0);
 
-        // 2. Pre-flight Fast TCP Check (max 0.35s socket connect)
-        // If port doesn't complete handshake in 0.35s, device is offline.
-        // Prevents multi-second blocking of the PHP server thread.
+        $envTimeout = (int)(getenv('MIKROTIK_TIMEOUT') ?: 3);
+        $effectiveTimeout = max(2, min(max($timeout, $envTimeout), 10));
+
+        // 2. Pre-flight TCP Check (allow up to 2.0s for WAN round-trip)
         $portsToTry = array_unique(array_filter([$port, $webPort]));
         $reachable = false;
+        $preflightTimeout = max(1.5, min(2.5, (float)$effectiveTimeout));
         foreach ($portsToTry as $p) {
-            $fp = @fsockopen($ip, $p, $errno, $errstr, 0.35);
+            $fp = @fsockopen($ip, $p, $errno, $errstr, $preflightTimeout);
             if ($fp) {
                 fclose($fp);
                 $reachable = true;
@@ -136,8 +138,6 @@ class MikrotikSyncService {
         if ($routerId > 0 && file_exists($offlineFile)) {
             @unlink($offlineFile);
         }
-
-        $effectiveTimeout = max(1, min($timeout, 2));
 
         // Check if REST API is requested or indicated by port
         $isRest = (($router['api_type'] ?? '') === 'rest' || in_array($port, [80, 443, 8080, 50000]) || in_array($webPort, [80, 443, 8080, 50000]) || ($webPort > 0 && $port === $webPort));
@@ -1138,7 +1138,7 @@ class MikrotikSyncService {
      * Completes in < 1 second for thousands of sessions.
      */
     public static function syncAllActiveSessions(PDO $db, ?int $tenantId = null, ?int $routerId = null): array {
-        $where = ["(device_type = 'router' OR vendor = 'mikrotik') AND status = 'active'"];
+        $where = ["(device_type = 'router' OR vendor = 'mikrotik') AND status NOT IN ('inactive', 'decommissioned')"];
         $params = [];
         if ($tenantId !== null) {
             $where[] = "tenant_id = :tid";
@@ -1160,9 +1160,10 @@ class MikrotikSyncService {
 
         foreach ($routers as $router) {
             $rId = (int)$router['network_device_id'];
-            $api = self::connect($router, 4);
+            $api = self::connect($router, 5, true);
             if (!$api) {
-                $errors[] = "Could not connect to router {$router['device_name']} ({$router['management_ip']})";
+                $port = $router['management_port'] ?: 8728;
+                $errors[] = "Could not connect to router {$router['device_name']} ({$router['management_ip']}:{$port})";
                 continue;
             }
 
@@ -1278,6 +1279,12 @@ class MikrotikSyncService {
                 }
 
                 $db->commit();
+
+                // Automatically mark router active and stamp last_sync_at on successful sync
+                try {
+                    $upDev = $db->prepare("UPDATE network_devices SET status = 'active', last_sync_at = NOW() WHERE network_device_id = :did");
+                    $upDev->execute(['did' => $rId]);
+                } catch (\Throwable $t) {}
             } catch (\Throwable $e) {
                 if ($db->inTransaction()) {
                     $db->rollBack();
