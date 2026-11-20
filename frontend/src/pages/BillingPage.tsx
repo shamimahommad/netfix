@@ -747,12 +747,31 @@ export default function BillingPage() {
     return `৳${Math.round(amount).toLocaleString('en-BD', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   };
 
-  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked) {
-      setSelectedCustomers(new Set(paginatedCustomers.map(c => c.customer_id || c.customerId || '')));
+  const isAllPageSelected = paginatedCustomers.length > 0 && paginatedCustomers.every((c: any) => selectedCustomers.has(String(c.customer_id ?? c.customerId ?? '')));
+
+  const handleSelectAll = (checkedOrEvent?: boolean | React.ChangeEvent<HTMLInputElement>) => {
+    let shouldSelect: boolean;
+    if (typeof checkedOrEvent === 'boolean') {
+      shouldSelect = checkedOrEvent;
+    } else if (checkedOrEvent && typeof checkedOrEvent === 'object' && 'target' in checkedOrEvent) {
+      shouldSelect = Boolean(checkedOrEvent.target?.checked);
     } else {
-      setSelectedCustomers(new Set());
+      shouldSelect = !isAllPageSelected;
     }
+
+    const next = new Set(selectedCustomers);
+    if (shouldSelect) {
+      paginatedCustomers.forEach((c: any) => {
+        const id = String(c.customer_id ?? c.customerId ?? '');
+        if (id) next.add(id);
+      });
+    } else {
+      paginatedCustomers.forEach((c: any) => {
+        const id = String(c.customer_id ?? c.customerId ?? '');
+        if (id) next.delete(id);
+      });
+    }
+    setSelectedCustomers(next);
   };
 
   const handleSelectCustomer = (customerId: string) => {
@@ -1255,9 +1274,9 @@ export default function BillingPage() {
                   <tr>
                     <th className="px-3 py-3 text-left" style={{ width: '48px' }}>
                       <ModernCheckbox
-                        checked={paginatedCustomers.length > 0 && paginatedCustomers.every((c: any) => selectedCustomers.has(String(c.customer_id ?? c.customerId ?? '')))}
-                        indeterminate={paginatedCustomers.some((c: any) => selectedCustomers.has(String(c.customer_id ?? c.customerId ?? ''))) && !paginatedCustomers.every((c: any) => selectedCustomers.has(String(c.customer_id ?? c.customerId ?? '')))}
-                        onChange={handleSelectAll}
+                        checked={isAllPageSelected}
+                        indeterminate={paginatedCustomers.some((c: any) => selectedCustomers.has(String(c.customer_id ?? c.customerId ?? ''))) && !isAllPageSelected}
+                        onChange={(checked) => handleSelectAll(checked)}
                         title="Select all on this page"
                       />
                     </th>

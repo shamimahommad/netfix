@@ -205,20 +205,32 @@ export default function CustomersListPage() {
     return `৳${Number(amount).toLocaleString('en-BD', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   };
 
-  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked) {
-      setSelectedCustomers(new Set(customers.map(c => c.customer_id || c.customerId || '')));
+  const isAllSelected = customers.length > 0 && customers.every(c => selectedCustomers.has(String(c.customer_id ?? c.customerId ?? '')));
+
+  const handleSelectAll = (checkedOrEvent?: boolean | React.ChangeEvent<HTMLInputElement>) => {
+    let shouldSelect: boolean;
+    if (typeof checkedOrEvent === 'boolean') {
+      shouldSelect = checkedOrEvent;
+    } else if (checkedOrEvent && typeof checkedOrEvent === 'object' && 'target' in checkedOrEvent) {
+      shouldSelect = Boolean(checkedOrEvent.target?.checked);
+    } else {
+      shouldSelect = !isAllSelected;
+    }
+
+    if (shouldSelect) {
+      setSelectedCustomers(new Set(customers.map(c => String(c.customer_id ?? c.customerId ?? ''))));
     } else {
       setSelectedCustomers(new Set());
     }
   };
 
-  const handleSelectCustomer = (customerId: string) => {
+  const handleSelectCustomer = (customerId: string | number) => {
+    const id = String(customerId);
     const newSelected = new Set(selectedCustomers);
-    if (newSelected.has(customerId)) {
-      newSelected.delete(customerId);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
     } else {
-      newSelected.add(customerId);
+      newSelected.add(id);
     }
     setSelectedCustomers(newSelected);
   };
@@ -864,9 +876,9 @@ export default function CustomersListPage() {
                   <tr>
                     <th className="px-4 py-3 text-left" style={{ width: '40px' }}>
                       <ModernCheckbox
-                        checked={selectedCustomers.size === customers.length && customers.length > 0}
-                        indeterminate={selectedCustomers.size > 0 && selectedCustomers.size < customers.length}
-                        onChange={handleSelectAll}
+                        checked={isAllSelected}
+                        indeterminate={selectedCustomers.size > 0 && !isAllSelected}
+                        onChange={(checked) => handleSelectAll(checked)}
                         title="Select all customers"
                       />
                     </th>
@@ -886,7 +898,7 @@ export default function CustomersListPage() {
                 </thead>
                 <tbody className="bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
                   {customers.map((customer) => {
-                    const customerId = customer.customer_id || customer.customerId || '';
+                    const customerId = String(customer.customer_id ?? customer.customerId ?? '');
                     const customerCode = customer.customer_code || customer.customerCode || '';
                     const fullName = customer.full_name || customer.fullName || '—';
                     const phone = customer.phone || customer.mobile || '—';

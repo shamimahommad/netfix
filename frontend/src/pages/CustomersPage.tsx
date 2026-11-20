@@ -988,20 +988,40 @@ export default function CustomersPage() {
   const totalAdvance = allSortedCustomers.filter(c => (c.balance ?? 0) > 0).reduce((sum, c) => sum + (c.balance ?? 0), 0);
   const totalDue = allSortedCustomers.filter(c => (c.balance ?? 0) < 0).reduce((sum, c) => sum + Math.abs(c.balance ?? 0), 0);
 
-  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked) {
-      setSelectedCustomers(new Set(paginatedCustomers.map(c => c.customer_id || c.customerId || '')));
+  const isAllPageSelected = paginatedCustomers.length > 0 && paginatedCustomers.every(c => selectedCustomers.has(String(c.customer_id ?? c.customerId ?? '')));
+
+  const handleSelectAll = (checkedOrEvent?: boolean | React.ChangeEvent<HTMLInputElement>) => {
+    let shouldSelect: boolean;
+    if (typeof checkedOrEvent === 'boolean') {
+      shouldSelect = checkedOrEvent;
+    } else if (checkedOrEvent && typeof checkedOrEvent === 'object' && 'target' in checkedOrEvent) {
+      shouldSelect = Boolean(checkedOrEvent.target?.checked);
     } else {
-      setSelectedCustomers(new Set());
+      shouldSelect = !isAllPageSelected;
     }
+
+    const next = new Set(selectedCustomers);
+    if (shouldSelect) {
+      paginatedCustomers.forEach(c => {
+        const id = String(c.customer_id ?? c.customerId ?? '');
+        if (id) next.add(id);
+      });
+    } else {
+      paginatedCustomers.forEach(c => {
+        const id = String(c.customer_id ?? c.customerId ?? '');
+        if (id) next.delete(id);
+      });
+    }
+    setSelectedCustomers(next);
   };
 
-  const handleSelectCustomer = (customerId: string) => {
+  const handleSelectCustomer = (customerId: string | number) => {
+    const id = String(customerId);
     const newSelected = new Set(selectedCustomers);
-    if (newSelected.has(customerId)) {
-      newSelected.delete(customerId);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
     } else {
-      newSelected.add(customerId);
+      newSelected.add(id);
     }
     setSelectedCustomers(newSelected);
   };
@@ -1736,9 +1756,9 @@ export default function CustomersPage() {
                   <tr>
                     <th className="px-2 py-2 text-left" style={{ width: '48px' }}>
                       <ModernCheckbox
-                        checked={paginatedCustomers.length > 0 && paginatedCustomers.every(c => selectedCustomers.has(c.customer_id || c.customerId || ''))}
-                        indeterminate={paginatedCustomers.some(c => selectedCustomers.has(c.customer_id || c.customerId || '')) && !paginatedCustomers.every(c => selectedCustomers.has(c.customer_id || c.customerId || ''))}
-                        onChange={handleSelectAll}
+                        checked={isAllPageSelected}
+                        indeterminate={paginatedCustomers.some(c => selectedCustomers.has(String(c.customer_id ?? c.customerId ?? ''))) && !isAllPageSelected}
+                        onChange={(checked) => handleSelectAll(checked)}
                         title="Select all on this page"
                       />
                     </th>
@@ -1951,7 +1971,7 @@ export default function CustomersPage() {
                     </tr>
                   ) : (
                     paginatedCustomers.map((customer) => {
-                    const customerId = customer.customer_id || customer.customerId || '';
+                    const customerId = String(customer.customer_id ?? customer.customerId ?? '');
                     const customerCode = customer.customer_code || customer.customerCode || '';
                     const displayId = formatCustomerIdDisplay(customerCode);
                     const fullName = customer.full_name || customer.fullName || '—';
@@ -2335,9 +2355,9 @@ export default function CustomersPage() {
                       <tr>
                         <th className="px-2 py-2 text-left" style={{ width: '48px' }}>
                           <ModernCheckbox
-                            checked={paginatedCustomers.length > 0 && paginatedCustomers.every(c => selectedCustomers.has(c.customer_id || c.customerId || ''))}
-                            indeterminate={paginatedCustomers.some(c => selectedCustomers.has(c.customer_id || c.customerId || '')) && !paginatedCustomers.every(c => selectedCustomers.has(c.customer_id || c.customerId || ''))}
-                            onChange={handleSelectAll}
+                            checked={isAllPageSelected}
+                            indeterminate={paginatedCustomers.some(c => selectedCustomers.has(String(c.customer_id ?? c.customerId ?? ''))) && !isAllPageSelected}
+                            onChange={(checked) => handleSelectAll(checked)}
                             title="Select all on this page"
                           />
                         </th>
@@ -2550,7 +2570,7 @@ export default function CustomersPage() {
                         </tr>
                       ) : (
                         paginatedCustomers.map((customer) => {
-                        const customerId = customer.customer_id || customer.customerId || '';
+                        const customerId = String(customer.customer_id ?? customer.customerId ?? '');
                         const customerCode = customer.customer_code || customer.customerCode || '';
                         const displayId = formatCustomerIdDisplay(customerCode);
                         const fullName = customer.full_name || customer.fullName || '—';
