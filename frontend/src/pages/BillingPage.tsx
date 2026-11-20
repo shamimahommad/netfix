@@ -747,33 +747,6 @@ export default function BillingPage() {
     return `৳${Math.round(amount).toLocaleString('en-BD', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   };
 
-  const isAllPageSelected = paginatedCustomers.length > 0 && paginatedCustomers.every((c: any) => selectedCustomers.has(String(c.customer_id ?? c.customerId ?? '')));
-
-  const handleSelectAll = (checkedOrEvent?: boolean | React.ChangeEvent<HTMLInputElement>) => {
-    let shouldSelect: boolean;
-    if (typeof checkedOrEvent === 'boolean') {
-      shouldSelect = checkedOrEvent;
-    } else if (checkedOrEvent && typeof checkedOrEvent === 'object' && 'target' in checkedOrEvent) {
-      shouldSelect = Boolean(checkedOrEvent.target?.checked);
-    } else {
-      shouldSelect = !isAllPageSelected;
-    }
-
-    const next = new Set(selectedCustomers);
-    if (shouldSelect) {
-      paginatedCustomers.forEach((c: any) => {
-        const id = String(c.customer_id ?? c.customerId ?? '');
-        if (id) next.add(id);
-      });
-    } else {
-      paginatedCustomers.forEach((c: any) => {
-        const id = String(c.customer_id ?? c.customerId ?? '');
-        if (id) next.delete(id);
-      });
-    }
-    setSelectedCustomers(next);
-  };
-
   const handleSelectCustomer = (customerId: string) => {
     const newSelected = new Set(selectedCustomers);
     if (newSelected.has(customerId)) {
@@ -941,6 +914,33 @@ export default function BillingPage() {
   const startIndex = (validCurrentPage - 1) * pageSize;
   const endIndex = Math.min(startIndex + pageSize, totalEntries);
   const paginatedCustomers = customers.slice(startIndex, endIndex);
+
+  const isAllPageSelected = paginatedCustomers.length > 0 && paginatedCustomers.every((c: any) => selectedCustomers.has(String(c.customer_id ?? c.customerId ?? '')));
+
+  const handleSelectAll = (checkedOrEvent?: boolean | React.ChangeEvent<HTMLInputElement>) => {
+    let shouldSelect: boolean;
+    if (typeof checkedOrEvent === 'boolean') {
+      shouldSelect = checkedOrEvent;
+    } else if (checkedOrEvent && typeof checkedOrEvent === 'object' && 'target' in checkedOrEvent) {
+      shouldSelect = Boolean(checkedOrEvent.target?.checked);
+    } else {
+      shouldSelect = !isAllPageSelected;
+    }
+
+    const next = new Set(selectedCustomers);
+    if (shouldSelect) {
+      paginatedCustomers.forEach((c: any) => {
+        const id = String(c.customer_id ?? c.customerId ?? '');
+        if (id) next.add(id);
+      });
+    } else {
+      paginatedCustomers.forEach((c: any) => {
+        const id = String(c.customer_id ?? c.customerId ?? '');
+        if (id) next.delete(id);
+      });
+    }
+    setSelectedCustomers(next);
+  };
 
   const startEntryDisplay = totalEntries === 0 ? 0 : startIndex + 1;
   const endEntryDisplay = endIndex;
