@@ -863,6 +863,21 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                     return;
                 }
 
+                // If caller is Reseller/Agent, ensure package is assigned to them
+                require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+                $callerLevel = HierarchySecurityService::getHierarchyLevel($user['role'] ?? '');
+                if ($callerLevel > 0) {
+                    $allowedPkg = (int)$db->query("SELECT (
+                        (SELECT COUNT(*) FROM tier_packages WHERE user_id = " . (int)$user['user_id'] . " AND package_id = " . (int)$packageId . " AND is_allowed = 1) +
+                        (SELECT COUNT(*) FROM reseller_plan_permission WHERE user_id = " . (int)$user['user_id'] . " AND access_profile_id = " . (int)$packageId . " AND is_allowed = 1)
+                    )")->fetchColumn();
+                    if ($allowedPkg <= 0) {
+                        $db->rollBack();
+                        Response::error('Access Denied: The selected package has not been assigned to your account.', 403);
+                        return;
+                    }
+                }
+
                 $ownerId = $data['ownerId'] ?? $user['user_id'];
                 if (!empty($ownerId) && (string)$ownerId !== (string)$user['user_id']) {
                     $ownerCheck = $db->prepare("SELECT user_id FROM users WHERE user_id = :oid AND tenant_id = :tid LIMIT 1");

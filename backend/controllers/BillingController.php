@@ -247,6 +247,25 @@ class BillingController {
             $stmtPkg = $db->prepare("SELECT * FROM access_profiles WHERE access_profile_id = :pid");
             $stmtPkg->execute(['pid' => $planId]);
             $package = $stmtPkg->fetch();
+            if (!$package) {
+                $db->rollBack();
+                Response::error('Package not found', 404);
+                return;
+            }
+
+            require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+            $callerLevel = HierarchySecurityService::getHierarchyLevel($user['role'] ?? '');
+            if ($callerLevel > 0) {
+                $allowedPkg = (int)$db->query("SELECT (
+                    (SELECT COUNT(*) FROM tier_packages WHERE user_id = " . (int)$user['user_id'] . " AND package_id = " . (int)$planId . " AND is_allowed = 1) +
+                    (SELECT COUNT(*) FROM reseller_plan_permission WHERE user_id = " . (int)$user['user_id'] . " AND access_profile_id = " . (int)$planId . " AND is_allowed = 1)
+                )")->fetchColumn();
+                if ($allowedPkg <= 0) {
+                    $db->rollBack();
+                    Response::error('Access Denied: The selected package has not been assigned to your account.', 403);
+                    return;
+                }
+            }
             $monthlyPrice = (float)($data['plan_price'] ?? $package['price'] ?? 500);
 
             if ($isDayBased) {

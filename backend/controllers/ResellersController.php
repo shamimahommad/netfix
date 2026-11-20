@@ -634,19 +634,12 @@ class ResellersController {
 
         // If caller is downline reseller/sub-reseller, scope packages to what the caller is authorized to sell
         if ($callerLevel > 0) {
-            $hasExplicitPermissions = (int)$db->query("SELECT (
-                (SELECT COUNT(*) FROM tier_packages WHERE user_id = {$callerId} AND is_allowed = 1) +
-                (SELECT COUNT(*) FROM reseller_plan_permission WHERE user_id = {$callerId} AND is_allowed = 1)
-            )")->fetchColumn();
-
-            if ($hasExplicitPermissions > 0) {
-                $where[] = "(
-                    ap.access_profile_id IN (SELECT package_id FROM tier_packages WHERE user_id = :cuid1 AND is_allowed = 1)
-                    OR ap.access_profile_id IN (SELECT access_profile_id FROM reseller_plan_permission WHERE user_id = :cuid2 AND is_allowed = 1)
-                )";
-                $params['cuid1'] = $callerId;
-                $params['cuid2'] = $callerId;
-            }
+            $where[] = "(
+                ap.access_profile_id IN (SELECT package_id FROM tier_packages WHERE user_id = :cuid1 AND is_allowed = 1)
+                OR ap.access_profile_id IN (SELECT access_profile_id FROM reseller_plan_permission WHERE user_id = :cuid2 AND is_allowed = 1)
+            )";
+            $params['cuid1'] = $callerId;
+            $params['cuid2'] = $callerId;
         }
 
         $whereSql = implode(' AND ', $where);
@@ -673,7 +666,7 @@ class ResellersController {
             COALESCE(tp.cost_price, rpp.sell_price, ap.price) as sellPrice,
             COALESCE(tp.commission_rate, rpp.pop_profit_percent, 0) as popProfitPercent,
             COALESCE(rpp.pop_profit, 0) as popProfit,
-            COALESCE(rpp.is_allowed, 1) as allowed
+            COALESCE(tp.is_allowed, rpp.is_allowed, 0) as allowed
             FROM access_profiles ap
             LEFT JOIN network_devices nd ON nd.network_device_id = ap.network_device_id
             LEFT JOIN tier_packages tp ON tp.package_id = ap.access_profile_id AND tp.user_id = :uid_tp AND tp.tenant_id = :tid_tp
@@ -769,6 +762,15 @@ class ResellersController {
             'tid_ap' => $tenantId,
             'tid_tp' => $tenantId,
         ];
+
+        if (!$isLevel0) {
+            $where[] = "(
+                ap.access_profile_id IN (SELECT package_id FROM tier_packages WHERE user_id = :my_uid1 AND is_allowed = 1)
+                OR ap.access_profile_id IN (SELECT access_profile_id FROM reseller_plan_permission WHERE user_id = :my_uid2 AND is_allowed = 1)
+            )";
+            $params['my_uid1'] = $userId;
+            $params['my_uid2'] = $userId;
+        }
 
         if (!empty($_GET['search'])) {
             $search = '%' . trim($_GET['search']) . '%';

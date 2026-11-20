@@ -66,15 +66,9 @@ class PackageAssignmentService {
         }
 
         if (!$tp || empty($tp['is_allowed'])) {
-            if ($level === 1 && !$tp) {
-                // If parent is a Level 1 Reseller and has not been explicitly restricted, default cost floor is retail price
-                $parentCost = $retailPrice;
-                $parentCommission = 0.00;
-            } else {
-                throw new DomainException(
-                    "Parent {$parent['username']} (Level {$level}) is not authorized to sell package '{$pkg['profile_name']}'."
-                );
-            }
+            throw new DomainException(
+                "Parent {$parent['username']} (Level {$level}) is not authorized to sell package '{$pkg['profile_name']}'. Only assigned packages can be delegated."
+            );
         } else {
             $parentCost = (float)$tp['cost_price'];
             $parentCommission = (float)$tp['commission_rate'];
@@ -271,7 +265,7 @@ class PackageAssignmentService {
 
             $currentCost = $childTp ? (float)$childTp['cost_price'] : $retailPrice;
             $currentComm = $childTp ? (float)$childTp['commission_rate'] : 0.00;
-            $isAllowed = $childTp ? (bool)$childTp['is_allowed'] : true;
+            $isAllowed = $childTp ? (bool)$childTp['is_allowed'] : false;
 
             $matrix[] = [
                 'package_id' => $pid,

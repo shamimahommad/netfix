@@ -14,24 +14,55 @@ class AccessProfilesController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        $callerLevel = HierarchySecurityService::getHierarchyLevel($user['role'] ?? '');
+
+        $where = ["ap.tenant_id = :tid", "ap.status = 'enabled'"];
+        $params = ['tid' => $tenantId];
+
+        $selectPrice = "ap.price";
+        $joins = "";
+
+        if ($callerLevel > 0) {
+            $callerId = (int)$user['user_id'];
+            $where[] = "(
+                ap.access_profile_id IN (SELECT package_id FROM tier_packages WHERE user_id = :caller_uid1 AND is_allowed = 1)
+                OR ap.access_profile_id IN (SELECT access_profile_id FROM reseller_plan_permission WHERE user_id = :caller_uid2 AND is_allowed = 1)
+            )";
+            $params['caller_uid1'] = $callerId;
+            $params['caller_uid2'] = $callerId;
+
+            $joins = " LEFT JOIN tier_packages tp ON tp.package_id = ap.access_profile_id AND tp.user_id = :caller_uid3 AND tp.tenant_id = :tid_tp 
+                       LEFT JOIN reseller_plan_permission rpp ON rpp.access_profile_id = ap.access_profile_id AND rpp.user_id = :caller_uid4 ";
+            $params['caller_uid3'] = $callerId;
+            $params['caller_uid4'] = $callerId;
+            $params['tid_tp'] = $tenantId;
+
+            $selectPrice = "COALESCE(tp.cost_price, rpp.sell_price, ap.price)";
+        }
+
+        $whereSql = implode(' AND ', $where);
+
         $stmt = $db->prepare("SELECT 
-            access_profile_id as id,
-            profile_name as name,
-            price,
-            download_speed_kbps as download_kbps,
-            upload_speed_kbps as upload_kbps,
-            is_default
-            FROM access_profiles 
-            WHERE tenant_id = :tid AND status = 'enabled'
-            ORDER BY price ASC");
-        $stmt->execute(['tid' => $tenantId]);
+            ap.access_profile_id as id,
+            ap.profile_name as name,
+            {$selectPrice} as price,
+            ap.download_speed_kbps as download_kbps,
+            ap.upload_speed_kbps as upload_kbps,
+            ap.is_default
+            FROM access_profiles ap 
+            {$joins}
+            WHERE {$whereSql}
+            ORDER BY ap.price ASC");
+        $stmt->execute($params);
         $rows = $stmt->fetchAll();
 
         $items = array_map(function($r) {
             return [
                 'id' => (string)$r['id'],
                 'name' => $r['name'],
-                'price' => (float)$r['price'],
+                'price' => (float)($r['effective_price'] ?? $r['price']),
+                'retailPrice' => (float)$r['price'],
                 'download_kbps' => (int)$r['download_kbps'],
                 'upload_kbps' => (int)$r['upload_kbps'],
                 'is_default' => (bool)$r['is_default'],
@@ -54,33 +85,26 @@ class AccessProfilesController {
 
         require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         $callerLevel = HierarchySecurityService::getHierarchyLevel($user['role'] ?? '');
+        $joins = "";
+        $selectPrice = "ap.price";
+
         if ($callerLevel > 0) {
             $callerId = (int)$user['user_id'];
-            $assignedServerId = HierarchySecurityService::getAssignedServerId($callerId);
+            // Resellers and downline tiers ONLY see packages explicitly assigned to them
+            $where[] = "(
+                ap.access_profile_id IN (SELECT package_id FROM tier_packages WHERE user_id = :caller_uid1 AND is_allowed = 1)
+                OR ap.access_profile_id IN (SELECT access_profile_id FROM reseller_plan_permission WHERE user_id = :caller_uid2 AND is_allowed = 1)
+            )";
+            $params['caller_uid1'] = $callerId;
+            $params['caller_uid2'] = $callerId;
 
-            // A downline reseller/dealer/agent is authorized to sell packages:
-            // 1. That are assigned/allowed to them in tier_packages or reseller_plan_permission
-            // 2. OR if assignedServerId matches
-            // 3. OR if no package restrictions have been explicitly set for this user, all tenant packages
-            $hasExplicitPermissions = (int)$db->query("SELECT (
-                (SELECT COUNT(*) FROM tier_packages WHERE user_id = {$callerId} AND is_allowed = 1) +
-                (SELECT COUNT(*) FROM reseller_plan_permission WHERE user_id = {$callerId} AND is_allowed = 1)
-            )")->fetchColumn();
+            $joins = " LEFT JOIN tier_packages tp ON tp.package_id = ap.access_profile_id AND tp.user_id = :caller_uid3 AND tp.tenant_id = :tid_tp 
+                       LEFT JOIN reseller_plan_permission rpp ON rpp.access_profile_id = ap.access_profile_id AND rpp.user_id = :caller_uid4 ";
+            $params['caller_uid3'] = $callerId;
+            $params['caller_uid4'] = $callerId;
+            $params['tid_tp'] = $tenantId;
 
-            if ($hasExplicitPermissions > 0) {
-                $where[] = "(
-                    ap.access_profile_id IN (SELECT package_id FROM tier_packages WHERE user_id = :caller_uid1 AND is_allowed = 1)
-                    OR ap.access_profile_id IN (SELECT access_profile_id FROM reseller_plan_permission WHERE user_id = :caller_uid2 AND is_allowed = 1)
-                )";
-                $params['caller_uid1'] = $callerId;
-                $params['caller_uid2'] = $callerId;
-            } elseif (!empty($assignedServerId) && $assignedServerId !== '0') {
-                $serverHasPackages = (int)$db->query("SELECT COUNT(*) FROM access_profiles WHERE tenant_id = " . (int)$tenantId . " AND network_device_id = " . $db->quote($assignedServerId))->fetchColumn();
-                if ($serverHasPackages > 0) {
-                    $where[] = "ap.network_device_id = :assigned_sid";
-                    $params['assigned_sid'] = $assignedServerId;
-                }
-            }
+            $selectPrice = "COALESCE(tp.cost_price, rpp.sell_price, ap.price)";
         } elseif (!empty($_GET['serverId'])) {
             $where[] = "ap.network_device_id = :sid";
             $params['sid'] = $_GET['serverId'];
@@ -98,6 +122,7 @@ class AccessProfilesController {
 
         $stmt = $db->prepare("SELECT 
             ap.*,
+            {$selectPrice} as effective_price,
             COALESCE(
                 nd.device_name,
                 (
@@ -119,6 +144,7 @@ class AccessProfilesController {
             ) as server_name,
             COUNT(cs.customer_id) as active_subscribers
             FROM access_profiles ap
+            {$joins}
             LEFT JOIN network_devices nd ON nd.network_device_id = ap.network_device_id
             LEFT JOIN customer_services cs ON cs.access_profile_id = ap.access_profile_id AND cs.status = 'active'
             WHERE {$whereSql}
@@ -158,7 +184,8 @@ class AccessProfilesController {
                 'protocol' => $r['protocol'] ?? 'pppoe',
                 'color' => $color,
                 'colorHex' => $color,
-                'price' => (float)$r['price'],
+                'price' => (float)($r['effective_price'] ?? $r['price']),
+                'retailPrice' => (float)$r['price'],
                 'downloadSpeedKbps' => $dlKbps,
                 'uploadSpeedKbps' => $ulKbps,
                 'download_speed' => (int)round($dlKbps / 1024),

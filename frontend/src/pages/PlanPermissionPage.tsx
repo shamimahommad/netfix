@@ -111,7 +111,7 @@ export default function PlanPermissionPage() {
             if (saved.allowed) selected.add(id);
           } else {
             initial[id] = Number(p.price);
-            selected.add(id);
+            // Newly created/imported packages remain unselected until admin explicitly assigns them
           }
         });
 
