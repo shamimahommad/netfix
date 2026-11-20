@@ -130,6 +130,8 @@ const getBackToAdminLabel = (roleCode: string | undefined): string => {
   if (r === 'saas_admin') return 'Back to Admin';
   if (r === 'admin' || r === 'isp_admin' || r === 'manager') return 'Back to Tenant Admin';
   if (r === 'reseller') return 'Back to Reseller';
+  if (r === 'sub_reseller') return 'Back to Sub Reseller';
+  if (r === 'dealer') return 'Back to Dealer';
   return 'Back to Admin';
 };
 

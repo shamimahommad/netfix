@@ -110,6 +110,141 @@ class HierarchySecurityService {
     }
 
     /**
+     * Check if current authenticated user has permission to impersonate a target user.
+     * Enforces strict downward-only hierarchical access:
+     * - Disallow self-impersonation
+     * - Disallow nested impersonation (cannot impersonate while already impersonating)
+     * - Target user must exist and be active
+     * - Target user cannot be saas_admin
+     * - SaaS Super Admin (saas_admin) can impersonate any non-saas_admin user across tenants
+     * - ISP Admin (Level 0: admin, isp_admin, tenant_admin, manager) can impersonate any downline in their tenant (reseller, sub_reseller, dealer, agent)
+     * - Downline Reseller tiers (Level 1 Reseller, Level 2 Sub-Reseller, Level 3 Dealer) can impersonate active users strictly beneath them in their hierarchy tree:
+     *     * Same tenant
+     *     * Target role level > Caller role level
+     *     * Target is direct child (parent_id == caller.user_id) OR descendant in materialized path
+     * - Level 4 (Agent) has no downline and cannot impersonate
+     */
+    public static function canImpersonateUser(array|int $currentUser, int $targetUserId): bool {
+        if (is_int($currentUser)) {
+            $currentUser = self::getUser($currentUser);
+        }
+        if (!$currentUser || empty($currentUser['user_id'])) {
+            return false;
+        }
+
+        $callerId = (int)$currentUser['user_id'];
+        if ($callerId <= 0 || $targetUserId <= 0) {
+            return false;
+        }
+
+        // 1. Cannot impersonate self
+        if ($callerId === $targetUserId) {
+            return false;
+        }
+
+        // 2. Disallow nested impersonation
+        if (!empty($currentUser['impersonated'])) {
+            return false;
+        }
+
+        // 3. Fetch target user
+        $targetUser = self::getUser($targetUserId);
+        if (!$targetUser) {
+            return false;
+        }
+
+        // Target user must be active
+        if (($targetUser['status'] ?? 'active') !== 'active') {
+            return false;
+        }
+
+        $targetRole = strtolower(trim($targetUser['role'] ?? ''));
+
+        // 4. No one can impersonate a saas_admin
+        if ($targetRole === 'saas_admin') {
+            return false;
+        }
+
+        $callerRole = strtolower(trim($currentUser['role'] ?? ''));
+
+        // 5. SaaS Admin has global downward authority across all tenant users
+        if ($callerRole === 'saas_admin') {
+            return true;
+        }
+
+        // 6. Tenant boundary: caller and target must belong to the exact same tenant
+        $callerTenantId = !empty($currentUser['tenant_id']) ? (int)$currentUser['tenant_id'] : null;
+        $targetTenantId = !empty($targetUser['tenant_id']) ? (int)$targetUser['tenant_id'] : null;
+
+        if ($callerTenantId === null || $targetTenantId === null || $callerTenantId !== $targetTenantId) {
+            return false;
+        }
+
+        $callerLevel = self::getHierarchyLevel($callerRole);
+        $targetLevel = self::getHierarchyLevel($targetRole);
+
+        // 7. ISP Company Admin (Level 0: admin, isp_admin, manager, tenant_admin)
+        if ($callerLevel === 0) {
+            // Level 0 admin can impersonate all subordinate roles in their tenant (resellers, sub-resellers, dealers, agents)
+            return $targetLevel > 0;
+        }
+
+        // 8. Agent (Level 4) has no subordinate users
+        if ($callerLevel >= 4) {
+            return false;
+        }
+
+        // 9. Downline Reseller tiers (Level 1 Reseller, Level 2 Sub-Reseller, Level 3 Dealer):
+        // Target role level must be strictly lower rank (higher level number)
+        if ($targetLevel <= $callerLevel) {
+            return false;
+        }
+
+        // Target must belong to caller's hierarchy tree:
+        // A) Direct child
+        $targetParentId = !empty($targetUser['parent_id']) ? (int)$targetUser['parent_id'] : null;
+        if ($targetParentId === $callerId) {
+            return true;
+        }
+
+        // B) Descendant via materialized path
+        $callerPath = $currentUser['hierarchy_path'] ?? null;
+        if (empty($callerPath) || $callerPath === '/') {
+            $hCaller = self::getUser($callerId);
+            $callerPath = $hCaller['hierarchy_path'] ?? "/{$callerId}/";
+        }
+        $callerPath = '/' . trim($callerPath, '/') . '/';
+
+        $targetPath = $targetUser['hierarchy_path'] ?? '';
+        if (!empty($targetPath)) {
+            $targetPath = '/' . trim($targetPath, '/') . '/';
+            if (str_starts_with($targetPath, $callerPath) && $targetPath !== $callerPath) {
+                return true;
+            }
+            if (str_contains($targetPath, "/{$callerId}/")) {
+                return true;
+            }
+        }
+
+        // C) Fallback: walk up parent_id chain (up to 10 hops)
+        $currParent = $targetParentId;
+        $hops = 0;
+        while ($currParent && $hops < 10) {
+            if ($currParent === $callerId) {
+                return true;
+            }
+            $pUser = self::getUser($currParent);
+            if (!$pUser || empty($pUser['parent_id'])) {
+                break;
+            }
+            $currParent = (int)$pUser['parent_id'];
+            $hops++;
+        }
+
+        return false;
+    }
+
+    /**
      * IDOR Security Guard: Verify whether a user can view or manage a customer record.
      * Enforces strict downward-inclusive hierarchy isolation:
      * - A user can access their OWN direct customers.

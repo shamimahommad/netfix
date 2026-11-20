@@ -1018,7 +1018,7 @@ export default function ResellerPage() {
                 <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-teal-100 dark:bg-teal-900/50 text-teal-600 dark:text-teal-400"><RechargeIcon /></span>
                 Recharge
               </button>
-              {isAdmin && canImpersonateMap[userPanelUser.userId] && (
+              {canImpersonateMap[userPanelUser.userId] && (
                 <button
                   type="button"
                   onClick={() => { setImpersonateConfirmTarget(userPanelUser); setUserPanelUser(null); }}

@@ -107,15 +107,23 @@ export const authService = {
     return response.data?.allowed ?? {};
   },
 
-  /** Start impersonation. Server sets httpOnly cookie. Redirect to returned URL (no localStorage). */
+  /** Start impersonation. Store delegated token in localStorage and redirect to dashboard. */
   async impersonate(targetUserId: string): Promise<ImpersonateResponse> {
     const response = await api.post<ImpersonateResponse>(`/auth/impersonate/${targetUserId}`);
+    if (response.data?.access_token) {
+      localStorage.setItem('access_token', response.data.access_token);
+      localStorage.removeItem('auth_user');
+    }
     return response.data;
   },
 
-  /** Exit impersonation. Server sets httpOnly cookie with original user. Redirect to returned URL. */
+  /** Exit impersonation. Restore original user token in localStorage and redirect. */
   async exitImpersonation(): Promise<ImpersonateResponse> {
     const response = await api.post<ImpersonateResponse>('/auth/impersonate/exit');
+    if (response.data?.access_token) {
+      localStorage.setItem('access_token', response.data.access_token);
+      localStorage.removeItem('auth_user');
+    }
     return response.data;
   },
 

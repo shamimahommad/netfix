@@ -439,29 +439,54 @@ class AuthController {
 
     public static function canImpersonate(string $targetUserId): void {
         $user = AuthMiddleware::requireAuth();
-        $allowed = ($user['role'] === 'saas_admin' || $user['role'] === 'admin');
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        $allowed = HierarchySecurityService::canImpersonateUser($user, (int)$targetUserId);
         Response::json(['allowed' => $allowed]);
     }
 
     public static function canImpersonateBatch(): void {
         $user = AuthMiddleware::requireAuth();
-        $allowed = ($user['role'] === 'saas_admin' || $user['role'] === 'admin');
-        Response::json(['allowed' => []]);
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+
+        $rawIds = $_GET['ids'] ?? '';
+        if (empty($rawIds)) {
+            Response::json(['allowed' => (object)[]]);
+            return;
+        }
+
+        $idList = array_filter(array_map('trim', explode(',', (string)$rawIds)));
+        $allowedMap = [];
+
+        foreach ($idList as $idStr) {
+            $tId = (int)$idStr;
+            if ($tId > 0) {
+                $allowedMap[(string)$tId] = HierarchySecurityService::canImpersonateUser($user, $tId);
+            }
+        }
+
+        Response::json(['allowed' => (object)$allowedMap]);
     }
 
     public static function impersonate(string $targetUserId): void {
         $currentUser = AuthMiddleware::requireAuth();
-        if ($currentUser['role'] !== 'saas_admin' && $currentUser['role'] !== 'admin') {
-            Response::error('Permission denied to impersonate', 403);
+        $targetId = (int)$targetUserId;
+
+        if (!empty($currentUser['impersonated'])) {
+            Response::error('Cannot switch accounts while currently impersonating. Please exit impersonation first.', 400);
+        }
+
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        if (!HierarchySecurityService::canImpersonateUser($currentUser, $targetId)) {
+            Response::error('Permission denied to impersonate this user', 403);
         }
 
         $db = Database::getConnection();
-        $stmt = $db->prepare("SELECT * FROM users WHERE user_id = :id LIMIT 1");
-        $stmt->execute(['id' => $targetUserId]);
+        $stmt = $db->prepare("SELECT * FROM users WHERE user_id = :id AND status = 'active' LIMIT 1");
+        $stmt->execute(['id' => $targetId]);
         $targetUser = $stmt->fetch();
 
         if (!$targetUser) {
-            Response::error('Target user not found', 404);
+            Response::error('Target user not found or is inactive', 404);
         }
 
         $userType = $targetUser['tenant_id'] ? 'isp' : 'saas';
@@ -494,18 +519,18 @@ class AuthController {
         $db = Database::getConnection();
         $stmt = $db->prepare("SELECT * FROM users WHERE user_id = :id LIMIT 1");
         $stmt->execute(['id' => $currentUser['impersonated_by']]);
-        $adminUser = $stmt->fetch();
+        $originalUser = $stmt->fetch();
 
-        if (!$adminUser) {
-            Response::error('Original admin not found', 404);
+        if (!$originalUser) {
+            Response::error('Original user not found', 404);
         }
 
-        $userType = $adminUser['tenant_id'] ? 'isp' : 'saas';
+        $userType = $originalUser['tenant_id'] ? 'isp' : 'saas';
         $payload = [
-            'user_id' => (string)$adminUser['user_id'],
-            'email' => $adminUser['email'],
-            'role_code' => $adminUser['role'],
-            'tenant_id' => $adminUser['tenant_id'] ? (string)$adminUser['tenant_id'] : null,
+            'user_id' => (string)$originalUser['user_id'],
+            'email' => $originalUser['email'],
+            'role_code' => $originalUser['role'],
+            'tenant_id' => $originalUser['tenant_id'] ? (string)$originalUser['tenant_id'] : null,
             'user_type' => $userType,
         ];
 
