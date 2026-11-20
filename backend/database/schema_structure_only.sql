@@ -1,8 +1,4 @@
--- MariaDB dump 10.19  Distrib 10.4.32-MariaDB, for Win64 (AMD64)
---
--- Host: localhost    Database: netfix_db
--- ------------------------------------------------------
--- Server version	10.4.32-MariaDB
+/*M!999999\- enable the sandbox mode */ 
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -13,15 +9,10 @@
 /*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
 /*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
 /*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
-/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
-
---
--- Table structure for table `access_profiles`
---
-
+/*M!100616 SET @OLD_NOTE_VERBOSITY=@@NOTE_VERBOSITY, NOTE_VERBOSITY=0 */;
 DROP TABLE IF EXISTS `access_profiles`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `access_profiles` (
   `access_profile_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -48,16 +39,11 @@ CREATE TABLE `access_profiles` (
   KEY `idx_profile_tenant` (`tenant_id`),
   KEY `idx_profile_device` (`network_device_id`),
   KEY `idx_profile_status` (`status`)
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `client_task_logs`
---
-
 DROP TABLE IF EXISTS `client_task_logs`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `client_task_logs` (
   `task_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -71,14 +57,9 @@ CREATE TABLE `client_task_logs` (
   KEY `idx_task_customer` (`customer_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `commission_logs`
---
-
 DROP TABLE IF EXISTS `commission_logs`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `commission_logs` (
   `commission_log_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -94,14 +75,9 @@ CREATE TABLE `commission_logs` (
   KEY `idx_comm_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `customer_id_reservations`
---
-
 DROP TABLE IF EXISTS `customer_id_reservations`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `customer_id_reservations` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -116,16 +92,11 @@ CREATE TABLE `customer_id_reservations` (
   KEY `idx_reserved_code_status` (`reserved_code`,`status`),
   KEY `idx_tenant_status_expires` (`tenant_id`,`status`,`expires_at`),
   KEY `idx_session_token` (`session_token`)
-) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `customer_network_accounts`
---
-
 DROP TABLE IF EXISTS `customer_network_accounts`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `customer_network_accounts` (
   `network_account_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -154,16 +125,11 @@ CREATE TABLE `customer_network_accounts` (
   PRIMARY KEY (`network_account_id`),
   KEY `idx_net_account_customer` (`customer_id`),
   KEY `idx_net_account_user` (`username`)
-) ENGINE=InnoDB AUTO_INCREMENT=2319 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `customer_services`
---
-
 DROP TABLE IF EXISTS `customer_services`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `customer_services` (
   `customer_service_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -181,16 +147,11 @@ CREATE TABLE `customer_services` (
   PRIMARY KEY (`customer_service_id`),
   KEY `idx_service_customer` (`customer_id`),
   KEY `idx_service_profile` (`access_profile_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2324 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `customer_tickets`
---
-
 DROP TABLE IF EXISTS `customer_tickets`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `customer_tickets` (
   `ticket_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -206,14 +167,9 @@ CREATE TABLE `customer_tickets` (
   KEY `idx_ticket_customer` (`customer_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `customers`
---
-
 DROP TABLE IF EXISTS `customers`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `customers` (
   `customer_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -256,16 +212,11 @@ CREATE TABLE `customers` (
   KEY `idx_customers_owner_path` (`owner_path`),
   KEY `idx_cust_tenant_owner_path` (`tenant_id`,`owner_path`),
   KEY `idx_cust_tenant_owner` (`tenant_id`,`owner_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=91214 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `invoices`
---
-
 DROP TABLE IF EXISTS `invoices`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `invoices` (
   `invoice_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -306,16 +257,11 @@ CREATE TABLE `invoices` (
   KEY `idx_invoices_invoice_no` (`invoice_no`),
   KEY `idx_invoices_creator_id` (`creator_id`),
   KEY `idx_invoices_payment_method` (`payment_method`)
-) ENGINE=InnoDB AUTO_INCREMENT=21 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `login_logs`
---
-
 DROP TABLE IF EXISTS `login_logs`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `login_logs` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `user_id` bigint(20) unsigned NOT NULL,
@@ -326,16 +272,11 @@ CREATE TABLE `login_logs` (
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `idx_login_user` (`user_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=29 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `mac_vendor_cache`
---
-
 DROP TABLE IF EXISTS `mac_vendor_cache`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `mac_vendor_cache` (
   `oui` varchar(20) NOT NULL,
   `vendor_name` varchar(191) NOT NULL,
@@ -344,14 +285,9 @@ CREATE TABLE `mac_vendor_cache` (
   KEY `idx_oui` (`oui`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `network_devices`
---
-
 DROP TABLE IF EXISTS `network_devices`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `network_devices` (
   `network_device_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -383,16 +319,11 @@ CREATE TABLE `network_devices` (
   UNIQUE KEY `syslog_token` (`syslog_token`),
   KEY `idx_devices_tenant` (`tenant_id`),
   KEY `idx_devices_status` (`status`)
-) ENGINE=InnoDB AUTO_INCREMENT=1000009 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `olt_onus`
---
-
 DROP TABLE IF EXISTS `olt_onus`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `olt_onus` (
   `onu_record_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -414,16 +345,11 @@ CREATE TABLE `olt_onus` (
   UNIQUE KEY `uq_olt_onu` (`tenant_id`,`network_device_id`,`mac_address`),
   KEY `idx_olt_mac` (`mac_address`),
   KEY `idx_olt_device` (`network_device_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=8887 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `payment_gateway_settings`
---
-
 DROP TABLE IF EXISTS `payment_gateway_settings`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `payment_gateway_settings` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -439,16 +365,11 @@ CREATE TABLE `payment_gateway_settings` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_tenant_gateway` (`tenant_id`,`gateway`),
   KEY `idx_pgw_tenant` (`tenant_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `payment_intents`
---
-
 DROP TABLE IF EXISTS `payment_intents`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `payment_intents` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -463,16 +384,11 @@ CREATE TABLE `payment_intents` (
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `idx_pi_tenant` (`tenant_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `permissions`
---
-
 DROP TABLE IF EXISTS `permissions`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `permissions` (
   `permission_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `permission_code` varchar(50) NOT NULL,
@@ -482,16 +398,11 @@ CREATE TABLE `permissions` (
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`permission_id`),
   UNIQUE KEY `permission_code` (`permission_code`)
-) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `pppoe_connection_logs`
---
-
 DROP TABLE IF EXISTS `pppoe_connection_logs`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `pppoe_connection_logs` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -517,14 +428,9 @@ CREATE TABLE `pppoe_connection_logs` (
   KEY `idx_assigned_ip` (`assigned_ip`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `reseller_ledger`
---
-
 DROP TABLE IF EXISTS `reseller_ledger`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `reseller_ledger` (
   `ledger_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -538,16 +444,11 @@ CREATE TABLE `reseller_ledger` (
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`ledger_id`),
   KEY `idx_ledger_tenant_user` (`tenant_id`,`user_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `reseller_plan_permission`
---
-
 DROP TABLE IF EXISTS `reseller_plan_permission`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `reseller_plan_permission` (
   `tenant_id` bigint(20) unsigned NOT NULL,
   `user_id` bigint(20) unsigned NOT NULL,
@@ -560,14 +461,9 @@ CREATE TABLE `reseller_plan_permission` (
   KEY `idx_rpp_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `roles`
---
-
 DROP TABLE IF EXISTS `roles`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `roles` (
   `role_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `role_code` varchar(50) NOT NULL,
@@ -577,16 +473,11 @@ CREATE TABLE `roles` (
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`role_id`),
   UNIQUE KEY `role_code` (`role_code`)
-) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `service_areas`
---
-
 DROP TABLE IF EXISTS `service_areas`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `service_areas` (
   `service_area_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -597,16 +488,11 @@ CREATE TABLE `service_areas` (
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`service_area_id`),
   KEY `idx_area_tenant` (`tenant_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `sms_gateway_settings`
---
-
 DROP TABLE IF EXISTS `sms_gateway_settings`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `sms_gateway_settings` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -621,14 +507,9 @@ CREATE TABLE `sms_gateway_settings` (
   KEY `idx_sms_gw_tenant` (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `sms_log`
---
-
 DROP TABLE IF EXISTS `sms_log`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `sms_log` (
   `sms_log_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -644,14 +525,9 @@ CREATE TABLE `sms_log` (
   KEY `idx_sms_log_tenant` (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `sms_templates`
---
-
 DROP TABLE IF EXISTS `sms_templates`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `sms_templates` (
   `sms_template_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -662,16 +538,11 @@ CREATE TABLE `sms_templates` (
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`sms_template_id`),
   UNIQUE KEY `uk_tenant_tpl_key` (`tenant_id`,`template_key`)
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `sub_areas`
---
-
 DROP TABLE IF EXISTS `sub_areas`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `sub_areas` (
   `sub_area_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -683,16 +554,11 @@ CREATE TABLE `sub_areas` (
   PRIMARY KEY (`sub_area_id`),
   KEY `idx_subarea_tenant` (`tenant_id`),
   KEY `idx_subarea_area` (`service_area_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `tenant_limits`
---
-
 DROP TABLE IF EXISTS `tenant_limits`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `tenant_limits` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -705,14 +571,9 @@ CREATE TABLE `tenant_limits` (
   UNIQUE KEY `tenant_id` (`tenant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `tenant_sequences`
---
-
 DROP TABLE IF EXISTS `tenant_sequences`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `tenant_sequences` (
   `tenant_id` bigint(20) unsigned NOT NULL,
   `sequence_type` varchar(50) NOT NULL DEFAULT 'customer',
@@ -721,14 +582,9 @@ CREATE TABLE `tenant_sequences` (
   PRIMARY KEY (`tenant_id`,`sequence_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `tenant_settings`
---
-
 DROP TABLE IF EXISTS `tenant_settings`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `tenant_settings` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -738,16 +594,11 @@ CREATE TABLE `tenant_settings` (
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_tenant_setting` (`tenant_id`,`setting_key`)
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `tenants`
---
-
 DROP TABLE IF EXISTS `tenants`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `tenants` (
   `tenant_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_code` varchar(50) NOT NULL,
@@ -779,16 +630,11 @@ CREATE TABLE `tenants` (
   UNIQUE KEY `tenant_slug` (`tenant_slug`),
   UNIQUE KEY `business_email` (`business_email`),
   KEY `idx_tenant_status` (`status`)
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `tier_packages`
---
-
 DROP TABLE IF EXISTS `tier_packages`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `tier_packages` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -806,16 +652,11 @@ CREATE TABLE `tier_packages` (
   KEY `idx_tp_user` (`user_id`),
   KEY `idx_tp_pkg` (`package_id`),
   KEY `idx_tp_assigned_by` (`assigned_by`)
-) ENGINE=InnoDB AUTO_INCREMENT=30 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `transactions`
---
-
 DROP TABLE IF EXISTS `transactions`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `transactions` (
   `transaction_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -834,16 +675,11 @@ CREATE TABLE `transactions` (
   PRIMARY KEY (`transaction_id`),
   KEY `idx_trx_tenant` (`tenant_id`),
   KEY `idx_trx_customer` (`customer_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `user_permissions`
---
-
 DROP TABLE IF EXISTS `user_permissions`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `user_permissions` (
   `user_id` bigint(20) unsigned NOT NULL,
   `permission_id` bigint(20) unsigned NOT NULL,
@@ -853,14 +689,9 @@ CREATE TABLE `user_permissions` (
   KEY `idx_up_perm` (`permission_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `users`
---
-
 DROP TABLE IF EXISTS `users`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `users` (
   `user_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned DEFAULT NULL,
@@ -906,16 +737,11 @@ CREATE TABLE `users` (
   KEY `idx_users_role` (`role`),
   KEY `idx_users_hierarchy_path` (`hierarchy_path`),
   KEY `idx_users_tenant_hierarchy` (`tenant_id`,`hierarchy_path`)
-) ENGINE=InnoDB AUTO_INCREMENT=1001 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `wallet_ledger`
---
-
 DROP TABLE IF EXISTS `wallet_ledger`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `wallet_ledger` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -939,16 +765,11 @@ CREATE TABLE `wallet_ledger` (
   KEY `idx_wl_purpose` (`purpose`),
   KEY `idx_wl_customer` (`source_customer_id`),
   KEY `idx_wl_invoice` (`invoice_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=19 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `wallet_transactions`
---
-
 DROP TABLE IF EXISTS `wallet_transactions`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `wallet_transactions` (
   `transaction_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -968,16 +789,11 @@ CREATE TABLE `wallet_transactions` (
   KEY `idx_wt_user` (`user_id`),
   KEY `idx_wt_ref` (`reference_type`,`reference_id`),
   KEY `idx_wt_created` (`created_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=27 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `wallets`
---
-
 DROP TABLE IF EXISTS `wallets`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
+/*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `wallets` (
   `wallet_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint(20) unsigned NOT NULL,
@@ -991,7 +807,7 @@ CREATE TABLE `wallets` (
   UNIQUE KEY `user_id` (`user_id`),
   KEY `idx_wallets_tenant` (`tenant_id`),
   KEY `idx_wallets_status` (`status`)
-) ENGINE=InnoDB AUTO_INCREMENT=22 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -1001,6 +817,5 @@ CREATE TABLE `wallets` (
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
 /*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
-/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
+/*M!100616 SET NOTE_VERBOSITY=@OLD_NOTE_VERBOSITY */;
 
--- Dump completed on 2026-11-12 15:29:22

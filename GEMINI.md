@@ -144,8 +144,24 @@ This file serves as the permanent source of truth for all coding and UI design s
   powershell -ExecutionPolicy Bypass -File ./run_project.ps1 -Restart
   ```
 
+## 8. Database Schema Synchronization & Git Push Standard
+- **MANDATORY RULE ON EVERY GIT PUSH / COMMIT**:
+  Whenever making database changes or pushing code to git, the database schema MUST be automatically synced and included in the commit/push.
+- Always execute the automated schema export:
+  ```powershell
+  php backend/database/export_schema.php
+  ```
+- Always ensure `backend/database/schema_structure_only.sql` and `backend/database/schema.sql` are staged and committed alongside code changes:
+  ```powershell
+  git add backend/database/schema_structure_only.sql backend/database/schema.sql
+  ```
+- NEVER push code without verifying that any new tables, columns, indexes, or migration updates are reflected in the database schema files.
+
+---
+
 # Strict Execution Rules
 1. NEVER create temporary test scripts (e.g., test_*.php) or run terminal verification commands unless explicitly asked.
 2. NEVER scan the entire project. Only read and edit the exact files mentioned with `@`.
 3. Do NOT write verification loops. Apply the code fix directly and stop immediately.
 4. Keep changes minimal and strictly focused on the prompt.
+5. ALWAYS run `php backend/database/export_schema.php` and stage schema files before `git push` so database schema is pushed every time.
