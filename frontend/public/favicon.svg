@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%">
+  <defs>
+    <linearGradient id="favBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B0F19" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <linearGradient id="favBeam" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F2FE" />
+      <stop offset="50%" stop-color="#06B6D4" />
+      <stop offset="100%" stop-color="#10B981" />
+    </linearGradient>
+    <linearGradient id="favLeft" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#1D4ED8" />
+    </linearGradient>
+    <linearGradient id="favRight" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="100%" stop-color="#34D399" />
+    </linearGradient>
+  </defs>
+
+  <!-- Squircle Base -->
+  <rect x="2" y="2" width="60" height="60" rx="14" ry="14" fill="url(#favBg)" stroke="#38BDF8" stroke-width="1.5" stroke-opacity="0.4" />
+
+  <!-- Signal Arc -->
+  <path d="M 43 14 A 12 12 0 0 1 50 21" fill="none" stroke="#00F2FE" stroke-width="2.5" stroke-linecap="round" />
+
+  <!-- NetFix N Emblem -->
+  <!-- Left Pillar -->
+  <rect x="14" y="14" width="8" height="36" rx="4" fill="url(#favLeft)" />
+  <!-- Dynamic Diagonal -->
+  <path d="M 17 14 L 47 50 L 40 50 L 14 19 Z" fill="url(#favBeam)" />
+  <!-- Right Pillar -->
+  <rect x="42" y="14" width="8" height="36" rx="4" fill="url(#favRight)" />
+
+  <!-- Optical Nodes -->
+  <circle cx="18" cy="18" r="3" fill="#FFFFFF" />
+  <circle cx="46" cy="46" r="3" fill="#FFFFFF" />
+  <circle cx="32" cy="32" r="2" fill="#00F2FE" />
+</svg>

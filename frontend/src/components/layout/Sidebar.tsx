@@ -224,11 +224,9 @@ export default function Sidebar({ items, isOpen, onClose }: SidebarProps) {
 
     return (
       <div className="flex items-center gap-2.5 min-w-0">
-        <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-blue-700 text-white font-black text-sm flex items-center justify-center shadow-sm shrink-0">
-          {(companyName || 'I')[0].toUpperCase()}
-        </span>
+        <img src="/logo-icon.svg" alt="NetFix" className="w-8 h-8 rounded-xl object-contain shadow-sm shrink-0" />
         <h1 className="text-lg font-bold text-text-primary tracking-tight truncate" title={companyName}>
-          {companyName || 'ISP SaaS'}
+          {companyName || 'NetFix'}
         </h1>
       </div>
     );

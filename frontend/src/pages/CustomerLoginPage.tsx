@@ -111,11 +111,11 @@ export default function CustomerLoginPage() {
       <header className="relative z-20 w-full max-w-7xl mx-auto px-4 sm:px-8 py-4 sm:py-6 flex items-center justify-between">
         {/* Brand Logo */}
         <Link to="/customer/login" className="flex items-center gap-3 group focus:outline-none">
-          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-600 p-0.5 shadow-lg shadow-cyan-500/20 group-hover:shadow-cyan-500/40 transition-shadow">
-            <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center">
-              <Wifi className="w-5 h-5 sm:w-6 sm:h-6 text-cyan-400 group-hover:scale-110 transition-transform" />
-            </div>
-          </div>
+          <img 
+            src="/logo-icon.svg" 
+            alt="NetFix Logo" 
+            className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl shadow-lg shadow-cyan-500/20 group-hover:shadow-cyan-500/40 group-hover:scale-105 transition-all" 
+          />
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xl sm:text-2xl font-black tracking-tight text-white font-sans">

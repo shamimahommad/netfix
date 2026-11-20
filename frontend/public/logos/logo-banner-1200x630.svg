@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bannerBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#070A12" />
+      <stop offset="50%" stop-color="#0B1120" />
+      <stop offset="100%" stop-color="#030712" />
+    </linearGradient>
+
+    <!-- Ambient Glows -->
+    <radialGradient id="bannerGlow1" cx="25%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="rgba(6, 182, 212, 0.25)" />
+      <stop offset="100%" stop-color="rgba(6, 182, 212, 0)" />
+    </radialGradient>
+    <radialGradient id="bannerGlow2" cx="75%" cy="30%" r="45%">
+      <stop offset="0%" stop-color="rgba(16, 185, 129, 0.2)" />
+      <stop offset="100%" stop-color="rgba(16, 185, 129, 0)" />
+    </radialGradient>
+
+    <!-- Gradients for Emblem -->
+    <linearGradient id="banLeftPillar" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#1D4ED8" />
+    </linearGradient>
+    <linearGradient id="banBeam" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F2FE" />
+      <stop offset="50%" stop-color="#06B6D4" />
+      <stop offset="100%" stop-color="#10B981" />
+    </linearGradient>
+    <linearGradient id="banRightPillar" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="100%" stop-color="#34D399" />
+    </linearGradient>
+    <linearGradient id="banFixGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00F2FE" />
+      <stop offset="60%" stop-color="#06B6D4" />
+      <stop offset="100%" stop-color="#10B981" />
+    </linearGradient>
+  </defs>
+
+  <style>
+    .font-brand {
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+  </style>
+
+  <!-- Background Base -->
+  <rect width="1200" height="630" fill="url(#bannerBg)" />
+  <circle cx="300" cy="315" r="450" fill="url(#bannerGlow1)" />
+  <circle cx="900" cy="200" r="400" fill="url(#bannerGlow2)" />
+
+  <!-- Subtle Network Grid -->
+  <g opacity="0.08" stroke="#38BDF8" stroke-width="1.5" stroke-dasharray="6 8">
+    <line x1="0" y1="150" x2="1200" y2="150" />
+    <line x1="0" y1="315" x2="1200" y2="315" />
+    <line x1="0" y1="480" x2="1200" y2="480" />
+    <line x1="300" y1="0" x2="300" y2="630" />
+    <line x1="600" y1="0" x2="600" y2="630" />
+    <line x1="900" y1="0" x2="900" y2="630" />
+  </g>
+
+  <!-- Icon Emblem (Left, 220x220) -->
+  <g transform="translate(130, 205)">
+    <rect x="0" y="0" width="220" height="220" rx="52" ry="52" fill="#0B0F19" stroke="url(#banFixGrad)" stroke-width="3" stroke-opacity="0.6" />
+    <path d="M 148 55 A 40 40 0 0 1 182 89" fill="none" stroke="#34D399" stroke-width="3.5" stroke-linecap="round" opacity="0.6" />
+    <path d="M 155 64 A 28 28 0 0 1 174 83" fill="none" stroke="#00F2FE" stroke-width="4" stroke-linecap="round" />
+
+    <!-- N Symbol inside Icon -->
+    <g>
+      <!-- Left Pillar -->
+      <rect x="52" y="64" width="26" height="98" rx="13" fill="url(#banLeftPillar)" />
+      <!-- Diagonal Connector -->
+      <path d="M 65 64 L 155 162 L 129 162 L 52 77 Z" fill="url(#banBeam)" />
+      <!-- Right Pillar -->
+      <rect x="142" y="64" width="26" height="98" rx="13" fill="url(#banRightPillar)" />
+    </g>
+
+    <!-- Optical Nodes -->
+    <circle cx="65" cy="77" r="7" fill="#FFFFFF" />
+    <circle cx="155" cy="149" r="7" fill="#FFFFFF" />
+    <circle cx="110" cy="113" r="5" fill="#00F2FE" />
+  </g>
+
+  <!-- Typography & Content -->
+  <g class="font-brand" transform="translate(400, 215)">
+    <!-- Pill Badge -->
+    <rect x="0" y="0" width="240" height="32" rx="16" ry="16" fill="rgba(6, 182, 212, 0.12)" stroke="#06B6D4" stroke-width="1.5" stroke-opacity="0.4" />
+    <circle cx="16" cy="16" r="4" fill="#10B981" />
+    <text x="28" y="21" font-size="12" font-weight="800" fill="#38BDF8" letter-spacing="2">NEXT-GEN ISP SAAS</text>
+
+    <!-- Main Title: NetFix -->
+    <text x="0" y="115" font-size="108" font-weight="900" fill="#FFFFFF" letter-spacing="-2">Net</text>
+    <text x="202" y="115" font-size="108" font-weight="900" fill="url(#banFixGrad)" letter-spacing="-2">Fix</text>
+    <circle cx="301" cy="40" r="9" fill="#00F2FE" />
+    <circle cx="301" cy="40" r="16" fill="none" stroke="#34D399" stroke-width="2.5" opacity="0.8" />
+
+    <!-- Subtitle / Tagline -->
+    <text x="4" y="165" font-size="22" font-weight="700" fill="#E2E8F0" letter-spacing="3" text-transform="uppercase">
+      INTELLIGENT ISP AUTOMATION &amp; CLOUD BILLING
+    </text>
+    <text x="4" y="198" font-size="16" font-weight="500" fill="#94A3B8" letter-spacing="1">
+      MikroTik RouterOS 7.x Sync • EPON/GPON OLT Telemetry • MFS bKash &amp; Nagad Auto-Recharge
+    </text>
+  </g>
+</svg>

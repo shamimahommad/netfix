@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient (Dark Mode) -->
+    <linearGradient id="darkBgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#080C14" />
+      <stop offset="100%" stop-color="#0F172A" />
+    </linearGradient>
+
+    <!-- Pillar Gradients -->
+    <linearGradient id="logoLeftPillar" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#1D4ED8" />
+    </linearGradient>
+    <linearGradient id="logoBeam" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F2FE" />
+      <stop offset="50%" stop-color="#06B6D4" />
+      <stop offset="100%" stop-color="#10B981" />
+    </linearGradient>
+    <linearGradient id="logoRightPillar" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="100%" stop-color="#34D399" />
+    </linearGradient>
+
+    <!-- Text Accent Gradient for FIX -->
+    <linearGradient id="fixTextGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00F2FE" />
+      <stop offset="60%" stop-color="#06B6D4" />
+      <stop offset="100%" stop-color="#10B981" />
+    </linearGradient>
+
+    <!-- Radial Glow for Icon Base -->
+    <radialGradient id="iconGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="rgba(6, 182, 212, 0.35)" />
+      <stop offset="100%" stop-color="rgba(15, 23, 42, 0)" />
+    </radialGradient>
+
+    <!-- Drop Shadow Filter -->
+    <filter id="logoShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#0284C7" flood-opacity="0.3" />
+    </filter>
+  </defs>
+
+  <style>
+    .font-brand {
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+  </style>
+
+  <!-- Left Icon Mark (Centered at X=100, Y=100) -->
+  <g transform="translate(25, 25)">
+    <!-- Icon Box Squircle (150x150) -->
+    <rect x="0" y="0" width="150" height="150" rx="36" ry="36" fill="#0B0F19" stroke="url(#fixTextGrad)" stroke-width="2" stroke-opacity="0.6" />
+    <circle cx="75" cy="75" r="60" fill="url(#iconGlow)" />
+
+    <!-- Signal Arcs -->
+    <path d="M 98 38 A 28 28 0 0 1 122 62" fill="none" stroke="#34D399" stroke-width="2.5" stroke-linecap="round" opacity="0.6" />
+    <path d="M 103 44 A 20 20 0 0 1 116 57" fill="none" stroke="#00F2FE" stroke-width="3" stroke-linecap="round" />
+
+    <!-- N Symbol inside Icon -->
+    <g filter="url(#logoShadow)">
+      <!-- Left Pillar -->
+      <rect x="36" y="44" width="18" height="66" rx="9" fill="url(#logoLeftPillar)" />
+      <!-- Diagonal Connector -->
+      <path d="M 45 44 L 105 110 L 87 110 L 36 53 Z" fill="url(#logoBeam)" />
+      <!-- Right Pillar -->
+      <rect x="96" y="44" width="18" height="66" rx="9" fill="url(#logoRightPillar)" />
+    </g>
+
+    <!-- High-tech Nodes -->
+    <circle cx="45" cy="53" r="5" fill="#FFFFFF" />
+    <circle cx="105" cy="101" r="5" fill="#FFFFFF" />
+    <circle cx="75" cy="77" r="3.5" fill="#00F2FE" />
+  </g>
+
+  <!-- Typography: NetFix -->
+  <g class="font-brand" transform="translate(210, 0)">
+    <!-- "Net" in Ultra-Bold Crisp White -->
+    <text x="0" y="112" font-size="78" font-weight="900" fill="#FFFFFF" letter-spacing="-1.5">Net</text>
+
+    <!-- "Fix" in Glowing Tech Gradient -->
+    <text x="146" y="112" font-size="78" font-weight="900" fill="url(#fixTextGrad)" letter-spacing="-1.5">Fix</text>
+
+    <!-- Spark / Pulse on the "i" in Fix -->
+    <circle cx="217" cy="56" r="6.5" fill="#00F2FE" />
+    <circle cx="217" cy="56" r="11" fill="none" stroke="#34D399" stroke-width="2" opacity="0.8" />
+
+    <!-- Subtitle / Tagline -->
+    <text x="4" y="148" font-size="14.5" font-weight="700" fill="#94A3B8" letter-spacing="4" text-transform="uppercase">
+      ISP AUTOMATION &amp; CLOUD BILLING
+    </text>
+
+    <!-- Small Network Badge Pill -->
+    <rect x="420" y="70" width="84" height="24" rx="12" ry="12" fill="rgba(6, 182, 212, 0.12)" stroke="#06B6D4" stroke-width="1.2" stroke-opacity="0.4" />
+    <circle cx="433" cy="82" r="3" fill="#10B981" />
+    <text x="442" y="86" font-size="10" font-weight="800" fill="#38BDF8" letter-spacing="1">CLOUD</text>
+  </g>
+</svg>
