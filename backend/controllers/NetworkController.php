@@ -1901,18 +1901,30 @@ class NetworkController {
         // - Agent sees only own customers
         // - Admin's customers are strictly excluded for Resellers and Agents!
         $custSql = "SELECT na.username, na.mac_address, na.remote_address, na.network_device_id as router_id,
+                           na.mikrotik_profile_name,
                            c.customer_id, c.customer_code, c.full_name, c.phone,
-                           c.status as customer_status, c.billing_status,
+                           c.status as customer_status, c.billing_status, c.metadata,
                            cs.expires_at, cs.status as service_status,
+                           cs.profile_name as package_name, cs.price as package_price,
+                           cs.download_speed_kbps, cs.upload_speed_kbps,
+                           sa.name as area_name, sub.name as sub_area_name,
+                           nd.device_name as allowed_mik,
                            c.owner_id, c.owner_role, c.owner_path,
                            u.username as owner_username, u.first_name as owner_first_name, u.last_name as owner_last_name, u.role as owner_user_role
                     FROM customer_network_accounts na 
                     JOIN customers c ON c.customer_id = na.customer_id 
+                    LEFT JOIN network_devices nd ON nd.network_device_id = na.network_device_id
                     LEFT JOIN (
-                        SELECT customer_id, MAX(expires_at) as expires_at, MAX(status) as status
-                        FROM customer_services
-                        GROUP BY customer_id
+                        SELECT cs1.customer_id, cs1.expires_at, cs1.status, 
+                               ap.profile_name, ap.price, ap.download_speed_kbps, ap.upload_speed_kbps
+                        FROM customer_services cs1
+                        JOIN access_profiles ap ON ap.access_profile_id = cs1.access_profile_id
+                        WHERE cs1.customer_service_id = (
+                            SELECT MAX(cs2.customer_service_id) FROM customer_services cs2 WHERE cs2.customer_id = cs1.customer_id
+                        )
                     ) cs ON cs.customer_id = c.customer_id
+                    LEFT JOIN service_areas sa ON sa.service_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) AS UNSIGNED)
+                    LEFT JOIN sub_areas sub ON sub.sub_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.sub_area_id')) AS UNSIGNED)
                     LEFT JOIN users u ON u.user_id = c.owner_id
                     WHERE na.tenant_id = :tid AND na.username IS NOT NULL";
         $custParams = ['tid' => $tenantId];
@@ -2186,6 +2198,20 @@ class NetworkController {
                     $registeredMac = strtoupper(str_replace(['-', '.', ' '], ':', trim($customerInfo['mac_address'])));
                 }
 
+                $meta = json_decode($customerInfo['metadata'] ?? '{}', true) ?: [];
+                $zoneCode = $meta['zone'] ?? ($customerInfo['sub_area_name'] ?? ($customerInfo['area_name'] ?? ($customerInfo['customer_code'] ?? '')));
+
+                $packageLabel = '';
+                if (!empty($customerInfo['download_speed_kbps'])) {
+                    $speedMb = round($customerInfo['download_speed_kbps'] / 1024);
+                    $priceTk = !empty($customerInfo['package_price']) ? round((float)$customerInfo['package_price']) : 0;
+                    $packageLabel = $speedMb > 0 ? ($priceTk > 0 ? "{$speedMb}Mb-{$priceTk}TK" : "{$speedMb}Mb") : ($customerInfo['package_name'] ?? '');
+                } elseif (!empty($customerInfo['package_name'])) {
+                    $packageLabel = $customerInfo['package_name'];
+                }
+
+                $remarks = $isExpired ? 'Expired' : ($statusLabel === 'Suspended' ? 'Suspended' : ($action === 'failed' ? 'Failed' : ($action === 'logout' ? 'Disconnected' : 'OK')));
+
                 $customerData = [
                     'customer_id' => (string)$customerInfo['customer_id'],
                     'customer_code' => $customerInfo['customer_code'],
@@ -2193,13 +2219,21 @@ class NetworkController {
                     'phone' => $customerInfo['phone'] ?? null,
                     'status' => $statusLabel,
                     'is_expired' => $isExpired,
+                    'remarks' => $remarks,
                     'expires_at' => $expiresAt,
                     'billing_status' => $customerInfo['billing_status'] ?? null,
                     'caller_id' => $registeredMac,
+                    'package_info' => $packageLabel,
+                    'zone' => $zoneCode,
                     'owner_id' => (string)($customerInfo['owner_id'] ?? ''),
                     'owner_name' => $ownerFullName,
                     'owner_role' => $customerInfo['owner_user_role'] ?? ($customerInfo['owner_role'] ?? 'admin'),
                 ];
+            } else {
+                $isExpired = false;
+                $remarks = ($action === 'failed') ? 'Auth Failed' : (($action === 'logout') ? 'Disconnected' : (($action === 'login' || $action === 'connected') ? 'OK' : 'Unknown'));
+                $packageLabel = '';
+                $zoneCode = '';
             }
 
             $finalMac = $mac ?: $registeredMac;
@@ -2209,8 +2243,15 @@ class NetworkController {
                 'time' => $time,
                 'topics' => $topics,
                 'action' => $action,
+                'remarks' => $remarks,
+                'is_expired' => $isExpired,
                 'username' => $username,
                 'customer' => $customerData,
+                'package_info' => $packageLabel,
+                'pool_queue' => $customerInfo['mikrotik_profile_name'] ?? null,
+                'vlan_mik' => '@ ' . ($rName ?: 'PPPoE-Server'),
+                'allowed_mik' => $customerInfo['allowed_mik'] ?? ($rName ?: 'PPPoE-Server'),
+                'zone' => $zoneCode,
                 'ip' => $ip,
                 'mac' => $finalMac,
                 'caller_mac' => $finalMac,

@@ -86,6 +86,133 @@ try {
         $total = count($filtered);
         $paginated = array_slice(array_values($filtered), ($page - 1) * $perPage, $perPage);
 
+        // Enrich paginated logs with customer, package_info, zone, allowed_mik, vlan_mik, remarks, is_expired
+        $usernames = [];
+        foreach ($paginated as $item) {
+            $u = strtolower(trim($item['username'] ?? ''));
+            if ($u !== '') {
+                $usernames[$u] = true;
+            }
+        }
+
+        $customerMap = [];
+        if (!empty($usernames)) {
+            $uList = array_keys($usernames);
+            $inPlaceholders = implode(',', array_fill(0, count($uList), '?'));
+            $custSql = "SELECT na.username, na.mac_address as registered_mac, na.network_device_id,
+                               c.customer_id, c.customer_code, c.full_name, c.phone, c.status as customer_status,
+                               c.billing_status, c.metadata,
+                               cs.expires_at, cs.status as service_status,
+                               cs.profile_name as package_name, cs.price as package_price,
+                               cs.download_speed_kbps, cs.upload_speed_kbps,
+                               sa.name as area_name, sub.name as sub_area_name,
+                               nd.device_name as allowed_mik,
+                               c.owner_id, c.owner_role,
+                               u.username as owner_username, u.first_name as owner_first_name, u.last_name as owner_last_name
+                        FROM customer_network_accounts na 
+                        JOIN customers c ON c.customer_id = na.customer_id 
+                        LEFT JOIN network_devices nd ON nd.network_device_id = na.network_device_id
+                        LEFT JOIN (
+                            SELECT cs1.customer_id, cs1.expires_at, cs1.status, 
+                                   ap.profile_name, ap.price, ap.download_speed_kbps, ap.upload_speed_kbps
+                            FROM customer_services cs1
+                            JOIN access_profiles ap ON ap.access_profile_id = cs1.access_profile_id
+                            WHERE cs1.customer_service_id = (
+                                SELECT MAX(cs2.customer_service_id) FROM customer_services cs2 WHERE cs2.customer_id = cs1.customer_id
+                            )
+                        ) cs ON cs.customer_id = c.customer_id
+                        LEFT JOIN service_areas sa ON sa.service_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) AS UNSIGNED)
+                        LEFT JOIN sub_areas sub ON sub.sub_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.sub_area_id')) AS UNSIGNED)
+                        LEFT JOIN users u ON u.user_id = c.owner_id
+                        WHERE na.tenant_id = ? AND LOWER(na.username) IN ($inPlaceholders)";
+            try {
+                $cStmt = $db->prepare($custSql);
+                $cStmt->execute(array_merge([$tenantId], $uList));
+                while ($crow = $cStmt->fetch(PDO::FETCH_ASSOC)) {
+                    $customerMap[strtolower($crow['username'])] = $crow;
+                }
+            } catch (\Throwable $e) {}
+        }
+
+        $enrichedPaginated = [];
+        foreach ($paginated as $item) {
+            $uname = strtolower(trim($item['username'] ?? ''));
+            $cRow = $customerMap[$uname] ?? null;
+            $evType = strtolower($item['event_type'] ?? $item['action'] ?? '');
+            
+            $isExpired = false;
+            $remarks = ($evType === 'auth_failed' || $evType === 'failed') ? 'Auth Failed' : (($evType === 'disconnected' || $evType === 'logout') ? 'Disconnected' : 'OK');
+            $packageLabel = '';
+            $zoneCode = 'ZONE-01';
+            $allowedMik = $item['router_name'] ?? 'PPPoE-Server';
+            $vlanMik = '@ ' . ($item['router_name'] ?? 'PPPoE-Server');
+            $customerData = null;
+
+            if ($cRow) {
+                $statusLabel = $cRow['customer_status'] ?? 'Active';
+                $serviceStatus = $cRow['service_status'] ?? 'active';
+                $expiresAt = $cRow['expires_at'] ?? null;
+                $isExpired = ($statusLabel === 'Expired' || $serviceStatus === 'expired' || ($expiresAt && strtotime($expiresAt) < time()));
+                if ($isExpired) {
+                    $statusLabel = 'Expired';
+                    $remarks = 'Expired';
+                } elseif ($statusLabel === 'Suspended' || $serviceStatus === 'suspended') {
+                    $remarks = 'Suspended';
+                }
+
+                $meta = [];
+                if (!empty($cRow['metadata'])) {
+                    $meta = is_array($cRow['metadata']) ? $cRow['metadata'] : (@json_decode($cRow['metadata'], true) ?: []);
+                }
+                $zoneCode = trim($meta['zone'] ?? $meta['sdt_zone'] ?? $meta['area_code'] ?? $cRow['sub_area_name'] ?? $cRow['area_name'] ?? 'ZONE-01');
+
+                $speed = $cRow['download_speed_kbps'] ? round($cRow['download_speed_kbps'] / 1024) . 'Mb' : '';
+                $price = $cRow['package_price'] ? round($cRow['package_price']) . 'TK' : '';
+                $packageLabel = trim(($speed ? $speed . '-' : '') . ($price ?: ($cRow['package_name'] ?? 'Standard')));
+
+                $allowedMik = $cRow['allowed_mik'] ?? ($item['router_name'] ?? 'PPPoE-Server');
+                $vlanMik = '@ ' . ($item['router_name'] ?? 'PPPoE-Server');
+
+                $ownerFullName = trim(($cRow['owner_first_name'] ?? '') . ' ' . ($cRow['owner_last_name'] ?? ''));
+                if (empty($ownerFullName)) {
+                    $ownerFullName = $cRow['owner_username'] ?? '';
+                }
+
+                $customerData = [
+                    'customer_id' => (string)$cRow['customer_id'],
+                    'customer_code' => $cRow['customer_code'],
+                    'full_name' => $cRow['full_name'],
+                    'phone' => $cRow['phone'] ?? null,
+                    'status' => $statusLabel,
+                    'is_expired' => $isExpired,
+                    'remarks' => $remarks,
+                    'expires_at' => $expiresAt,
+                    'billing_status' => $cRow['billing_status'] ?? null,
+                    'caller_id' => $cRow['registered_mac'] ?? null,
+                    'package_info' => $packageLabel,
+                    'zone' => $zoneCode,
+                    'owner_id' => (string)($cRow['owner_id'] ?? ''),
+                    'owner_name' => $ownerFullName,
+                    'owner_role' => $cRow['owner_role'] ?? 'admin',
+                ];
+            }
+
+            $item['remarks'] = $item['remarks'] ?? $remarks;
+            $item['is_expired'] = $item['is_expired'] ?? $isExpired;
+            $item['customer'] = $item['customer'] ?? $customerData;
+            $item['package_info'] = $item['package_info'] ?? $packageLabel;
+            $item['zone'] = $item['zone'] ?? $zoneCode;
+            $item['allowed_mik'] = $item['allowed_mik'] ?? $allowedMik;
+            $item['vlan_mik'] = $item['vlan_mik'] ?? $vlanMik;
+            $item['pool_queue'] = $item['pool_queue'] ?? null;
+            $item['time'] = $item['time'] ?? $item['logged_at'] ?? date('Y-m-d H:i:s');
+            $item['mac'] = $item['mac'] ?? $item['caller_mac'] ?? null;
+            $item['ip'] = $item['ip'] ?? $item['assigned_ip'] ?? null;
+
+            $enrichedPaginated[] = $item;
+        }
+        $paginated = $enrichedPaginated;
+
         Response::json([
             'success' => true,
             'data' => $paginated,

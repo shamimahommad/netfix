@@ -62,6 +62,8 @@ interface PppoeLogItem {
   topics?: string;
   event_type: 'connected' | 'disconnected' | 'auth_failed' | 'info';
   action?: 'login' | 'logout' | 'failed' | 'connected' | 'authenticated' | 'info';
+  remarks?: string;
+  is_expired?: boolean;
   username: string | null;
   customer: LogCustomer | null;
   assigned_ip?: string | null;
@@ -80,6 +82,11 @@ interface PppoeLogItem {
   router_id?: string;
   router_name?: string;
   correlated?: boolean;
+  package_info?: string;
+  pool_queue?: string | null;
+  vlan_mik?: string;
+  allowed_mik?: string;
+  zone?: string;
 }
 
 interface PppoeLogsResponse {
@@ -158,6 +165,23 @@ function formatLogTimestamp(ts: string | undefined): { date: string; time: strin
   }
 }
 
+function formatIspLoginTime(ts: string | undefined): string {
+  if (!ts) return '—';
+  try {
+    const cleanTs = ts.includes(' ') && !ts.includes('T') ? ts.replace(' ', 'T') : ts;
+    const d = new Date(cleanTs);
+    if (isNaN(d.getTime())) return ts;
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const mins = String(d.getMinutes()).padStart(2, '0');
+    const secs = String(d.getSeconds()).padStart(2, '0');
+    return `${day}/${month} ${hours}:${mins}:${secs}`;
+  } catch {
+    return ts;
+  }
+}
+
 export default function PppoeLogsPage() {
   const toast = useToastContext();
   const [logs, setLogs] = useState<PppoeLogItem[]>([]);
@@ -166,6 +190,9 @@ export default function PppoeLogsPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'isp_sample' | 'detailed'>('isp_sample');
+  const [sortColumn, setSortColumn] = useState<string>('time');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [tierInfo, setTierInfo] = useState<{
     mode: 'short_term_redis' | 'long_term_victoria' | 'disabled';
     label: string;
@@ -186,9 +213,9 @@ export default function PppoeLogsPage() {
   // Selection state (ModernCheckbox)
   const [selectedLogIds, setSelectedLogIds] = useState<Set<string>>(new Set());
 
-  // Pagination
+  // Pagination (Default 100 entries matching sample)
   const [page, setPage] = useState<number>(1);
-  const [perPage, setPerPage] = useState<number>(25);
+  const [perPage, setPerPage] = useState<number>(100);
   const [totalRecords, setTotalRecords] = useState<number>(0);
   const [totalPages, setTotalPages] = useState<number>(1);
 
@@ -427,6 +454,62 @@ export default function PppoeLogsPage() {
     setUserFilter(null);
     setPage(1);
   };
+
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortColumn(column);
+      setSortDirection('desc');
+    }
+  };
+
+  const renderSortIndicator = (column: string) => {
+    if (sortColumn !== column) {
+      return <span className="text-slate-400 text-[10px] ml-1">⇅</span>;
+    }
+    return (
+      <span className="text-blue-600 dark:text-blue-400 text-xs ml-1 font-bold">
+        {sortDirection === 'asc' ? '▲' : '▼'}
+      </span>
+    );
+  };
+
+  // Sorted Logs Memo
+  const sortedLogs = useMemo(() => {
+    const list = [...logs];
+    return list.sort((a, b) => {
+      let cmp = 0;
+      if (sortColumn === 'time') {
+        const timeA = new Date((a.logged_at || a.time || '').replace(' ', 'T')).getTime() || 0;
+        const timeB = new Date((b.logged_at || b.time || '').replace(' ', 'T')).getTime() || 0;
+        cmp = timeA - timeB;
+      } else if (sortColumn === 'username') {
+        cmp = (a.username || '').localeCompare(b.username || '');
+      } else if (sortColumn === 'remarks') {
+        const isExpA = Boolean(a.is_expired || a.remarks === 'Expired' || a.customer?.is_expired);
+        const isExpB = Boolean(b.is_expired || b.remarks === 'Expired' || b.customer?.is_expired);
+        const remA = a.remarks || (isExpA ? 'Expired' : 'OK');
+        const remB = b.remarks || (isExpB ? 'Expired' : 'OK');
+        cmp = remA.localeCompare(remB);
+      } else if (sortColumn === 'customer') {
+        const nameA = a.customer?.full_name || a.username || '';
+        const nameB = b.customer?.full_name || b.username || '';
+        cmp = nameA.localeCompare(nameB);
+      } else if (sortColumn === 'pool_queue') {
+        cmp = (a.pool_queue || '').localeCompare(b.pool_queue || '');
+      } else if (sortColumn === 'vlan_mik') {
+        cmp = (a.vlan_mik || '').localeCompare(b.vlan_mik || '');
+      } else if (sortColumn === 'allowed_mik') {
+        cmp = (a.allowed_mik || a.router_name || '').localeCompare(b.allowed_mik || b.router_name || '');
+      } else if (sortColumn === 'mac') {
+        cmp = (a.caller_mac || a.mac || '').localeCompare(b.caller_mac || b.mac || '');
+      } else if (sortColumn === 'zone') {
+        cmp = (a.zone || '').localeCompare(b.zone || '');
+      }
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [logs, sortColumn, sortDirection]);
 
   // Modern Checkbox Selection Handlers
   const isAllSelected = useMemo(() => {
@@ -922,6 +1005,84 @@ export default function PppoeLogsPage() {
 
       {/* Main Logs DataTable */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden">
+        {/* Table Toolbar & View Switcher (Matches Sample: Show [100 ▾] entries ... Search: [   ]) */}
+        <div className="bg-slate-50/90 dark:bg-slate-800/60 px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          {/* Left: Show [ 100 ▾ ] entries */}
+          <div className="flex items-center gap-2 text-xs sm:text-sm text-slate-700 dark:text-slate-300">
+            <span className="font-medium">Show</span>
+            <select
+              value={perPage}
+              onChange={(e) => {
+                setPerPage(Number(e.target.value));
+                setPage(1);
+              }}
+              className="px-2.5 py-1 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md font-semibold text-slate-800 dark:text-slate-100 shadow-2xs focus:ring-2 focus:ring-blue-500/20"
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+            </select>
+            <span className="font-medium">entries</span>
+          </div>
+
+          {/* Center: View Switcher */}
+          <div className="inline-flex items-center bg-slate-200/80 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-300/60 dark:border-slate-700/60 self-start md:self-auto">
+            <button
+              type="button"
+              onClick={() => setViewMode('isp_sample')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+                viewMode === 'isp_sample'
+                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              📋 ISP Billing Standard
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('detailed')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+                viewMode === 'detailed'
+                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              🔍 Telemetry View
+            </button>
+          </div>
+
+          {/* Right: Search: [ __________ ] */}
+          <div className="flex items-center gap-2 text-xs sm:text-sm text-slate-700 dark:text-slate-300 self-end md:self-auto">
+            <span className="font-medium">Search:</span>
+            <div className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search..."
+                className="px-2.5 py-1 text-xs sm:text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500/20 outline-none w-44 sm:w-56"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setPage(1);
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
         {isLoading ? (
           <div className="p-16 text-center text-slate-500 dark:text-slate-400 space-y-3">
             <RefreshCw className="w-8 h-8 animate-spin mx-auto text-blue-600" />
@@ -955,7 +1116,248 @@ export default function PppoeLogsPage() {
               <span>Open Setup & 1-Click Auto Config</span>
             </button>
           </div>
+        ) : viewMode === 'isp_sample' ? (
+          /* ISP Standard Table View (Matches Sample Screenshot) */
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs sm:text-sm border-collapse">
+              <thead className="bg-slate-100 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs sticky top-0 z-10 select-none">
+                <tr>
+                  <th className="py-2.5 px-3" style={{ width: '40px' }}>
+                    <ModernCheckbox
+                      checked={isAllSelected}
+                      indeterminate={isIndeterminate}
+                      onChange={handleSelectAll}
+                      title="Select all logs on this page"
+                    />
+                  </th>
+                  <th 
+                    className="py-2.5 px-3 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700/60 transition-colors whitespace-nowrap"
+                    onClick={() => handleSort('time')}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Login Time</span>
+                      {renderSortIndicator('time')}
+                    </div>
+                  </th>
+                  <th 
+                    className="py-2.5 px-3 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700/60 transition-colors whitespace-nowrap"
+                    onClick={() => handleSort('username')}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>UserName</span>
+                      {renderSortIndicator('username')}
+                    </div>
+                  </th>
+                  <th 
+                    className="py-2.5 px-3 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700/60 transition-colors whitespace-nowrap"
+                    onClick={() => handleSort('remarks')}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Remarks</span>
+                      {renderSortIndicator('remarks')}
+                    </div>
+                  </th>
+                  <th 
+                    className="py-2.5 px-3 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700/60 transition-colors whitespace-nowrap"
+                    onClick={() => handleSort('customer')}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Customer Name</span>
+                      {renderSortIndicator('customer')}
+                    </div>
+                  </th>
+                  <th 
+                    className="py-2.5 px-3 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700/60 transition-colors whitespace-nowrap"
+                    onClick={() => handleSort('pool_queue')}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Pool/Queue</span>
+                      {renderSortIndicator('pool_queue')}
+                    </div>
+                  </th>
+                  <th 
+                    className="py-2.5 px-3 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700/60 transition-colors whitespace-nowrap"
+                    onClick={() => handleSort('vlan_mik')}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>VLan @ Mik</span>
+                      {renderSortIndicator('vlan_mik')}
+                    </div>
+                  </th>
+                  <th 
+                    className="py-2.5 px-3 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700/60 transition-colors whitespace-nowrap"
+                    onClick={() => handleSort('allowed_mik')}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Allowed Mik</span>
+                      {renderSortIndicator('allowed_mik')}
+                    </div>
+                  </th>
+                  <th 
+                    className="py-2.5 px-3 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700/60 transition-colors whitespace-nowrap"
+                    onClick={() => handleSort('mac')}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Mac Address</span>
+                      {renderSortIndicator('mac')}
+                    </div>
+                  </th>
+                  <th 
+                    className="py-2.5 px-3 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700/60 transition-colors whitespace-nowrap"
+                    onClick={() => handleSort('zone')}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>SDT/Zone</span>
+                      {renderSortIndicator('zone')}
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
+                {sortedLogs.map((item) => {
+                  const isSelected = selectedLogIds.has(item.id);
+                  const isExpired = Boolean(
+                    item.is_expired || 
+                    item.remarks === 'Expired' || 
+                    item.customer?.is_expired || 
+                    item.customer?.status === 'Expired' ||
+                    item.action === 'failed' || 
+                    item.event_type === 'auth_failed'
+                  );
+                  const rowTextColor = isExpired 
+                    ? 'text-red-600 dark:text-red-400 font-bold' 
+                    : 'text-slate-800 dark:text-slate-200 font-medium';
+
+                  const loginTimeStr = formatIspLoginTime(item.logged_at || item.time);
+                  const macVal = item.caller_mac || item.mac || '—';
+                  const pkgVal = item.package_info || (item.customer as any)?.package_info || '';
+                  const macDisplay = pkgVal ? `${macVal} / ${pkgVal}` : macVal;
+                  const remarksVal = item.remarks || (isExpired ? 'Expired' : (item.event_type === 'disconnected' ? 'Disconnected' : 'OK'));
+                  const customerNameVal = item.customer?.full_name || item.username || '—';
+                  const allowedMikVal = item.allowed_mik || item.router_name || 'PPPoE-Server-8';
+                  const vlanMikVal = item.vlan_mik || `@ ${allowedMikVal}`;
+                  const zoneVal = item.zone || (item.customer as any)?.zone || 'MTLKTBPR01';
+
+                  return (
+                    <tr
+                      key={item.id}
+                      className={`transition-colors cursor-pointer border-b border-slate-100 dark:border-slate-800/80 ${
+                        isSelected 
+                          ? 'bg-blue-50/60 dark:bg-blue-900/15' 
+                          : isExpired 
+                          ? 'bg-red-50/30 dark:bg-red-950/15 hover:bg-red-50/50 dark:hover:bg-red-950/30' 
+                          : 'hover:bg-slate-50/70 dark:hover:bg-slate-800/50'
+                      }`}
+                      onClick={() => handleSelectLog(item.id)}
+                    >
+                      {/* Checkbox */}
+                      <td className="py-2.5 px-3" onClick={(e) => e.stopPropagation()}>
+                        <ModernCheckbox
+                          checked={isSelected}
+                          onChange={() => handleSelectLog(item.id)}
+                          title="Select this log"
+                        />
+                      </td>
+
+                      {/* Login Time */}
+                      <td className={`py-2.5 px-3 whitespace-nowrap font-mono text-xs ${rowTextColor}`}>
+                        {loginTimeStr}
+                      </td>
+
+                      {/* UserName with 🔍 search icon */}
+                      <td className="py-2.5 px-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleFilterByUser(item.username || '')}
+                            title={`Filter history for user ${item.username}`}
+                            className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
+                          >
+                            <Search className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleFilterByUser(item.username || '')}
+                            className={`hover:underline font-mono text-left cursor-pointer ${rowTextColor}`}
+                          >
+                            {item.username || '—'}
+                          </button>
+                        </div>
+                      </td>
+
+                      {/* Remarks */}
+                      <td className={`py-2.5 px-3 whitespace-nowrap ${rowTextColor}`}>
+                        {remarksVal}
+                      </td>
+
+                      {/* Customer Name with ❌ / ✅ icon */}
+                      <td className="py-2.5 px-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1.5">
+                          {isExpired ? (
+                            <span className="text-red-600 font-bold text-xs" title="Subscription Expired / Inactive">❌</span>
+                          ) : (
+                            <span className="text-emerald-600 font-bold text-xs" title="Active / Verified">✅</span>
+                          )}
+                          {item.customer ? (
+                            <Link
+                              to={`/dashboard/customers/view/${item.customer.customer_id}`}
+                              className={`hover:underline ${rowTextColor}`}
+                              title={`View Customer details (${item.customer.customer_code})`}
+                            >
+                              {customerNameVal}
+                            </Link>
+                          ) : (
+                            <span className={rowTextColor}>{customerNameVal}</span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Pool/Queue */}
+                      <td className={`py-2.5 px-3 whitespace-nowrap ${rowTextColor}`}>
+                        {item.pool_queue || '—'}
+                      </td>
+
+                      {/* VLan @ Mik */}
+                      <td className={`py-2.5 px-3 whitespace-nowrap font-mono text-xs ${rowTextColor}`}>
+                        {vlanMikVal}
+                      </td>
+
+                      {/* Allowed Mik */}
+                      <td className={`py-2.5 px-3 whitespace-nowrap font-mono text-xs ${rowTextColor}`}>
+                        {allowedMikVal}
+                      </td>
+
+                      {/* Mac Address */}
+                      <td className="py-2.5 px-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`font-mono text-xs ${rowTextColor}`}>
+                            {macDisplay}
+                          </span>
+                          {macVal !== '—' && (
+                            <button
+                              type="button"
+                              onClick={() => copyToClipboard(macVal, `Copied MAC: ${macVal}`)}
+                              title="Copy MAC Address"
+                              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
+                            >
+                              {copiedText === macVal ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* SDT/Zone */}
+                      <td className={`py-2.5 px-3 whitespace-nowrap font-mono text-xs ${rowTextColor}`}>
+                        {zoneVal}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         ) : (
+          /* Detailed Telemetry View (Network Diagnostics) */
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs sm:text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold uppercase tracking-wider text-[11px] sticky top-0 z-10 select-none">
@@ -999,7 +1401,7 @@ export default function PppoeLogsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium bg-white dark:bg-slate-900">
-                {logs.map((item) => {
+                {sortedLogs.map((item) => {
                   const ev = item.event_type || item.action || 'info';
                   const isSelected = selectedLogIds.has(item.id);
 
