@@ -509,9 +509,9 @@ class TenantsController {
         Response::json([
             'success' => true,
             'data' => [
-                ['id' => 'mim_sms', 'name' => 'MIM SMS Gateway (Bangladesh)'],
-                ['id' => 'greenweb', 'name' => 'GreenWeb SMS'],
-                ['id' => 'bulksmsbd', 'name' => 'BulkSMS BD'],
+                ['id' => 'mim_sms', 'name' => 'MIM SMS Gateway (mimsms.com)'],
+                ['id' => 'bulksmsbd', 'name' => 'BulkSMS BD (bulksmsbd.net)'],
+                ['id' => 'greenweb', 'name' => 'GreenWeb SMS (greenweb.com.bd)'],
                 ['id' => 'infobip', 'name' => 'Infobip Global'],
             ],
         ]);
@@ -964,38 +964,96 @@ class TenantsController {
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $db = Database::getConnection();
 
-        $provider = $data['providerName'] ?? 'mim_sms';
+        $realTenantId = is_numeric($id) ? (int)$id : 0;
+        $tStmt = $db->prepare("SELECT tenant_id FROM tenants WHERE tenant_id = :id OR tenant_code = :code OR tenant_slug = :slug LIMIT 1");
+        $tStmt->execute(['id' => $realTenantId, 'code' => $id, 'slug' => $id]);
+        $tid = $tStmt->fetchColumn();
+        if ($tid) {
+            $realTenantId = (int)$tid;
+        }
+
+        $provider = trim($data['providerName'] ?? ($data['provider'] ?? 'mim_sms'));
         $enabled = !empty($data['isEnabled']) ? 1 : 0;
         $creds = $data['credentials'] ?? [];
 
+        $apiKey = trim($creds['apiKey'] ?? ($creds['apikey'] ?? ($creds['api_key'] ?? '')));
+        $senderId = trim($creds['senderId'] ?? ($creds['senderName'] ?? ($creds['sender_id'] ?? '')));
+
         $stmt = $db->prepare("SELECT id FROM sms_gateway_settings WHERE tenant_id = :tid LIMIT 1");
-        $stmt->execute(['tid' => $id]);
+        $stmt->execute(['tid' => $realTenantId]);
         $exists = $stmt->fetch();
 
         if ($exists) {
             $stmtUp = $db->prepare("UPDATE sms_gateway_settings 
-                SET provider = :p, is_active = :act, api_key = COALESCE(:ak, api_key), sender_id = COALESCE(:sid, sender_id)
+                SET provider = :p, is_active = :act, api_key = :ak, sender_id = :sid
                 WHERE id = :id");
             $stmtUp->execute([
                 'p' => $provider,
                 'act' => $enabled,
-                'ak' => $creds['apiKey'] ?? null,
-                'sid' => $creds['senderId'] ?? null,
+                'ak' => $apiKey,
+                'sid' => $senderId,
                 'id' => $exists['id'],
             ]);
         } else {
             $stmtIn = $db->prepare("INSERT INTO sms_gateway_settings (tenant_id, provider, api_key, sender_id, is_active)
                 VALUES (:tid, :p, :ak, :sid, :act)");
             $stmtIn->execute([
-                'tid' => $id,
+                'tid' => $realTenantId,
                 'p' => $provider,
-                'ak' => $creds['apiKey'] ?? '',
-                'sid' => $creds['senderId'] ?? '',
+                'ak' => $apiKey,
+                'sid' => $senderId,
                 'act' => $enabled,
             ]);
         }
 
-        Response::json(['success' => true, 'message' => 'SMS gateway updated']);
+        // Sync sms_enabled in tenant_settings
+        $stmtSet = $db->prepare("INSERT INTO tenant_settings (tenant_id, setting_key, setting_value, created_at, updated_at)
+            VALUES (:tid, 'sms_enabled', :v, NOW(), NOW())
+            ON DUPLICATE KEY UPDATE setting_value = :v2, updated_at = NOW()");
+        $stmtSet->execute([
+            'tid' => $realTenantId,
+            'v' => (string)$enabled,
+            'v2' => (string)$enabled,
+        ]);
+
+        Response::json(['success' => true, 'message' => 'SMS gateway updated successfully']);
+    }
+
+    public static function sendSmsTest(string $id): void {
+        $user = AuthMiddleware::requireAuth();
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+        $db = Database::getConnection();
+
+        $realTenantId = is_numeric($id) ? (int)$id : 0;
+        $tStmt = $db->prepare("SELECT tenant_id, tenant_name FROM tenants WHERE tenant_id = :id OR tenant_code = :code OR tenant_slug = :slug LIMIT 1");
+        $tStmt->execute(['id' => $realTenantId, 'code' => $id, 'slug' => $id]);
+        $row = $tStmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            $realTenantId = (int)$row['tenant_id'];
+        }
+
+        $mobileNumber = trim($data['mobileNumber'] ?? ($data['phone'] ?? ''));
+        if (empty($mobileNumber)) {
+            Response::error('Mobile number is required', 400);
+            return;
+        }
+
+        $ispName = $row['tenant_name'] ?? 'NetFix';
+        $testMsg = "Test SMS from {$ispName}. SMS Gateway is connected and working successfully!";
+
+        require_once __DIR__ . '/../lib/SmsService.php';
+        $res = SmsService::sendSingle($db, $realTenantId, $mobileNumber, $testMsg, 'test');
+
+        if (!$res['success']) {
+            Response::error($res['error'] ?? 'Failed to send test SMS. Please verify your API Key and Sender ID.', 400);
+            return;
+        }
+
+        Response::json([
+            'success' => true,
+            'message' => 'Test SMS sent successfully to ' . $res['to'],
+            'trx_id' => $res['trxn_id'],
+        ]);
     }
 
     public static function resetAdminPassword(string $id): void {

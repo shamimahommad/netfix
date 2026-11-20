@@ -78,11 +78,25 @@ class SmsService {
                         'msg' => $message,
                     ];
                     $res = self::httpPost($url, $payload, true);
-                    if ($res['http_code'] === 200 && ($res['data']['status'] ?? '') === 'success') {
+                    if ($res['http_code'] === 200 && (strtolower($res['data']['status'] ?? '') === 'success' || !empty($res['data']['trx_id']))) {
                         $status = 'success';
                         $trxnId = $res['data']['trx_id'] ?? $trxnId;
                     } else {
-                        $errorMessage = $res['data']['message'] ?? ($res['error'] ?: 'MIM SMS failed');
+                        // Fallback to esms.mimsms.com/smsapi GET/POST endpoint
+                        $altUrl = 'https://esms.mimsms.com/smsapi';
+                        $altPayload = [
+                            'api_key' => $apiKey,
+                            'type' => 'text',
+                            'contacts' => $cleanPhone,
+                            'senderid' => $senderId,
+                            'msg' => $message,
+                        ];
+                        $altRes = self::httpPost($altUrl, $altPayload, false);
+                        if ($altRes['http_code'] === 200 && (strpos($altRes['raw'], 'SMS_SUBMIT_SUCCESS') !== false || strpos($altRes['raw'], '100') !== false || ($altRes['data']['status'] ?? '') === 'success')) {
+                            $status = 'success';
+                        } else {
+                            $errorMessage = $res['data']['message'] ?? ($altRes['raw'] ?: ($res['error'] ?: 'MIM SMS failed'));
+                        }
                     }
                 } else if ($provider === 'greenweb') {
                     $localPhone = self::formatPhoneNumber($toNumber, '01');
@@ -108,10 +122,11 @@ class SmsService {
                         'message' => $message,
                     ];
                     $res = self::httpPost($url, $payload, false);
-                    if ($res['http_code'] === 200 && ($res['data']['response_code'] ?? 0) == 200) {
+                    $respCode = (int)($res['data']['response_code'] ?? 0);
+                    if ($res['http_code'] === 200 && ($respCode === 200 || strpos($res['raw'], 'Submitted Successfully') !== false)) {
                         $status = 'success';
                     } else {
-                        $errorMessage = $res['data']['error_message'] ?? ($res['raw'] ?: 'BulkSMS BD failed');
+                        $errorMessage = $res['data']['error_message'] ?? ($res['data']['success_message'] ?? ($res['raw'] ?: 'BulkSMS BD failed'));
                     }
                 } else {
                     // Generic provider simulation
@@ -177,6 +192,72 @@ class SmsService {
             'failed' => $failed,
             'total' => count($numbers),
             'results' => $results,
+        ];
+    }
+
+    /**
+     * Get live balance from provider or database
+     */
+    public static function getBalance(PDO $db, int $tenantId): array {
+        $settings = self::getGatewaySettings($db, $tenantId);
+        if (!$settings) {
+            return ['balance' => 0.00, 'provider' => 'none'];
+        }
+
+        $provider = $settings['provider'] ?? 'mim_sms';
+        $apiKey = trim($settings['api_key'] ?? '');
+
+        if (empty($apiKey) || $apiKey === 'sandbox_key' || $apiKey === 'test') {
+            return ['balance' => (float)($settings['balance'] ?? 500.00), 'provider' => $provider, 'simulated' => true];
+        }
+
+        try {
+            if ($provider === 'bulksmsbd') {
+                $res = self::httpGet("http://bulksmsbd.net/api/getBalanceApi?api_key=" . urlencode($apiKey));
+                if (!empty($res['data']['balance'])) {
+                    $bal = (float)$res['data']['balance'];
+                    $db->prepare("UPDATE sms_gateway_settings SET balance = :b WHERE id = :id")->execute(['b' => $bal, 'id' => $settings['id']]);
+                    return ['balance' => $bal, 'provider' => $provider];
+                }
+            } else if ($provider === 'greenweb') {
+                $res = self::httpGet("http://api.greenweb.com.bd/grebalsms.php?token=" . urlencode($apiKey));
+                if (!empty($res['raw']) && is_numeric(trim($res['raw']))) {
+                    $bal = (float)trim($res['raw']);
+                    $db->prepare("UPDATE sms_gateway_settings SET balance = :b WHERE id = :id")->execute(['b' => $bal, 'id' => $settings['id']]);
+                    return ['balance' => $bal, 'provider' => $provider];
+                }
+            }
+        } catch (\Throwable $ignored) {}
+
+        return ['balance' => (float)($settings['balance'] ?? 0.00), 'provider' => $provider];
+    }
+
+    /**
+     * Helper for HTTP GET requests
+     */
+    private static function httpGet(string $url): array {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+
+        $res = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+
+        $decoded = null;
+        if (!empty($res)) {
+            $decoded = json_decode($res, true);
+        }
+
+        return [
+            'http_code' => $code,
+            'raw' => $res,
+            'data' => $decoded,
+            'error' => $err,
         ];
     }
 

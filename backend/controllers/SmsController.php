@@ -145,12 +145,11 @@ class SmsController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT balance FROM sms_gateway_settings WHERE tenant_id = :tid LIMIT 1");
-        $stmt->execute(['tid' => $tenantId]);
-        $row = $stmt->fetch();
+        $balInfo = SmsService::getBalance($db, $tenantId);
 
         Response::json([
-            'balance' => $row ? (float)$row['balance'] : 450.00,
+            'balance' => $balInfo['balance'] ?? 0.00,
+            'provider' => $balInfo['provider'] ?? 'none',
         ]);
     }
 }

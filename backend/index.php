@@ -664,6 +664,9 @@ if ($method === 'POST' && (preg_match('#^/tenants/([^/]+)/payment-gateways/test$
 if ($method === 'PUT' && preg_match('#^/tenants/([^/]+)/sms-gateway$#', $uri, $m)) {
     TenantsController::updateSmsGateway($m[1]);
 }
+if ($method === 'POST' && preg_match('#^/tenants/([^/]+)/sms-test$#', $uri, $m)) {
+    TenantsController::sendSmsTest($m[1]);
+}
 if ($method === 'PATCH' && preg_match('#^/tenants/([^/]+)/limits$#', $uri, $m)) {
     TenantsController::updateLimits($m[1]);
 }
