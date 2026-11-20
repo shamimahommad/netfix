@@ -827,10 +827,54 @@ class PaymentGatewayService {
                 // 4. Double-Entry Multi-Tier Margin Split Disbursement
                 $splitResult = null;
                 $splitTargetInvId = $invoiceId;
+
+                // If an invoice wasn't explicitly given, check for recently settled pending invoice
                 if (!$splitTargetInvId) {
-                    $sInv = $db->prepare("SELECT invoice_id FROM invoices WHERE customer_id = :cid AND tenant_id = :tid ORDER BY invoice_id DESC LIMIT 1");
+                    $sInv = $db->prepare("SELECT invoice_id FROM invoices 
+                        WHERE customer_id = :cid AND tenant_id = :tid AND status = 'paid' 
+                          AND updated_at >= DATE_SUB(NOW(), INTERVAL 2 MINUTE) 
+                        ORDER BY invoice_id DESC LIMIT 1");
                     $sInv->execute(['cid' => $customerId, 'tid' => $tenantId]);
                     $splitTargetInvId = $sInv->fetchColumn() ?: null;
+                }
+
+                // If still no invoice or if the selected invoice was already split in wallet_ledger, create a new paid invoice
+                $needsNewInvoice = false;
+                if (!$splitTargetInvId) {
+                    $needsNewInvoice = true;
+                } else {
+                    $stmtCheckSplit = $db->prepare("SELECT 1 FROM wallet_ledger WHERE invoice_id = :inv LIMIT 1");
+                    $stmtCheckSplit->execute(['inv' => $splitTargetInvId]);
+                    if ($stmtCheckSplit->fetchColumn()) {
+                        $needsNewInvoice = true;
+                    }
+                }
+
+                if ($needsNewInvoice) {
+                    $stmtCs = $db->prepare("SELECT cs.customer_service_id, cs.access_profile_id 
+                        FROM customer_services cs 
+                        WHERE cs.customer_id = :cid AND cs.tenant_id = :tid 
+                        ORDER BY cs.customer_service_id DESC LIMIT 1");
+                    $stmtCs->execute(['cid' => $customerId, 'tid' => $tenantId]);
+                    $csRow = $stmtCs->fetch(PDO::FETCH_ASSOC);
+
+                    $invNum = 'INV-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(3)));
+                    $stmtNewInv = $db->prepare("INSERT INTO invoices 
+                        (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, subtotal, total_amount, paid_amount, balance_due, status, payment_method, notes, created_at, updated_at)
+                        VALUES 
+                        (:tid, :cid, :csid, :invnum, CURDATE(), CURDATE(), :subtotal, :total, :paid, 0.00, 'paid', :pm, :notes, NOW(), NOW())");
+                    $stmtNewInv->execute([
+                        'tid' => $tenantId,
+                        'cid' => $customerId,
+                        'csid' => $csRow['customer_service_id'] ?? null,
+                        'invnum' => $invNum,
+                        'subtotal' => $amount,
+                        'total' => $amount,
+                        'paid' => $amount,
+                        'pm' => $gateway,
+                        'notes' => "Online payment via {$gateway} (Txn: {$transRef})",
+                    ]);
+                    $splitTargetInvId = (int)$db->lastInsertId();
                 }
 
                 if ($splitTargetInvId) {
