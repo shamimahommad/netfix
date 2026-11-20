@@ -7,6 +7,7 @@ import {
   Printer, 
   RotateCcw, 
   XCircle, 
+  ArrowRightLeft,
   Search, 
   CreditCard, 
   Calendar, 
@@ -154,13 +155,18 @@ export default function CustomerInvoicesPage() {
     return { totalCount, totalBilled, totalPaid, totalDue };
   }, [invoices]);
 
+  const authUser = useAuthStore((s) => s.user);
+  const userRole = (authUser?.role_code || (authUser as any)?.role || '').toLowerCase();
+  const canManageInvoices = ['admin', 'saas_admin', 'isp_admin', 'tenant_admin', 'manager', 'super_admin'].includes(userRole);
+
   const isPaid = (inv: InvoiceDto) => (inv.status || '').toLowerCase() === 'paid';
   const canCancelOrReturn = (inv: InvoiceDto) => isPaid(inv) && inv.isLastPaidInvoice === true;
 
-  const showCancelReturnButtons = (inv: InvoiceDto) => canCancelOrReturn(inv);
+  const showCancelReturnButtons = (inv: InvoiceDto) => canManageInvoices && canCancelOrReturn(inv);
+  const showTransferButton = (inv: InvoiceDto) => canManageInvoices && isPaid(inv);
 
   const handleCancel = async (inv: InvoiceDto) => {
-    if (!canCancelOrReturn(inv)) return;
+    if (!canManageInvoices || !canCancelOrReturn(inv)) return;
     const result = await Swal.fire({
       title: 'Cancel Invoice?',
       text: `Invoice #${formatInvoiceIdDisplay(inv.invoiceNumber || inv.invoiceId)} will be marked as cancelled.`,
@@ -189,7 +195,7 @@ export default function CustomerInvoicesPage() {
   };
 
   const handleReturn = async (inv: InvoiceDto) => {
-    if (!canCancelOrReturn(inv)) return;
+    if (!canManageInvoices || !canCancelOrReturn(inv)) return;
     const result = await Swal.fire({
       title: 'Process Return?',
       text: `Process refund/return for invoice #${formatInvoiceIdDisplay(inv.invoiceNumber || inv.invoiceId)}.`,
@@ -214,6 +220,59 @@ export default function CustomerInvoicesPage() {
       Swal.fire({
         title: 'Error',
         text: err?.response?.data?.message ?? err?.message ?? 'Failed to process return.',
+        icon: 'error',
+      });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleTransfer = async (inv: InvoiceDto) => {
+    if (!canManageInvoices || !isPaid(inv)) return;
+
+    const { value: targetCustomer } = await Swal.fire({
+      title: 'Transfer Invoice',
+      html: `
+        <div style="text-align: left; font-size: 13px; line-height: 1.5; color: #475569;">
+          Transfer invoice <b>#${formatInvoiceIdDisplay(inv.invoiceNumber || inv.invoiceId)}</b> 
+          (৳${Number(inv.totalAmount || (inv as any).total_amount || 0).toFixed(2)}) to another subscriber.
+          <br/><br/>
+          <div style="background: #f1f5f9; padding: 8px 12px; border-radius: 6px; font-size: 12px; border-left: 3px solid #6366f1;">
+            ℹ️ <b>Note:</b> Service validity will be reversed from this subscriber and applied to the target subscriber.
+          </div>
+        </div>
+      `,
+      input: 'text',
+      inputLabel: 'Target Customer ID, Username, or Code',
+      inputPlaceholder: 'e.g. 102344 or username',
+      showCancelButton: true,
+      confirmButtonText: 'Transfer Invoice',
+      confirmButtonColor: '#6366f1',
+      cancelButtonColor: '#64748b',
+      inputValidator: (value) => {
+        if (!value || !value.trim()) {
+          return 'Please enter target customer ID, username, or code.';
+        }
+        return null;
+      },
+    });
+
+    if (!targetCustomer) return;
+
+    setActionLoading(inv.invoiceId);
+    try {
+      const res = await billingService.transferInvoice(inv.invoiceId, { targetCustomer: targetCustomer.trim() });
+      await useAuthStore.getState().refreshMe();
+      await Swal.fire({
+        title: 'Transferred',
+        text: res?.message || 'Invoice has been transferred successfully.',
+        icon: 'success',
+      });
+      fetchInvoices();
+    } catch (err: any) {
+      Swal.fire({
+        title: 'Transfer Failed',
+        text: err?.response?.data?.message ?? err?.message ?? 'Failed to transfer invoice.',
         icon: 'error',
       });
     } finally {
@@ -616,6 +675,17 @@ export default function CustomerInvoicesPage() {
                                     <RotateCcw className="w-3.5 h-3.5" />
                                   </button>
                                 </>
+                              )}
+                              {showTransferButton(inv) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleTransfer(inv)}
+                                  disabled={isLoadingAction}
+                                  title="Transfer invoice to another subscriber"
+                                  className="p-1.5 rounded-lg border border-indigo-200 dark:border-indigo-900 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors disabled:opacity-50"
+                                >
+                                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                                </button>
                               )}
                               <button
                                 type="button"

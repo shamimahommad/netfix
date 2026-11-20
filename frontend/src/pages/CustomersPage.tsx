@@ -375,6 +375,9 @@ export default function CustomersPage() {
   const permissions = usePermissions();
   const { user } = useAuthStore();
   const isAdmin = user?.role_code === 'admin' || user?.role_code === 'isp_admin';
+  const isIspAdminOrManager = ['isp_admin', 'admin', 'manager', 'tenant_admin', 'saas_admin', 'super_admin'].includes(
+    (user?.role_code || (user as any)?.role || '').toLowerCase()
+  );
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -1058,7 +1061,7 @@ export default function CustomersPage() {
 
   const moreMenuItems = [
     'Suspend / Restore',
-    'Transfer to Reseller',
+    ...(isIspAdminOrManager ? ['Transfer to Reseller'] : []),
     'Change Area',
     'Change Customer Type',
     'Change Billing Type',
@@ -1110,6 +1113,10 @@ export default function CustomersPage() {
     }
 
     if (action === 'Transfer to Reseller') {
+      if (!isIspAdminOrManager) {
+        toast.error('Only ISP administrators and managers can transfer customers to a reseller.');
+        return;
+      }
       const resellerUserId = await openTransferToResellerModal();
       if (!resellerUserId) return;
       const ids = Array.from(selectedCustomers);

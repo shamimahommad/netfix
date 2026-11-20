@@ -286,6 +286,9 @@ if ($method === 'POST' && preg_match('#^/billing/invoices/([^/]+)/cancel$#', $ur
 if ($method === 'POST' && preg_match('#^/billing/invoices/([^/]+)/return$#', $uri, $m)) {
     BillingController::returnInvoice($m[1]);
 }
+if ($method === 'POST' && preg_match('#^/billing/invoices/([^/]+)/transfer$#', $uri, $m)) {
+    BillingController::transferInvoice($m[1]);
+}
 if ($method === 'GET' && preg_match('#^/billing/invoices/([^/]+)$#', $uri, $m)) {
     BillingController::invoiceDetail($m[1]);
 }

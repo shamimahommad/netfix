@@ -1129,6 +1129,12 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         $params['meta'] = json_encode($meta, JSON_UNESCAPED_UNICODE);
 
         if (isset($data['ownerId']) || isset($data['owner_id'])) {
+            $userRole = strtolower(trim($user['role'] ?? ''));
+            $allowedRoles = ['admin', 'saas_admin', 'isp_admin', 'tenant_admin', 'manager', 'super_admin'];
+            if (!in_array($userRole, $allowedRoles, true)) {
+                Response::error('Access denied. Only ISP administrators and managers can transfer customer ownership.', 403);
+                return;
+            }
             $newOwnerId = (int)($data['ownerId'] ?? $data['owner_id']);
             require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             $ownerUser = HierarchySecurityService::getUser($newOwnerId);

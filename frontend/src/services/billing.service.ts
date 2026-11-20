@@ -174,6 +174,22 @@ export const billingService = {
     }>(`/billing/invoices/${invoiceId}/return`);
     return response.data;
   },
+
+  async transferInvoice(
+    invoiceId: string,
+    payload: { targetCustomer: string }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: any;
+  }> {
+    const response = await api.post<{
+      success: boolean;
+      message: string;
+      data?: any;
+    }>(`/billing/invoices/${invoiceId}/transfer`, payload);
+    return response.data;
+  },
 };
 
 export interface InvoiceDto {

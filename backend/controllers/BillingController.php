@@ -730,6 +730,14 @@ class BillingController {
      * POST /billing/invoices/{id}/cancel
      */
     public static function cancelInvoice(string $id): void {
+        $user = AuthMiddleware::requireAuth();
+        $role = strtolower(trim($user['role'] ?? ''));
+        $allowedRoles = ['admin', 'saas_admin', 'isp_admin', 'tenant_admin', 'manager', 'super_admin'];
+        if (!in_array($role, $allowedRoles, true)) {
+            Response::error('Access denied. Only ISP administrators and managers can cancel invoices.', 403);
+            return;
+        }
+
         self::returnInvoice($id);
     }
 
@@ -737,10 +745,19 @@ class BillingController {
      * POST /billing/invoices/{id}/return
      * Atomically reverses invoice, refunds the reseller wallet, claws back upstream margins,
      * and reverts customer service expiry.
+     * Allowed only for ISP admin and Manager roles.
      */
     public static function returnInvoice(string $id): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
+
+        $role = strtolower(trim($user['role'] ?? ''));
+        $allowedRoles = ['admin', 'saas_admin', 'isp_admin', 'tenant_admin', 'manager', 'super_admin'];
+        if (!in_array($role, $allowedRoles, true)) {
+            Response::error('Access denied. Only ISP administrators and managers can process invoice returns.', 403);
+            return;
+        }
+
         $db = Database::getConnection();
 
         $stmt = $db->prepare("SELECT * FROM invoices WHERE invoice_id = :id AND (tenant_id = :tid OR :tid2 IS NULL) LIMIT 1");
@@ -988,6 +1005,187 @@ class BillingController {
                 'status' => 'cancelled',
                 'returnAmount' => $refundAmount,
                 'balance' => $actorNewBal,
+            ],
+        ]);
+    }
+
+    /**
+     * POST /billing/invoices/{id}/transfer
+     * Transfers an invoice and its renewed service period from one customer to another customer.
+     * Allowed only for ISP admin and Manager roles.
+     */
+    public static function transferInvoice(string $id): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+
+        $role = strtolower(trim($user['role'] ?? ''));
+        $allowedRoles = ['admin', 'saas_admin', 'isp_admin', 'tenant_admin', 'manager', 'super_admin'];
+        if (!in_array($role, $allowedRoles, true)) {
+            Response::error('Access denied. Only ISP administrators and managers can transfer invoices.', 403);
+            return;
+        }
+
+        $input = json_decode(file_get_contents('php://input'), true) ?: [];
+        $targetCustomerInput = trim((string)($input['targetCustomer'] ?? $input['targetCustomerId'] ?? $input['targetCustomerUsername'] ?? ''));
+
+        if (empty($targetCustomerInput)) {
+            Response::error('Target customer ID, username, or code is required.', 400);
+            return;
+        }
+
+        $db = Database::getConnection();
+
+        // 1. Fetch current invoice
+        $stmt = $db->prepare("SELECT * FROM invoices WHERE invoice_id = :id AND (tenant_id = :tid OR :tid2 IS NULL) LIMIT 1");
+        $stmt->execute(['id' => $id, 'tid' => $tenantId, 'tid2' => $tenantId]);
+        $inv = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$inv) {
+            Response::error('Invoice not found.', 404);
+            return;
+        }
+
+        if (in_array(strtolower($inv['status'] ?? ''), ['cancelled', 'returned'], true)) {
+            Response::error('Cancelled or returned invoices cannot be transferred.', 400);
+            return;
+        }
+
+        $invId = (int)$inv['invoice_id'];
+        $invNum = $inv['invoice_number'];
+        $sourceCustomerId = (int)$inv['customer_id'];
+        $effectiveTenantId = (int)($inv['tenant_id'] ?? $tenantId);
+
+        // 2. Fetch source customer
+        $stmtSource = $db->prepare("SELECT * FROM customers WHERE customer_id = :cid AND (tenant_id = :tid OR :tid2 IS NULL) LIMIT 1");
+        $stmtSource->execute(['cid' => $sourceCustomerId, 'tid' => $effectiveTenantId, 'tid2' => $effectiveTenantId]);
+        $sourceCust = $stmtSource->fetch(PDO::FETCH_ASSOC);
+
+        // 3. Fetch target customer (by customer_id, customer_code, or username)
+        $stmtTarget = $db->prepare("SELECT * FROM customers 
+            WHERE (tenant_id = :tid OR :tid2 IS NULL) 
+              AND (customer_id = :cid OR customer_code = :ccode OR username = :uname) 
+            LIMIT 1");
+        $stmtTarget->execute([
+            'tid' => $effectiveTenantId,
+            'tid2' => $effectiveTenantId,
+            'cid' => is_numeric($targetCustomerInput) ? (int)$targetCustomerInput : 0,
+            'ccode' => $targetCustomerInput,
+            'uname' => $targetCustomerInput,
+        ]);
+        $targetCust = $stmtTarget->fetch(PDO::FETCH_ASSOC);
+
+        if (!$targetCust) {
+            Response::error("Target customer '{$targetCustomerInput}' not found.", 404);
+            return;
+        }
+
+        $targetCustomerId = (int)$targetCust['customer_id'];
+        if ($targetCustomerId === $sourceCustomerId) {
+            Response::error('Source customer and target customer cannot be the same.', 400);
+            return;
+        }
+
+        $db->beginTransaction();
+        try {
+            // A. Revert Source Customer Service Expiry
+            $stmtCs = $db->prepare("SELECT * FROM customer_services WHERE customer_id = :cid ORDER BY customer_service_id DESC LIMIT 1");
+            $stmtCs->execute(['cid' => $sourceCustomerId]);
+            $sourceCs = $stmtCs->fetch(PDO::FETCH_ASSOC);
+
+            if ($sourceCs) {
+                if (!empty($inv['previous_expire_date'])) {
+                    $newSourceExp = $inv['previous_expire_date'];
+                } else {
+                    $newSourceExp = date('Y-m-d H:i:s', strtotime('-30 days', strtotime($sourceCs['expires_at'])));
+                }
+
+                $isSourceExpired = strtotime($newSourceExp) < time();
+                $newSourceStatus = $isSourceExpired ? 'suspended' : ($sourceCs['status'] === 'active' ? 'active' : 'inactive');
+
+                $db->prepare("UPDATE customer_services SET expires_at = :exp, status = :st, updated_at = NOW() WHERE customer_service_id = :sid")
+                   ->execute(['exp' => $newSourceExp, 'st' => $newSourceStatus, 'sid' => $sourceCs['customer_service_id']]);
+
+                if ($isSourceExpired) {
+                    $db->prepare("UPDATE customers SET status = 'suspended', billing_status = 'Expired', updated_at = NOW() WHERE customer_id = :cid")
+                       ->execute(['cid' => $sourceCustomerId]);
+                    try {
+                        require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+                        MikrotikSyncService::disableCustomer($db, $sourceCustomerId);
+                    } catch (\Throwable $mke) {
+                        error_log("MikroTik disable notice on invoice transfer: " . $mke->getMessage());
+                    }
+                }
+            }
+
+            // B. Extend Target Customer Service Expiry
+            $stmtTargetCs = $db->prepare("SELECT * FROM customer_services WHERE customer_id = :cid ORDER BY customer_service_id DESC LIMIT 1");
+            $stmtTargetCs->execute(['cid' => $targetCustomerId]);
+            $targetCs = $stmtTargetCs->fetch(PDO::FETCH_ASSOC);
+
+            $now = time();
+            if ($targetCs) {
+                $targetCurrentExp = strtotime($targetCs['expires_at']);
+                $baseTime = ($targetCurrentExp && $targetCurrentExp > $now) ? $targetCurrentExp : $now;
+                $newTargetExp = date('Y-m-d H:i:s', strtotime('+30 days', $baseTime));
+
+                $db->prepare("UPDATE customer_services SET expires_at = :exp, status = 'active', updated_at = NOW() WHERE customer_service_id = :sid")
+                   ->execute(['exp' => $newTargetExp, 'sid' => $targetCs['customer_service_id']]);
+            } else {
+                $newTargetExp = date('Y-m-d H:i:s', strtotime('+30 days', $now));
+            }
+
+            // Activate Target Customer
+            $db->prepare("UPDATE customers SET status = 'active', billing_status = 'Paid', updated_at = NOW() WHERE customer_id = :cid")
+               ->execute(['cid' => $targetCustomerId]);
+
+            try {
+                require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+                MikrotikSyncService::enableCustomer($db, $targetCustomerId);
+            } catch (\Throwable $mke) {
+                error_log("MikroTik enable notice on invoice transfer: " . $mke->getMessage());
+            }
+
+            // C. Update Invoice Record
+            $sourceIdentifier = $sourceCust ? ($sourceCust['customer_code'] ?: $sourceCust['username'] ?: (string)$sourceCustomerId) : (string)$sourceCustomerId;
+            $targetIdentifier = $targetCust['customer_code'] ?: $targetCust['username'] ?: (string)$targetCustomerId;
+            $transferNote = " [Transferred from Customer #{$sourceIdentifier} to #{$targetIdentifier} by {$user['username']} on " . date('Y-m-d H:i') . "]";
+
+            $db->prepare("UPDATE invoices 
+                SET customer_id = :targetCid, notes = CONCAT(COALESCE(notes, ''), :note), updated_at = NOW() 
+                WHERE invoice_id = :id")
+               ->execute([
+                   'targetCid' => $targetCustomerId,
+                   'note' => $transferNote,
+                   'id' => $invId,
+               ]);
+
+            // D. Update Transactions Record if any
+            $db->prepare("UPDATE transactions 
+                SET customer_id = :targetCid, description = CONCAT(COALESCE(description, ''), :note) 
+                WHERE tenant_id = :tid AND (transaction_ref = :ref OR (customer_id = :srcCid AND created_at BETWEEN DATE_SUB(:invTime, INTERVAL 5 MINUTE) AND DATE_ADD(:invTime, INTERVAL 5 MINUTE)))")
+               ->execute([
+                   'targetCid' => $targetCustomerId,
+                   'note' => $transferNote,
+                   'tid' => $effectiveTenantId,
+                   'ref' => "INV-{$invNum}",
+                   'srcCid' => $sourceCustomerId,
+                   'invTime' => $inv['created_at'],
+               ]);
+
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollBack();
+            Response::error('Failed to transfer invoice: ' . $e->getMessage(), 500);
+            return;
+        }
+
+        Response::json([
+            'success' => true,
+            'message' => "Invoice #{$invNum} transferred successfully to customer {$targetCust['username']} ({$targetCust['name']}).",
+            'data' => [
+                'invoiceId' => (string)$invId,
+                'targetCustomerId' => (string)$targetCustomerId,
+                'targetCustomerName' => $targetCust['name'] ?? $targetCust['username'],
             ],
         ]);
     }
