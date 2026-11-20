@@ -37,6 +37,11 @@ class HierarchySecurityService {
         };
     }
 
+    public static function isIspAdmin(mixed $userOrRole): bool {
+        $role = is_array($userOrRole) ? ($userOrRole['role'] ?? '') : (string)$userOrRole;
+        return in_array(strtolower(trim($role)), ['isp_admin', 'admin', 'manager', 'tenant_admin', 'saas_admin', 'super_admin'], true);
+    }
+
     /**
      * Strict Allowed Downline Child Role per Tier
      * Level 0 (ISP Admin) -> Level 1 (Reseller)
