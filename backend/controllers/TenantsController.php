@@ -254,6 +254,7 @@ class TenantsController {
                 'gateway' => $pg['gateway'],
                 'isEnabled' => (bool)$pg['is_active'],
                 'credentials' => [
+                    'apiContextRoot' => $pg['api_context_root'] ?? '',
                     'appKey' => $pg['app_key'] ?? '',
                     'appSecret' => $pg['app_secret'] ?? '',
                     'username' => $pg['username'] ?? '',
@@ -278,6 +279,7 @@ class TenantsController {
                     'gateway' => 'bkash',
                     'isEnabled' => true,
                     'credentials' => [
+                        'apiContextRoot' => '',
                         'appKey' => '',
                         'appSecret' => '',
                         'username' => '',
@@ -861,6 +863,10 @@ class TenantsController {
             $appSecret = '';
             $username = '';
             $password = '';
+            $apiContextRoot = trim($creds['apiContextRoot'] ?? ($creds['api_context_root'] ?? ''));
+            if ($apiContextRoot === '') {
+                $apiContextRoot = null;
+            }
             $isSandbox = isset($creds['sandbox']) ? ($creds['sandbox'] ? 1 : 0) : 1;
 
             if ($name === 'bkash') {
@@ -893,6 +899,7 @@ class TenantsController {
                         app_secret = :as,
                         username = :un,
                         password = :pw,
+                        api_context_root = :acr,
                         is_sandbox = :sb,
                         updated_at = NOW()
                     WHERE id = :id");
@@ -902,13 +909,14 @@ class TenantsController {
                     'as' => $appSecret,
                     'un' => $username,
                     'pw' => $password,
+                    'acr' => $apiContextRoot,
                     'sb' => $isSandbox,
                     'id' => $exists['id'],
                 ]);
             } else {
                 $stmtIn = $db->prepare("INSERT INTO payment_gateway_settings 
-                    (tenant_id, gateway, app_key, app_secret, username, password, is_sandbox, is_active)
-                    VALUES (:tid, :gw, :ak, :as, :un, :pw, :sb, :act)");
+                    (tenant_id, gateway, app_key, app_secret, username, password, api_context_root, is_sandbox, is_active)
+                    VALUES (:tid, :gw, :ak, :as, :un, :pw, :acr, :sb, :act)");
                 $stmtIn->execute([
                     'tid' => $realTenantId,
                     'gw' => $name,
@@ -916,6 +924,7 @@ class TenantsController {
                     'as' => $appSecret,
                     'un' => $username,
                     'pw' => $password,
+                    'acr' => $apiContextRoot,
                     'sb' => $isSandbox,
                     'act' => $enabled,
                 ]);

@@ -358,6 +358,7 @@ CREATE TABLE `payment_gateway_settings` (
   `app_secret` varchar(255) DEFAULT NULL,
   `username` varchar(100) DEFAULT NULL,
   `password` varchar(255) DEFAULT NULL,
+  `api_context_root` varchar(255) DEFAULT NULL,
   `is_sandbox` tinyint(1) NOT NULL DEFAULT 1,
   `is_active` tinyint(1) NOT NULL DEFAULT 1,
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),

@@ -51,10 +51,18 @@ class PaymentGatewayService {
         curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 
+        $isJson = false;
+        foreach ($headers as $h) {
+            if (stripos($h, 'application/json') !== false) {
+                $isJson = true;
+                break;
+            }
+        }
+
         if (strtoupper($method) === 'POST') {
             curl_setopt($ch, CURLOPT_POST, true);
             if ($data !== null) {
-                if (is_array($data) && !in_array('Content-Type: application/json', $headers)) {
+                if (is_array($data) && !$isJson) {
                     curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($data));
                 } else {
                     curl_setopt($ch, CURLOPT_POSTFIELDS, is_string($data) ? $data : json_encode($data));
@@ -72,7 +80,7 @@ class PaymentGatewayService {
         }
 
         $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $curlError = curl_error($ch);
         curl_close($ch);
 
@@ -104,7 +112,17 @@ class PaymentGatewayService {
     // 1. bKash Tokenized Checkout v1.2.0-beta
     // ==========================================
 
-    public static function bkashBaseUrl(bool $isSandbox): string {
+    public static function bkashBaseUrl(bool $isSandbox, ?string $customContextRoot = null): string {
+        if (!empty($customContextRoot)) {
+            $root = rtrim(trim($customContextRoot), '/');
+            if (strpos($root, '/tokenized/checkout') !== false) {
+                return $root;
+            }
+            if (strpos($root, '/v1.2.0-beta') !== false) {
+                return $root . '/tokenized/checkout';
+            }
+            return $root . '/v1.2.0-beta/tokenized/checkout';
+        }
         return $isSandbox 
             ? 'https://tokenized.sandbox.bka.sh/v1.2.0-beta/tokenized/checkout' 
             : 'https://tokenized.pay.bka.sh/v1.2.0-beta/tokenized/checkout';
@@ -112,13 +130,21 @@ class PaymentGatewayService {
 
     public static function bkashGrantToken(array $settings): array {
         $isSandbox = self::isSandboxMode($settings);
-        $baseUrl = self::bkashBaseUrl($isSandbox);
+        $customContextRoot = $settings['api_context_root'] ?? ($settings['credentials']['apiContextRoot'] ?? null);
+        $baseUrl = self::bkashBaseUrl($isSandbox, $customContextRoot);
         $url = $baseUrl . '/token/grant';
 
         $appKey = trim($settings['app_key'] ?? '');
         $appSecret = trim($settings['app_secret'] ?? '');
         $username = trim($settings['username'] ?? '');
         $password = trim($settings['password'] ?? '');
+
+        if (empty($appKey) || empty($appSecret) || empty($username) || empty($password)) {
+            return [
+                'success' => false,
+                'message' => 'bKash credentials missing: Please provide PGW Username, Password, App Key, and App Secret in Gateway settings.',
+            ];
+        }
 
         // Token Caching: bKash id_token is valid for 1 hour (3600s).
         // Reuse cached token from Redis to prevent duplicate API requests and rate limits.
@@ -168,12 +194,24 @@ class PaymentGatewayService {
             ];
         }
 
-        $errorMessage = $res['data']['statusMessage'] ?? ($res['error'] ?: 'bKash token grant failed');
-        if (($res['http_code'] ?? 0) === 503) {
-            $rawDetail = !empty($res['data']['statusMessage']) 
-                ? $res['data']['statusMessage'] 
-                : (!empty($res['raw']) ? trim(substr(strip_tags($res['raw']), 0, 200)) : 'bKash service is temporarily unavailable or undergoing maintenance');
+        $httpCode = (int)($res['http_code'] ?? 0);
+        $statusMsg = $res['data']['statusMessage'] ?? ($res['data']['message'] ?? ($res['data']['errorMessage'] ?? ''));
+        $statusCode = $res['data']['statusCode'] ?? '';
+
+        if ($httpCode === 401) {
+            $errorMessage = "bKash Auth Failed (HTTP 401): Invalid App Key, App Secret, Username, or Password." . ($statusMsg ? " ({$statusMsg})" : "");
+        } else if ($httpCode === 403) {
+            $errorMessage = "bKash Access Forbidden (HTTP 403): Your server IP is likely not whitelisted in bKash Merchant Portal firewall. Please request bKash support to whitelist your live server IP.";
+        } else if ($httpCode === 503) {
+            $rawDetail = $statusMsg ?: (!empty($res['raw']) ? trim(substr(strip_tags($res['raw']), 0, 200)) : 'bKash service is temporarily unavailable or undergoing maintenance');
             $errorMessage = "bKash Live Service Unavailable (HTTP 503): {$rawDetail}";
+        } else if ($httpCode === 0 && !empty($res['error'])) {
+            $errorMessage = "bKash Connection Failed: " . $res['error'];
+        } else {
+            $errorMessage = $statusMsg ?: ($res['error'] ?: 'bKash token grant failed');
+            if ($statusCode && $statusCode !== '0000') {
+                $errorMessage = "[{$statusCode}] " . $errorMessage;
+            }
         }
 
         return [
@@ -191,7 +229,8 @@ class PaymentGatewayService {
 
         $idToken = $tokenRes['token'];
         $isSandbox = self::isSandboxMode($settings);
-        $baseUrl = self::bkashBaseUrl($isSandbox);
+        $customContextRoot = $settings['api_context_root'] ?? ($settings['credentials']['apiContextRoot'] ?? null);
+        $baseUrl = self::bkashBaseUrl($isSandbox, $customContextRoot);
         $url = $baseUrl . '/create';
 
         $headers = [
@@ -221,7 +260,13 @@ class PaymentGatewayService {
             ];
         }
 
-        $errorMessage = $res['data']['statusMessage'] ?? ($res['error'] ?: 'bKash create payment failed');
+        $statusMsg = $res['data']['statusMessage'] ?? ($res['data']['message'] ?? ($res['data']['errorMessage'] ?? ''));
+        $statusCode = $res['data']['statusCode'] ?? '';
+        $errorMessage = $statusMsg ?: ($res['error'] ?: 'bKash create payment failed');
+        if ($statusCode && $statusCode !== '0000') {
+            $errorMessage = "[{$statusCode}] " . $errorMessage;
+        }
+
         return [
             'success' => false,
             'message' => $errorMessage,
@@ -237,7 +282,8 @@ class PaymentGatewayService {
 
         $idToken = $tokenRes['token'];
         $isSandbox = self::isSandboxMode($settings);
-        $baseUrl = self::bkashBaseUrl($isSandbox);
+        $customContextRoot = $settings['api_context_root'] ?? ($settings['credentials']['apiContextRoot'] ?? null);
+        $baseUrl = self::bkashBaseUrl($isSandbox, $customContextRoot);
         $url = $baseUrl . '/execute';
 
         $headers = [
@@ -264,9 +310,15 @@ class PaymentGatewayService {
             ];
         }
 
+        $statusMsg = $res['data']['statusMessage'] ?? ($res['data']['message'] ?? ($res['data']['errorMessage'] ?? ''));
+        $errorMessage = $statusMsg ?: ($res['error'] ?: 'bKash payment execution failed');
+        if ($statusCode && $statusCode !== '0000') {
+            $errorMessage = "[{$statusCode}] " . $errorMessage;
+        }
+
         return [
             'success' => false,
-            'message' => $res['data']['statusMessage'] ?? ($res['error'] ?: 'bKash payment execution failed'),
+            'message' => $errorMessage,
             'data' => $res['data'],
         ];
     }
@@ -572,20 +624,25 @@ class PaymentGatewayService {
         }
 
         // Insert initiated intent
-        $stmtIntent = $db->prepare("INSERT INTO payment_intents 
-            (tenant_id, customer_id, invoice_id, amount, gateway, gateway_payment_id, transaction_ref, status, metadata)
-            VALUES (:tid, :cid, :inv, :amt, :gw, :gpid, :ref, 'initiated', :meta)");
-        $stmtIntent->execute([
-            'tid' => $tenantId,
-            'cid' => $customerId ?: null,
-            'inv' => $invoiceId ?: null,
-            'amt' => $amount,
-            'gw' => $gw,
-            'gpid' => $orderRef,
-            'ref' => $orderRef,
-            'meta' => json_encode($extra),
-        ]);
-        $intentId = $db->lastInsertId();
+        $intentId = 0;
+        try {
+            $stmtIntent = $db->prepare("INSERT INTO payment_intents 
+                (tenant_id, customer_id, invoice_id, amount, gateway, gateway_payment_id, transaction_ref, status, metadata)
+                VALUES (:tid, :cid, :inv, :amt, :gw, :gpid, :ref, 'initiated', :meta)");
+            $stmtIntent->execute([
+                'tid' => $tenantId,
+                'cid' => $customerId ?: null,
+                'inv' => $invoiceId ?: null,
+                'amt' => $amount,
+                'gw' => $gw,
+                'gpid' => $orderRef,
+                'ref' => $orderRef,
+                'meta' => json_encode($extra),
+            ]);
+            $intentId = (int)$db->lastInsertId();
+        } catch (\Throwable $e) {
+            error_log("Failed to insert payment_intent record: " . $e->getMessage());
+        }
 
         $redirectUrl = null;
         $paymentId = $orderRef;
@@ -636,9 +693,13 @@ class PaymentGatewayService {
         }
 
         // Update payment ID in intent if changed
-        if ($paymentId !== $orderRef) {
-            $db->prepare("UPDATE payment_intents SET gateway_payment_id = :gpid WHERE id = :id")
-               ->execute(['gpid' => $paymentId, 'id' => $intentId]);
+        if ($paymentId !== $orderRef && $intentId > 0) {
+            try {
+                $db->prepare("UPDATE payment_intents SET gateway_payment_id = :gpid WHERE id = :id")
+                   ->execute(['gpid' => $paymentId, 'id' => $intentId]);
+            } catch (\Throwable $e) {
+                error_log("Failed to update payment_intent record: " . $e->getMessage());
+            }
         }
 
         // If gateway returned valid URL, return it
@@ -656,12 +717,14 @@ class PaymentGatewayService {
         }
 
         // STRICT SANDBOX VS LIVE ENVIRONMENT POLICY:
-        // The interactive simulator is strictly restricted to Sandbox mode on non-production/local environments.
-        // On Live servers or when is_sandbox is 0, the sandbox simulator is NEVER shown.
+        // The interactive simulator is strictly restricted to Sandbox mode.
+        // For SaaS Admin testing in sandbox mode, fallback to simulator allows end-to-end testing.
+        // In Live mode (is_sandbox = 0), simulator is NEVER shown.
         $appEnv = strtolower(getenv('APP_ENV') ?: 'development');
         $isLiveEnvironment = ($appEnv === 'production' || $appEnv === 'live');
+        $isAdminTest = (($extra['flow'] ?? '') === 'saas_admin_test');
 
-        if ($isSandbox && !$isLiveEnvironment) {
+        if ($isSandbox && (!$isLiveEnvironment || $isAdminTest)) {
             $simulatorUrl = "/payments/simulator?intent_id={$intentId}&tenant_id={$tenantId}&gateway={$gw}&amount={$amount}&ref={$orderRef}&paymentID={$paymentId}&callback=" . urlencode($callbackUrl);
 
             return [

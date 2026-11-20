@@ -66,49 +66,56 @@ class PaymentGatewayController {
      * POST /tenants/{id}/bkash-create-payment
      */
     public static function testPaymentFlow(string $id): void {
-        $user = AuthMiddleware::requireAuth();
-        $data = json_decode(file_get_contents('php://input'), true) ?: [];
-        $db = Database::getConnection();
+        try {
+            $user = AuthMiddleware::requireAuth();
+            $data = json_decode(file_get_contents('php://input'), true) ?: [];
+            $db = Database::getConnection();
 
-        $tenantId = self::resolveTenantId($db, $id);
-        if (!$tenantId) {
-            Response::error('Tenant not found', 404);
+            $tenantId = self::resolveTenantId($db, $id);
+            if (!$tenantId) {
+                Response::error('Tenant not found', 404);
+                return;
+            }
+
+            $gateway = strtolower(trim($data['gateway'] ?? 'bkash'));
+            if ($gateway === 'sslcommerz') $gateway = 'ssl';
+            $amount = (float)($data['amount'] ?? 10.00);
+            if ($amount <= 0) $amount = 10.00;
+
+            $defaultCallback = self::getFrontendBaseUrl() . "/saas/tenants/{$tenantId}/payment-callback";
+            $callbackUrl = !empty($data['callbackURL']) ? $data['callbackURL'] : $defaultCallback;
+
+            $res = PaymentGatewayService::initiatePayment(
+                $db,
+                $tenantId,
+                $gateway,
+                $amount,
+                null, // No specific customer for admin test
+                null,
+                $callbackUrl,
+                ['flow' => 'saas_admin_test', 'user_id' => $user['user_id'] ?? null]
+            );
+
+            if (!$res['success']) {
+                Response::error($res['message'] ?? 'Failed to initiate test payment', 400);
+                return;
+            }
+
+            Response::json([
+                'success' => true,
+                'gateway' => $gateway,
+                'amount' => $amount,
+                'payment_url' => $res['payment_url'] ?? ($res['redirectURL'] ?? ($res['bkashURL'] ?? '')),
+                'redirectURL' => $res['redirectURL'] ?? ($res['payment_url'] ?? ''),
+                'bkashURL' => $res['bkashURL'] ?? ($res['payment_url'] ?? ''),
+                'paymentID' => $res['paymentID'] ?? '',
+                'transaction_ref' => $res['transaction_ref'] ?? '',
+                'intent_id' => $res['intent_id'] ?? '',
+            ]);
+        } catch (\Throwable $e) {
+            error_log('Test payment flow error: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+            Response::error('Payment test failed: ' . $e->getMessage(), 400);
         }
-
-        $gateway = strtolower(trim($data['gateway'] ?? 'bkash'));
-        if ($gateway === 'sslcommerz') $gateway = 'ssl';
-        $amount = (float)($data['amount'] ?? 10.00);
-        if ($amount <= 0) $amount = 10.00;
-
-        $defaultCallback = self::getFrontendBaseUrl() . "/saas/tenants/{$tenantId}/payment-callback";
-        $callbackUrl = !empty($data['callbackURL']) ? $data['callbackURL'] : $defaultCallback;
-
-        $res = PaymentGatewayService::initiatePayment(
-            $db,
-            $tenantId,
-            $gateway,
-            $amount,
-            null, // No specific customer for admin test
-            null,
-            $callbackUrl,
-            ['flow' => 'saas_admin_test', 'user_id' => $user['user_id'] ?? null]
-        );
-
-        if (!$res['success']) {
-            Response::error($res['message'] ?? 'Failed to initiate test payment', 400);
-        }
-
-        Response::json([
-            'success' => true,
-            'gateway' => $gateway,
-            'amount' => $amount,
-            'payment_url' => $res['payment_url'],
-            'redirectURL' => $res['redirectURL'],
-            'bkashURL' => $res['bkashURL'],
-            'paymentID' => $res['paymentID'],
-            'transaction_ref' => $res['transaction_ref'],
-            'intent_id' => $res['intent_id'],
-        ]);
     }
 
     /**

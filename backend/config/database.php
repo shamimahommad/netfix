@@ -137,6 +137,44 @@ class Database {
             self::ensureColumn($pdo, 'tenants', 'support_phone', 'VARCHAR(50) DEFAULT NULL');
             self::ensureColumn($pdo, 'tenants', 'logo_url', 'VARCHAR(255) DEFAULT NULL');
 
+            // Ensure payment_gateway_settings table
+            $pdo->exec("CREATE TABLE IF NOT EXISTS `payment_gateway_settings` (
+                `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `tenant_id` BIGINT UNSIGNED NOT NULL,
+                `gateway` VARCHAR(50) NOT NULL,
+                `app_key` VARCHAR(255) DEFAULT NULL,
+                `app_secret` VARCHAR(255) DEFAULT NULL,
+                `username` VARCHAR(100) DEFAULT NULL,
+                `password` VARCHAR(255) DEFAULT NULL,
+                `api_context_root` VARCHAR(255) DEFAULT NULL,
+                `is_sandbox` TINYINT(1) NOT NULL DEFAULT 1,
+                `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uq_tenant_gateway` (`tenant_id`, `gateway`),
+                KEY `idx_pgw_tenant` (`tenant_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+            // Ensure payment_intents table
+            $pdo->exec("CREATE TABLE IF NOT EXISTS `payment_intents` (
+                `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `tenant_id` BIGINT UNSIGNED NOT NULL,
+                `customer_id` BIGINT UNSIGNED DEFAULT NULL,
+                `invoice_id` BIGINT UNSIGNED DEFAULT NULL,
+                `amount` DECIMAL(15,2) NOT NULL,
+                `gateway` VARCHAR(50) NOT NULL,
+                `gateway_payment_id` VARCHAR(150) DEFAULT NULL,
+                `transaction_ref` VARCHAR(100) DEFAULT NULL,
+                `status` ENUM('initiated','completed','failed','cancelled') NOT NULL DEFAULT 'initiated',
+                `metadata` TEXT DEFAULT NULL,
+                `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                KEY `idx_pi_tenant` (`tenant_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+            self::ensureColumn($pdo, 'payment_gateway_settings', 'api_context_root', 'VARCHAR(255) DEFAULT NULL');
+
             // Ensure syslog_token on network_devices
             self::ensureColumn($pdo, 'network_devices', 'syslog_token', 'VARCHAR(64) DEFAULT NULL UNIQUE');
 
