@@ -111,23 +111,6 @@ export default function TenantLayout() {
         icon: <CardIcon />,
         path: '/dashboard/my-packages',
       },
-    );
-
-    // SMS Module: Show for Admin, Manager, Reseller
-    const isAgent = (user?.role_code ?? '').toLowerCase() === 'agent';
-    if (!isAgent && isSmsEnabled !== false) {
-      items.push({
-        label: 'SMS',
-        icon: <SMSIcon />,
-        submenu: [
-          { label: 'Send SMS', path: '/dashboard/sms/send' },
-          { label: 'SMS Template', path: '/dashboard/sms/template' },
-          { label: 'SMS Log', path: '/dashboard/sms/log' },
-        ],
-      });
-    }
-
-    items.push(
       {
         label: 'Service Area',
         icon: <AreaIcon />,
@@ -148,6 +131,9 @@ export default function TenantLayout() {
         ],
       },
     );
+
+    const isAgent = (user?.role_code ?? '').toLowerCase() === 'agent';
+
     // Reseller menu: not shown for agent
     if (!isAgent) {
       items.push({
@@ -158,6 +144,7 @@ export default function TenantLayout() {
         ],
       });
     }
+
     items.push(
       {
         label: 'Topup Balance',
@@ -190,6 +177,19 @@ export default function TenantLayout() {
         label: 'Map',
         icon: <MapIcon />,
         path: '/dashboard/map',
+      });
+    }
+
+    // SMS Module: Directly above Support
+    if (!isAgent && isSmsEnabled !== false) {
+      items.push({
+        label: 'SMS',
+        icon: <SMSIcon />,
+        submenu: [
+          { label: 'Send SMS', path: '/dashboard/sms/send' },
+          { label: 'SMS Template', path: '/dashboard/sms/template' },
+          { label: 'SMS Log', path: '/dashboard/sms/log' },
+        ],
       });
     }
 
