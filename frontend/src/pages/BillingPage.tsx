@@ -274,6 +274,12 @@ export default function BillingPage() {
     setSearch(urlSearch);
   }, [searchParams]);
 
+  // Reset selection and pagination immediately when billing type (tab) or search/date filters change
+  useEffect(() => {
+    setSelectedCustomers(new Set());
+    setCurrentPage(1);
+  }, [type, dateRange, startDate, endDate, search]);
+
   // Load customers when filters change (including search)
   useEffect(() => {
     const timeoutId = setTimeout(() => {

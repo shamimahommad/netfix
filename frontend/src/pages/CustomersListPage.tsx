@@ -122,6 +122,11 @@ export default function CustomersListPage() {
     setStatusFilter(urlStatus);
   }, [searchParams]);
 
+  // Reset selection when filters change
+  useEffect(() => {
+    setSelectedCustomers(new Set());
+  }, [statusFilter, search, searchParams]);
+
   // Load customers when filters change (debounced for search)
   useEffect(() => {
     const timeoutId = setTimeout(() => {

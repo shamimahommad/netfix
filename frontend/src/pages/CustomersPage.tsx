@@ -475,8 +475,15 @@ export default function CustomersPage() {
     if (urlSearch !== null && urlSearch !== search) {
       setSearch(urlSearch);
       setCurrentPage(1);
+      setSelectedCustomers(new Set());
     }
   }, [searchParams]);
+
+  // Reset selection and pagination immediately when customer type (tab) or filters change
+  useEffect(() => {
+    setSelectedCustomers(new Set());
+    setCurrentPage(1);
+  }, [type, statusFilter, urlOwnerId, urlServerId]);
 
   useEffect(() => {
     if (type === 'add') return;
