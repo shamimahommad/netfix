@@ -2030,6 +2030,21 @@ class NetworkController {
             }
         } catch (\Throwable $ignored) {}
 
+        // Fallback: Local file cache when Redis is unavailable (60s TTL)
+        $forceReload = !empty($_GET['force']) || (isset($_GET['source']) && $_GET['source'] === 'live');
+        $cacheDir = __DIR__ . '/../../cache';
+        if (!is_dir($cacheDir)) {
+            @mkdir($cacheDir, 0777, true);
+        }
+        $fileCacheKey = $cacheDir . '/pppoe_logs_t' . ($tenantId ?? 0) . '_r' . ($targetRouterId ?: 'all') . '.json';
+        if (!$forceReload && file_exists($fileCacheKey) && (time() - filemtime($fileCacheKey) < 60)) {
+            $fileCached = @json_decode(file_get_contents($fileCacheKey), true);
+            if (!empty($fileCached) && is_array($fileCached) && isset($fileCached['logs'])) {
+                Response::json($fileCached);
+                return;
+            }
+        }
+
         // 4. Ingest/Fetch raw logs: Check Redis first, then fall back to MikroTik and populate Redis
         $routersToQuery = [];
         if ($queryAllRouters) {
@@ -2040,7 +2055,6 @@ class NetworkController {
 
         $allRawLogs = [];
         $anyOnline = false;
-        $forceReload = !empty($_GET['force']) || (isset($_GET['source']) && $_GET['source'] === 'live');
 
         foreach ($routersToQuery as $rItem) {
             $rId = (string)$rItem['network_device_id'];
@@ -2370,6 +2384,36 @@ class NetworkController {
         if ($redis && $redis->isConnected() && !empty($cacheKey) && !empty($parsedLogs)) {
             try {
                 $redis->set($cacheKey, json_encode($responsePayload, JSON_UNESCAPED_UNICODE), 6);
+            } catch (\Throwable $ignored) {}
+        }
+
+        // Cache in local file (60s retention) for instant loading
+        if (!empty($fileCacheKey) && !empty($parsedLogs)) {
+            @file_put_contents($fileCacheKey, json_encode($responsePayload, JSON_UNESCAPED_UNICODE));
+        }
+
+        // Auto-persist latest logs into MySQL pppoe_connection_logs table
+        if (!empty($parsedLogs)) {
+            try {
+                $insStmt = $db->prepare("INSERT IGNORE INTO pppoe_connection_logs 
+                    (tenant_id, router_id, username, event_type, assigned_ip, caller_mac, interface_name, disconnect_reason, raw_message, logged_at)
+                    VALUES (:tid, :rid, :uname, :event_type, :ip, :mac, :iface, :reason, :msg, :logged_at)");
+                foreach (array_slice($parsedLogs, 0, 50) as $pl) {
+                    $evType = $pl['action'] === 'failed' ? 'auth_failed' : (in_array($pl['action'], ['logout', 'disconnected']) ? 'disconnected' : 'connected');
+                    $logTime = !empty($pl['time']) ? date('Y-m-d H:i:s', strtotime($pl['time']) ?: time()) : date('Y-m-d H:i:s');
+                    $insStmt->execute([
+                        'tid' => $tenantId ?: 1,
+                        'rid' => (int)($pl['router_id'] ?? 0),
+                        'uname' => $pl['username'] ?: 'unknown',
+                        'event_type' => $evType,
+                        'ip' => $pl['ip'] ?? null,
+                        'mac' => $pl['mac'] ?? null,
+                        'iface' => $pl['vlan_mik'] ?? null,
+                        'reason' => $pl['remarks'] ?? null,
+                        'msg' => substr($pl['message'] ?? '', 0, 450),
+                        'logged_at' => $logTime,
+                    ]);
+                }
             } catch (\Throwable $ignored) {}
         }
 

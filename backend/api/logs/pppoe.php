@@ -38,7 +38,42 @@ try {
         }
     } catch (\Throwable $ignored) {}
 
-    // 2. If Redis has ingested logs, serve them instantly from Redis In-Memory
+    // 1.5 If Redis has no logs, query MySQL pppoe_connection_logs table for instant sub-10ms response
+    if (empty($redisLogs)) {
+        try {
+            $force = !empty($_GET['force']);
+            if (!$force) {
+                $dbLogsStmt = ($tenantId !== null)
+                    ? $db->prepare("SELECT * FROM pppoe_connection_logs WHERE tenant_id = :tid ORDER BY logged_at DESC LIMIT 500")
+                    : $db->query("SELECT * FROM pppoe_connection_logs ORDER BY logged_at DESC LIMIT 500");
+                if ($tenantId !== null) {
+                    $dbLogsStmt->execute(['tid' => $tenantId]);
+                }
+                $dbRows = $dbLogsStmt->fetchAll(PDO::FETCH_ASSOC);
+                if (!empty($dbRows)) {
+                    foreach ($dbRows as $row) {
+                        $redisLogs[] = [
+                            'id' => (string)$row['id'],
+                            'time' => $row['logged_at'],
+                            'logged_at' => $row['logged_at'],
+                            'event_type' => $row['event_type'],
+                            'action' => $row['event_type'] === 'connected' ? 'login' : ($row['event_type'] === 'disconnected' ? 'logout' : 'failed'),
+                            'username' => $row['username'],
+                            'assigned_ip' => $row['assigned_ip'],
+                            'caller_mac' => $row['caller_mac'],
+                            'interface_name' => $row['interface_name'],
+                            'disconnect_reason' => $row['disconnect_reason'],
+                            'raw_message' => $row['raw_message'],
+                            'message' => $row['raw_message'],
+                            'router_id' => (string)$row['router_id'],
+                        ];
+                    }
+                }
+            }
+        } catch (\Throwable $ignored) {}
+    }
+
+    // 2. If Redis or MySQL has ingested logs, serve them instantly with customer enrichments
     if (!empty($redisLogs)) {
         // Fetch routers for switcher dropdown
         $rStmt = $db->prepare("SELECT network_device_id, device_name, management_ip, status FROM network_devices WHERE tenant_id = :tid AND device_type = 'router' ORDER BY network_device_id ASC");
