@@ -1,0 +1,305 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="100%" height="100%">
+  <defs>
+    <!-- 3D Studio Background (Soft Radial Navy Vignette) -->
+    <radialGradient id="studio3d" cx="50%" cy="45%" r="65%">
+      <stop offset="0%" stop-color="#0E172A" />
+      <stop offset="50%" stop-color="#090E1A" />
+      <stop offset="100%" stop-color="#03060B" />
+    </radialGradient>
+
+    <!-- 3D Floor Shadow / Ambient Occlusion -->
+    <radialGradient id="floorShadow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="rgba(0, 242, 254, 0.25)" />
+      <stop offset="40%" stop-color="rgba(0, 0, 0, 0.7)" />
+      <stop offset="100%" stop-color="rgba(0, 0, 0, 0)" />
+    </radialGradient>
+
+    <!-- 3D Extrusion Depth Gradients (The side walls of the 3D letter) -->
+    <linearGradient id="depthLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0369A1" />
+      <stop offset="60%" stop-color="#0C4A6E" />
+      <stop offset="100%" stop-color="#082F49" />
+    </linearGradient>
+
+    <linearGradient id="depthDiag" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284C7" />
+      <stop offset="40%" stop-color="#0F766E" />
+      <stop offset="100%" stop-color="#064E3B" />
+    </linearGradient>
+
+    <linearGradient id="depthRight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#047857" />
+      <stop offset="60%" stop-color="#065F46" />
+      <stop offset="100%" stop-color="#022C22" />
+    </linearGradient>
+
+    <!-- Front Face Gradients (Glossy Metallic Neon) -->
+    <linearGradient id="frontLeft" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#7DD3FC" />
+      <stop offset="25%" stop-color="#38BDF8" />
+      <stop offset="70%" stop-color="#0284C7" />
+      <stop offset="100%" stop-color="#1D4ED8" />
+    </linearGradient>
+
+    <linearGradient id="frontDiag" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#A5F3FC" />
+      <stop offset="20%" stop-color="#00F2FE" />
+      <stop offset="55%" stop-color="#06B6D4" />
+      <stop offset="85%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#6EE7B7" />
+    </linearGradient>
+
+    <linearGradient id="frontRight" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="40%" stop-color="#10B981" />
+      <stop offset="80%" stop-color="#34D399" />
+      <stop offset="100%" stop-color="#A7F3D0" />
+    </linearGradient>
+
+    <!-- Chrome Bevel Highlight Gradients -->
+    <linearGradient id="bevelLight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95" />
+      <stop offset="40%" stop-color="#38BDF8" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#0284C7" stop-opacity="0" />
+    </linearGradient>
+
+    <linearGradient id="bevelEmerald" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#A7F3D0" stop-opacity="0.9" />
+      <stop offset="50%" stop-color="#34D399" stop-opacity="0.5" />
+      <stop offset="100%" stop-color="#059669" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- Glass Specular Reflection -->
+    <linearGradient id="glassShine" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.6" />
+      <stop offset="35%" stop-color="#FFFFFF" stop-opacity="0.15" />
+      <stop offset="60%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- 3D Node Sphere Shading -->
+    <radialGradient id="sphere3dCyan" cx="35%" cy="30%" r="65%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="25%" stop-color="#67E8F9" />
+      <stop offset="60%" stop-color="#06B6D4" />
+      <stop offset="100%" stop-color="#083344" />
+    </radialGradient>
+
+    <radialGradient id="sphere3dEmerald" cx="35%" cy="30%" r="65%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="25%" stop-color="#A7F3D0" />
+      <stop offset="60%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#022C22" />
+    </radialGradient>
+
+    <!-- 3D Text Gradients -->
+    <linearGradient id="textNet3d" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="60%" stop-color="#E2E8F0" />
+      <stop offset="100%" stop-color="#94A3B8" />
+    </linearGradient>
+
+    <linearGradient id="textFix3d" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="45%" stop-color="#00F2FE" />
+      <stop offset="80%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#34D399" />
+    </linearGradient>
+
+    <!-- Drop Shadows & Glow Filters -->
+    <filter id="depthShadow3d" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="24" result="blur" />
+      <feColorMatrix type="matrix" values="0 0 0 0 0   0 0 0 0 0   0 0 0 0 0  0 0 0 0.85 0"/>
+    </filter>
+
+    <filter id="neonGlow3d" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="16" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="intenseBloom" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="28" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <style>
+    .font-3d {
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+  </style>
+
+  <!-- Studio Background -->
+  <rect width="1024" height="1024" fill="url(#studio3d)" />
+
+  <!-- Ambient Neon Backlights -->
+  <circle cx="340" cy="380" r="320" fill="rgba(6, 182, 212, 0.18)" filter="url(#intenseBloom)" />
+  <circle cx="680" cy="460" r="320" fill="rgba(16, 185, 129, 0.16)" filter="url(#intenseBloom)" />
+
+  <!-- 3D Ground Shadow / Floor Reflection -->
+  <ellipse cx="512" cy="730" rx="380" ry="60" fill="url(#floorShadow)" />
+
+  <!-- ============================================================ -->
+  <!-- EXACT NETFIX "N" EMBLEM (Crafted with 3D Bevels & Depth)    -->
+  <!-- Base Scale: Center ~ (512, 380)                             -->
+  <!-- ============================================================ -->
+  <g transform="translate(144, 40)">
+
+    <!-- 1. Ambient Drop Shadow of the Emblem -->
+    <g opacity="0.75" filter="url(#depthShadow3d)" transform="translate(18, 38)">
+      <rect x="132" y="154" width="64" height="236" rx="32" fill="#000000" />
+      <path d="M 164 122 L 348 358 L 284 358 L 132 154 Z" fill="#000000" />
+      <rect x="316" y="154" width="64" height="236" rx="32" fill="#000000" />
+    </g>
+
+    <!-- 2. 3D Isometric Extrusion Layer (Thickness = 22px down-right) -->
+    <!-- Extrusion for Left Pillar -->
+    <path d="M 132 154 C 132 136, 146 122, 164 122 L 180 142 C 162 142, 148 156, 148 174 L 148 378 L 196 378 L 196 358 L 212 378 L 212 388 C 212 406, 198 420, 180 420 C 162 420, 148 406, 148 388 Z" fill="url(#depthLeft)" opacity="0.95" />
+
+    <!-- Extrusion for Diagonal Connector -->
+    <path d="M 196 154 L 348 358 L 366 380 L 334 412 L 284 358 L 132 154 L 148 174 L 298 378 Z" fill="url(#depthDiag)" opacity="0.9" />
+
+    <!-- Extrusion for Right Pillar -->
+    <path d="M 316 154 L 332 174 L 332 378 L 380 378 L 396 398 L 396 174 C 396 156, 382 142, 364 142 L 348 122 Z" fill="url(#depthRight)" opacity="0.95" />
+    <path d="M 380 358 C 380 376, 366 390, 348 390 L 364 412 C 382 412, 396 398, 396 380 Z" fill="url(#depthRight)" />
+
+    <!-- 3. Front Face - EXACT NETFIX "N" EMBLEM -->
+    <!-- (A) Left Pillar (Net Backbone) -->
+    <g>
+      <path d="M 132 154
+               C 132 136, 146 122, 164 122
+               C 182 122, 196 136, 196 154
+               L 196 358
+               C 196 376, 182 390, 164 390
+               C 146 390, 132 376, 132 358
+               Z" 
+            fill="url(#frontLeft)" />
+
+      <!-- Glossy 3D Highlight Curve on Left Pillar -->
+      <path d="M 136 154
+               C 136 140, 148 128, 164 128
+               L 164 384
+               C 152 384, 142 374, 138 362
+               L 138 160
+               Z" 
+            fill="url(#bevelLight)" 
+            opacity="0.85" />
+      
+      <!-- Internal Fiber Optic Beam -->
+      <line x1="164" y1="140" x2="164" y2="372" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" opacity="0.7" />
+    </g>
+
+    <!-- (B) Dynamic Diagonal Connector (High-Speed Fiber Bolt / Fix Beam) -->
+    <g>
+      <path d="M 164 122
+               C 182 122, 196 136, 196 154
+               L 348 358
+               C 348 376, 334 390, 316 390
+               C 298 390, 284 376, 284 358
+               L 132 154
+               C 132 136, 146 122, 164 122
+               Z"
+            fill="url(#frontDiag)"
+            filter="url(#neonGlow3d)" />
+
+      <!-- 3D Chiseled Edge Line on Diagonal -->
+      <line x1="164" y1="126" x2="344" y2="362" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" opacity="0.9" />
+      <line x1="136" y1="154" x2="284" y2="358" stroke="rgba(0, 242, 254, 0.6)" stroke-width="2.5" />
+    </g>
+
+    <!-- (C) Right Pillar (Fix Anchor) -->
+    <g>
+      <path d="M 316 154
+               C 316 136, 330 122, 348 122
+               C 366 122, 380 136, 380 154
+               L 380 358
+               C 380 376, 366 390, 348 390
+               C 330 390, 316 376, 316 358
+               Z" 
+            fill="url(#frontRight)" />
+
+      <!-- Glossy 3D Highlight Curve on Right Pillar -->
+      <path d="M 320 154
+               C 320 140, 332 128, 348 128
+               L 348 384
+               C 336 384, 326 374, 322 362
+               L 322 160
+               Z" 
+            fill="url(#bevelEmerald)" 
+            opacity="0.8" />
+
+      <!-- Internal Fiber Optic Beam -->
+      <line x1="348" y1="140" x2="348" y2="372" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" opacity="0.75" />
+    </g>
+
+    <!-- (D) 3D Signal Broadcast Waves in Top-Right Corner (Exact Logo Style) -->
+    <g filter="url(#neonGlow3d)">
+      <path d="M 330 110 A 85 85 0 0 1 402 182" fill="none" stroke="#34D399" stroke-width="6.5" stroke-linecap="round" opacity="0.5" />
+      <path d="M 345 125 A 65 65 0 0 1 387 167" fill="none" stroke="#00F2FE" stroke-width="7.5" stroke-linecap="round" opacity="0.85" />
+      <path d="M 360 140 A 45 45 0 0 1 372 152" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" />
+    </g>
+
+    <!-- (E) 3D Optical Nodes (Spherical 3D Shading) -->
+    <!-- Top-Left Optical Core Sphere -->
+    <circle cx="164" cy="154" r="32" fill="rgba(0, 242, 254, 0.3)" filter="url(#intenseBloom)" />
+    <circle cx="164" cy="154" r="18" fill="url(#sphere3dCyan)" />
+    <circle cx="158" cy="148" r="5" fill="#FFFFFF" opacity="0.95" />
+
+    <!-- Bottom-Right Optical Core Sphere -->
+    <circle cx="348" cy="358" r="32" fill="rgba(16, 185, 129, 0.35)" filter="url(#intenseBloom)" />
+    <circle cx="348" cy="358" r="18" fill="url(#sphere3dEmerald)" />
+    <circle cx="342" cy="352" r="5" fill="#FFFFFF" opacity="0.95" />
+
+    <!-- Center Laser Burst Accent -->
+    <polygon points="256,230 262,250 282,256 262,262 256,282 250,262 230,256 250,250" fill="#FFFFFF" opacity="0.95" filter="url(#neonGlow3d)" />
+    <circle cx="256" cy="256" r="16" fill="rgba(0, 242, 254, 0.85)" filter="url(#intenseBloom)" />
+    <circle cx="256" cy="256" r="4" fill="#FFFFFF" />
+
+    <!-- Satellite Endpoints -->
+    <circle cx="164" cy="358" r="12" fill="url(#sphere3dCyan)" />
+    <circle cx="348" cy="154" r="12" fill="url(#sphere3dEmerald)" />
+  </g>
+
+  <!-- ============================================================ -->
+  <!-- 3D TYPOGRAPHY: NetFix & "NEXT GEN ISP SOLUTION"             -->
+  <!-- ============================================================ -->
+  <g class="font-3d" transform="translate(512, 650)" text-anchor="middle">
+    <!-- 3D Typography Drop Shadow -->
+    <text x="3" y="93" font-size="124" font-weight="900" fill="#000000" opacity="0.7" letter-spacing="-2">
+      NetFix
+    </text>
+
+    <!-- Main Wordmark -->
+    <text x="-98" y="90" font-size="124" font-weight="900" fill="url(#textNet3d)" letter-spacing="-2">
+      Net
+    </text>
+    <text x="96" y="90" font-size="124" font-weight="900" fill="url(#textFix3d)" filter="url(#neonGlow3d)" letter-spacing="-2">
+      Fix
+    </text>
+
+    <!-- Glowing Pulse Dot on the "i" -->
+    <circle cx="83" cy="2" r="10" fill="#00F2FE" filter="url(#intenseBloom)" />
+    <circle cx="83" cy="2" r="5" fill="#FFFFFF" />
+    <circle cx="83" cy="2" r="16" fill="none" stroke="#34D399" stroke-width="3" opacity="0.8" />
+
+    <!-- Subtitle: NEXT GEN ISP SOLUTION (Pill Badge) -->
+    <g transform="translate(0, 140)">
+      <rect x="-210" y="0" width="420" height="44" rx="22" ry="22" fill="rgba(15, 23, 42, 0.8)" stroke="url(#textFix3d)" stroke-width="2" stroke-opacity="0.6" />
+      <circle cx="-176" cy="22" r="5" fill="#10B981" filter="url(#neonGlow3d)" />
+      <text x="-160" y="28" text-anchor="start" font-size="15" font-weight="800" fill="#F8FAFC" letter-spacing="4">
+        NEXT GEN ISP SOLUTION
+      </text>
+    </g>
+
+    <!-- High-Availability Tagline -->
+    <text x="0" y="222" font-size="16" font-weight="500" fill="#64748B" letter-spacing="2">
+      MikroTik RouterOS 7.x • EPON/GPON OLT Telemetry • Smart Auto-Billing
+    </text>
+  </g>
+</svg>

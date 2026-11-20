@@ -187,10 +187,10 @@ export default function LoginPage() {
                 Net<span className="text-emerald-400">Fix</span>
               </span>
               <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                SaaS OS
+                Next Gen ISP Solution
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 hidden sm:block">ISP Billing & Network Automation</p>
+            <p className="text-[11px] text-slate-400 hidden sm:block">Intelligent Network &amp; Billing Automation</p>
           </div>
         </Link>
 
@@ -220,7 +220,7 @@ export default function LoginPage() {
               className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold uppercase tracking-wider self-start"
             >
               <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-              Next-Gen ISP Infrastructure & Billing
+              Next Gen ISP Solution
             </motion.div>
 
             {/* Headline */}

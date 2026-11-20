@@ -42,8 +42,8 @@
 
   <!-- Left Icon Mark (Centered at X=100, Y=100) -->
   <g transform="translate(25, 25)">
-    <!-- Icon Box Squircle (150x150) -->
-    <rect x="0" y="0" width="150" height="150" rx="36" ry="36" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="2" />
+    <!-- Icon Box Squircle (150x150, Transparent glassmorphic) -->
+    <rect x="0" y="0" width="150" height="150" rx="36" ry="36" fill="rgba(15, 23, 42, 0.04)" stroke="rgba(15, 23, 42, 0.12)" stroke-width="1.5" />
     <circle cx="75" cy="75" r="60" fill="url(#lightIconGlow)" />
 
     <!-- Signal Arcs -->
@@ -80,7 +80,7 @@
 
     <!-- Subtitle / Tagline -->
     <text x="4" y="148" font-size="14.5" font-weight="700" fill="#64748B" letter-spacing="4" text-transform="uppercase">
-      ISP AUTOMATION &amp; CLOUD BILLING
+      NEXT GEN ISP SOLUTION
     </text>
 
     <!-- Small Network Badge Pill -->
