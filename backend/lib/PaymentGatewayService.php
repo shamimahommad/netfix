@@ -431,12 +431,19 @@ class PaymentGatewayService {
     }
 
     public static function surjopayGetToken(array $settings): array {
-        $isSandbox = (bool)($settings['is_sandbox'] ?? true);
+        $isSandbox = self::isSandboxMode($settings);
         $baseUrl = self::surjopayBaseUrl($isSandbox);
         $url = $baseUrl . '/get_token';
 
-        $username = $settings['username'] ?? '';
-        $password = $settings['password'] ?? '';
+        $username = trim($settings['username'] ?? '');
+        $password = trim($settings['password'] ?? '');
+
+        if (empty($username) || empty($password)) {
+            return [
+                'success' => false,
+                'message' => 'SurjoPay credentials missing: Please provide SP Username and Password in Gateway settings.',
+            ];
+        }
 
         $headers = [
             'Content-Type: application/json',
@@ -457,9 +464,17 @@ class PaymentGatewayService {
             ];
         }
 
+        $errMsg = $res['data']['message'] ?? ($res['error'] ?: 'SurjoPay token request failed');
+        $httpCode = (int)($res['http_code'] ?? 0);
+        if ($httpCode === 401) {
+            $errMsg = "SurjoPay Auth Failed (HTTP 401): Invalid SP Username or Password. ({$errMsg})";
+        } else if ($httpCode === 0 && !empty($res['error'])) {
+            $errMsg = "SurjoPay Connection Failed: " . $res['error'];
+        }
+
         return [
             'success' => false,
-            'message' => $res['data']['message'] ?? ($res['error'] ?: 'SurjoPay token request failed'),
+            'message' => $errMsg,
             'raw' => $res,
         ];
     }
@@ -478,11 +493,11 @@ class PaymentGatewayService {
         }
 
         $token = $tokenRes['token'];
-        $isSandbox = (bool)($settings['is_sandbox'] ?? true);
+        $isSandbox = self::isSandboxMode($settings);
         $baseUrl = self::surjopayBaseUrl($isSandbox);
         $url = $baseUrl . '/secret-pay';
 
-        $prefix = !empty($settings['app_key']) ? $settings['app_key'] : 'NOK';
+        $prefix = !empty($settings['app_key']) ? trim($settings['app_key']) : 'NOK';
 
         $headers = [
             'Content-Type: application/json',
@@ -531,7 +546,7 @@ class PaymentGatewayService {
         }
 
         $token = $tokenRes['token'];
-        $isSandbox = (bool)($settings['is_sandbox'] ?? true);
+        $isSandbox = self::isSandboxMode($settings);
         $baseUrl = self::surjopayBaseUrl($isSandbox);
         $url = $baseUrl . '/verification';
 

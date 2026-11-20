@@ -298,7 +298,7 @@ class PaymentGatewayController {
         $tenantId = (int)AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
-        $paymentId = trim($data['paymentID'] ?? ($data['payment_id'] ?? ''));
+        $paymentId = trim($data['paymentID'] ?? ($data['payment_id'] ?? ($data['order_id'] ?? '')));
         if (empty($paymentId)) {
             Response::error('Payment ID is required', 400);
         }
@@ -446,7 +446,7 @@ class PaymentGatewayController {
         $userId = (int)$user['user_id'];
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
-        $paymentId = trim($data['paymentID'] ?? ($data['payment_id'] ?? ''));
+        $paymentId = trim($data['paymentID'] ?? ($data['payment_id'] ?? ($data['order_id'] ?? '')));
         if (empty($paymentId)) {
             Response::error('Payment ID is required', 400);
         }

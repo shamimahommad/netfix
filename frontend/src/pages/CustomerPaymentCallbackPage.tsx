@@ -6,8 +6,8 @@ import { Loader2 } from 'lucide-react';
 export default function CustomerPaymentCallbackPage() {
   const [searchParams] = useSearchParams();
   const status = searchParams.get('status') || '';
-  // bKash may send paymentID or payment_id
-  const paymentID = searchParams.get('paymentID') || searchParams.get('payment_id') || '';
+  // bKash, SurjoPay, or SSLCommerz payment identifier
+  const paymentID = searchParams.get('paymentID') || searchParams.get('payment_id') || searchParams.get('order_id') || '';
   const [confirming, setConfirming] = useState(false);
   const [confirmDone, setConfirmDone] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);

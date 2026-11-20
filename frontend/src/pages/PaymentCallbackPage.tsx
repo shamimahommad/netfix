@@ -30,7 +30,7 @@ export default function PaymentCallbackPage() {
               </svg>
             </div>
             <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-2">Payment cancelled</h1>
-            <p className="text-slate-600 dark:text-slate-400 mb-6">You cancelled the payment on Bkash.</p>
+            <p className="text-slate-600 dark:text-slate-400 mb-6">You cancelled the payment on the gateway.</p>
           </>
         )}
         {!isSuccess && !isCancel && (
