@@ -516,10 +516,13 @@ export default function CustomersListPage() {
     if (action === 'Delete Customer') {
       const ids = Array.from(selectedCustomers);
       const customerList = customers.filter(
-        (c) => (c.customer_id || c.customerId) && ids.includes(c.customer_id || c.customerId || '')
+        (c) => ids.includes(String(c.customer_id ?? c.customerId ?? ''))
       );
       const isLeft = (c: Customer) =>
-        c.billing_status === 'Left' || c.status === 'terminated' || c.status === 'cancelled';
+        c.billing_status === 'Left' ||
+        (c as any).billingStatus === 'Left' ||
+        c.status === 'terminated' ||
+        c.status === 'cancelled';
       const notLeft = customerList.filter((c) => !isLeft(c));
       if (notLeft.length > 0) {
         toast.error('Only Left customers can be deleted. Mark the customer(s) as Left first.');
@@ -539,6 +542,7 @@ export default function CustomersListPage() {
       }
       if (successCount > 0) {
         toast.success(`Deleted ${successCount} customer(s).`);
+        setSelectedCustomers(new Set());
         loadCustomers();
       }
       if (errors.length > 0) {

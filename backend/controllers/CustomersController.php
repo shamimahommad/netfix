@@ -1295,15 +1295,77 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         $db = Database::getConnection();
 
         HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_delete_customer');
-        $cid = is_numeric($id) ? (int)$id : (int)self::getRealCustomerId($db, $id, $tenantId, false);
-        HierarchySecurityService::canViewCustomer((int)$user['user_id'], $cid, $tenantId ? (int)$tenantId : null);
 
-        $stmt = $db->prepare("UPDATE customers SET status = 'cancelled' WHERE customer_id = :id AND tenant_id = :tid");
-        $stmt->execute(['id' => $cid, 'tid' => $tenantId]);
+        // 1. Locate customer by customer_id or customer_code
+        $stmtC = $db->prepare("SELECT * FROM customers WHERE (customer_id = :id OR customer_code = :id) LIMIT 1");
+        $stmtC->execute(['id' => $id]);
+        $customer = $stmtC->fetch();
+        if (!$customer) {
+            Response::error('Customer not found', 404);
+            return;
+        }
+
+        $cid = (int)$customer['customer_id'];
+        $customerTenantId = (int)$customer['tenant_id'];
+
+        // Enforce hierarchy scoping
+        HierarchySecurityService::canViewCustomer((int)$user['user_id'], $cid, $customerTenantId);
+
+        // Best effort: Remove PPPoE secret & active sessions from MikroTik router
+        try {
+            require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+            $router = MikrotikSyncService::getRouter($db, $cid, $customerTenantId);
+            if ($router) {
+                $api = MikrotikSyncService::connect($router, 2);
+                if ($api) {
+                    $stmtU = $db->prepare("SELECT username FROM customer_network_accounts WHERE customer_id = :cid");
+                    $stmtU->execute(['cid' => $cid]);
+                    $currUser = $stmtU->fetchColumn();
+                    if ($currUser) {
+                        $actives = $api->comm('/ppp/active/print', ['?name' => $currUser]);
+                        if (!empty($actives[0]['.id'])) {
+                            $api->comm('/ppp/active/remove', ['.id' => $actives[0]['.id']]);
+                        }
+                        $secrets = $api->comm('/ppp/secret/print', ['?name' => $currUser]);
+                        if (!empty($secrets[0]['.id'])) {
+                            $api->comm('/ppp/secret/remove', ['.id' => $secrets[0]['.id']]);
+                        }
+                    }
+                }
+            }
+        } catch (\Throwable $mtErr) {
+            error_log("Mikrotik delete customer secret notice: " . $mtErr->getMessage());
+        }
+
+        // 2. Perform permanent cascading deletion
+        $db->beginTransaction();
+        try {
+            $db->prepare("DELETE FROM customer_network_accounts WHERE customer_id = :cid")->execute(['cid' => $cid]);
+            $db->prepare("DELETE FROM customer_services WHERE customer_id = :cid")->execute(['cid' => $cid]);
+            $db->prepare("DELETE FROM client_task_logs WHERE customer_id = :cid")->execute(['cid' => $cid]);
+            $db->prepare("DELETE FROM customer_tickets WHERE customer_id = :cid")->execute(['cid' => $cid]);
+            $db->prepare("DELETE FROM payment_intents WHERE customer_id = :cid")->execute(['cid' => $cid]);
+            $db->prepare("DELETE FROM invoices WHERE customer_id = :cid")->execute(['cid' => $cid]);
+            $db->prepare("DELETE FROM transactions WHERE customer_id = :cid")->execute(['cid' => $cid]);
+            $db->prepare("UPDATE wallet_ledger SET source_customer_id = NULL WHERE source_customer_id = :cid")->execute(['cid' => $cid]);
+
+            if (!empty($customer['login_user_id'])) {
+                $db->prepare("DELETE FROM users WHERE user_id = :uid AND role = 'customer'")->execute(['uid' => $customer['login_user_id']]);
+            }
+
+            $stmtDel = $db->prepare("DELETE FROM customers WHERE customer_id = :id");
+            $stmtDel->execute(['id' => $cid]);
+
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollBack();
+            Response::error('Failed to permanently delete customer: ' . $e->getMessage(), 500);
+            return;
+        }
 
         Response::json([
             'success' => true,
-            'message' => 'Customer cancelled/archived successfully',
+            'message' => 'Customer permanently deleted successfully',
         ]);
     }
 
