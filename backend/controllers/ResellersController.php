@@ -109,18 +109,44 @@ class ResellersController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT user_id, first_name, last_name, username 
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        $callerRole = strtolower($user['role'] ?? '');
+        $callerLevel = HierarchySecurityService::getHierarchyLevel($callerRole);
+        $callerId = (int)$user['user_id'];
+        $isLevel0 = ($callerLevel === 0 || $callerRole === 'saas_admin');
+
+        $where = ["status = 'active'", "role IN ('reseller', 'sub_reseller', 'dealer', 'agent')"];
+        $params = [];
+
+        if ($tenantId !== null) {
+            $where[] = "tenant_id = :tid";
+            $params['tid'] = $tenantId;
+        }
+
+        if (!$isLevel0) {
+            $rawPath = $user['hierarchy_path'] ?? "/{$callerId}/";
+            $userPath = '/' . trim($rawPath, '/') . '/';
+            $where[] = "(user_id = :scope_uid OR hierarchy_path LIKE :scope_wildcard)";
+            $params['scope_uid'] = $callerId;
+            $params['scope_wildcard'] = $userPath . '%';
+        }
+
+        $whereSql = implode(' AND ', $where);
+        $stmt = $db->prepare("SELECT user_id, first_name, last_name, username, role 
             FROM users 
-            WHERE tenant_id = :tid AND role = 'reseller' AND status = 'active'
+            WHERE {$whereSql}
             ORDER BY first_name ASC");
-        $stmt->execute(['tid' => $tenantId]);
+        $stmt->execute($params);
         $rows = $stmt->fetchAll();
 
         $pops = array_map(function($r) {
+            $roleLabel = str_replace('_', ' ', ucfirst($r['role']));
+            $name = trim(($r['first_name'] ?? '') . ' ' . ($r['last_name'] ?? ''));
             return [
                 'userId' => (string)$r['user_id'],
-                'name' => trim($r['first_name'] . ' ' . $r['last_name']),
+                'name' => ($name ? $name : $r['username']) . " ({$r['username']}) - {$roleLabel}",
                 'username' => $r['username'],
+                'role' => $r['role'],
             ];
         }, $rows);
 

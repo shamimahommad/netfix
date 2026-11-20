@@ -538,7 +538,154 @@ class PaymentsController {
     }
 
     public static function rechargeHistory(): void {
-        self::customerPayments();
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $page = max(1, (int)($_GET['page'] ?? 1));
+        $limit = max(1, min(100, (int)($_GET['limit'] ?? 25)));
+        $offset = ($page - 1) * $limit;
+
+        $callerId = (int)$user['user_id'];
+        $role = strtolower($user['role'] ?? '');
+        $isLevel0 = (HierarchySecurityService::getHierarchyLevel($role) === 0 || $role === 'saas_admin');
+
+        $userId = !empty($_GET['userId']) ? (int)$_GET['userId'] : (!empty($_GET['initiator']) ? (int)$_GET['initiator'] : null);
+        $popInCharge = !empty($_GET['createdBy']) ? (int)$_GET['createdBy'] : (!empty($_GET['pop_in_charge']) ? (int)$_GET['pop_in_charge'] : null);
+        $dateFrom = !empty($_GET['dateFrom']) ? trim($_GET['dateFrom']) : null;
+        $dateTo = !empty($_GET['dateTo']) ? trim($_GET['dateTo']) : null;
+        $method = !empty($_GET['method']) ? trim($_GET['method']) : null;
+        $search = !empty($_GET['search']) ? trim($_GET['search']) : null;
+
+        $where = ["wt.tenant_id = :tid"];
+        $params = ['tid' => $tenantId];
+
+        // Downward hierarchy security scoping:
+        // Level 0 (Admin) can see all wallet transactions in the tenant.
+        // Reseller/Sub-reseller/Agent can only see their own wallet transactions or downlines' wallet transactions!
+        if (!$isLevel0) {
+            $rawPath = $user['hierarchy_path'] ?? "/{$callerId}/";
+            $userPath = '/' . trim($rawPath, '/') . '/';
+            $params['scope_uid'] = $callerId;
+            $params['scope_path_wildcard'] = $userPath . '%';
+            $where[] = "(wt.user_id = :scope_uid OR u_pop.hierarchy_path LIKE :scope_path_wildcard OR wt.created_by = :scope_uid)";
+        }
+
+        // Filter by Initiator (who created/initiated the transaction)
+        if ($userId) {
+            $where[] = "wt.created_by = :userId";
+            $params['userId'] = $userId;
+        }
+
+        // Filter by POP In-Charge (whose wallet is affected)
+        if ($popInCharge) {
+            $where[] = "wt.user_id = :popInCharge";
+            $params['popInCharge'] = $popInCharge;
+        }
+
+        // Date Range
+        if ($dateFrom) {
+            $where[] = "DATE(wt.created_at) >= :dateFrom";
+            $params['dateFrom'] = $dateFrom;
+        }
+        if ($dateTo) {
+            $where[] = "DATE(wt.created_at) <= :dateTo";
+            $params['dateTo'] = $dateTo;
+        }
+
+        // Method filter (e.g. cash, bkash, nagad, system)
+        if ($method) {
+            $m = strtolower($method);
+            if ($m === 'system') {
+                $where[] = "(wt.reference_type = 'CUSTOMER_RECHARGE' OR LOWER(wt.description) LIKE '%system%')";
+            } else {
+                $where[] = "(LOWER(wt.description) LIKE :method OR LOWER(wt.reference_type) LIKE :method OR LOWER(wt.reference_id) LIKE :method)";
+                $params['method'] = "%{$m}%";
+            }
+        }
+
+        // Search text
+        if ($search) {
+            $where[] = "(wt.reference_id LIKE :search OR wt.description LIKE :search OR u_pop.username LIKE :search OR u_pop.first_name LIKE :search OR u_pop.last_name LIKE :search OR u_init.username LIKE :search OR u_init.first_name LIKE :search)";
+            $params['search'] = "%{$search}%";
+        }
+
+        $whereSql = implode(' AND ', $where);
+
+        // Count total matching
+        $countStmt = $db->prepare("SELECT COUNT(*) FROM wallet_transactions wt
+            LEFT JOIN users u_pop ON u_pop.user_id = wt.user_id
+            LEFT JOIN users u_init ON u_init.user_id = wt.created_by
+            WHERE {$whereSql}");
+        $countStmt->execute($params);
+        $total = (int)$countStmt->fetchColumn();
+
+        // Fetch paginated rows from wallet_transactions
+        $stmt = $db->prepare("SELECT 
+            wt.transaction_id,
+            wt.wallet_id,
+            wt.user_id as pop_user_id,
+            wt.type,
+            wt.amount,
+            wt.balance_before,
+            wt.balance_after,
+            wt.reference_type,
+            wt.reference_id,
+            wt.description,
+            wt.created_by as initiator_user_id,
+            wt.created_at,
+            TRIM(CONCAT(COALESCE(u_pop.first_name, ''), ' ', COALESCE(u_pop.last_name, ''))) as pop_name,
+            u_pop.username as pop_username,
+            TRIM(CONCAT(COALESCE(u_init.first_name, ''), ' ', COALESCE(u_init.last_name, ''))) as initiator_name,
+            u_init.username as initiator_username
+            FROM wallet_transactions wt
+            LEFT JOIN users u_pop ON u_pop.user_id = wt.user_id
+            LEFT JOIN users u_init ON u_init.user_id = wt.created_by
+            WHERE {$whereSql}
+            ORDER BY wt.transaction_id DESC
+            LIMIT {$limit} OFFSET {$offset}");
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+
+        $dataRows = [];
+        $sl = $offset + 1;
+        foreach ($rows as $r) {
+            $isDebit = ($r['type'] === 'debit');
+            $amount = (float)$r['amount'];
+            $debit = $isDebit ? $amount : 0.0;
+            $credit = $isDebit ? null : $amount;
+
+            $initName = !empty($r['initiator_name']) ? $r['initiator_name'] : (!empty($r['initiator_username']) ? $r['initiator_username'] : 'System / Online');
+            $popName = !empty($r['pop_name']) ? $r['pop_name'] : (!empty($r['pop_username']) ? $r['pop_username'] : '—');
+
+            $dataRows[] = [
+                'sl' => $sl++,
+                'ref' => $r['reference_id'] ?: ('WT-' . $r['transaction_id']),
+                'ref_no' => $r['reference_id'] ?: ('WT-' . $r['transaction_id']),
+                'initiator_name' => $initName,
+                'pop_in_charge_name' => $popName,
+                'pop_name' => $popName,
+                'debit' => $debit,
+                'credit' => $credit,
+                'balance' => (float)$r['balance_after'],
+                'balance_after' => (float)$r['balance_after'],
+                'created_at' => $r['created_at'],
+                'description' => $r['description'] ?: 'Wallet transaction',
+            ];
+        }
+
+        Response::json([
+            'success' => true,
+            'total' => $total,
+            'current_page' => $page,
+            'per_page' => $limit,
+            'meta' => [
+                'total' => $total,
+                'page' => $page,
+                'limit' => $limit,
+            ],
+            'data' => $dataRows,
+        ]);
     }
 
     public static function bkashCallback(): void {
