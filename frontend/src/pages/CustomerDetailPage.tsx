@@ -684,6 +684,29 @@ export default function CustomerDetailPage() {
     return newExpireDate.toISOString();
   };
 
+  // Check if customer belongs to a reseller/agent panel (and is not directly an admin's customer)
+  const isResellerCustomer = Boolean(
+    customerData?.customer?.isResellerCustomer ??
+    customerData?.billing?.isResellerCustomer ??
+    (
+      customerData?.customer?.resellerId ||
+      (['reseller', 'agent', 'dealer', 'sub_reseller'].includes(String(customerData?.billing?.connectedByRole || '').toLowerCase())) ||
+      (['reseller', 'agent', 'dealer', 'sub_reseller'].includes(String(customerData?.customer?.ownerRole || '').toLowerCase()))
+    )
+  );
+
+  const isCallerReseller = Boolean(
+    ['reseller', 'agent', 'dealer', 'sub_reseller'].includes(String(user?.role_code || (user as any)?.role || '').toLowerCase())
+  );
+
+  const showRenewAsReseller = isResellerCustomer && !isCallerReseller;
+
+  const connectedResellerName =
+    customerData?.customer?.resellerName ||
+    (customerData?.billing?.connectedByRole && ['reseller', 'agent', 'dealer', 'sub_reseller'].includes(String(customerData.billing.connectedByRole).toLowerCase()) ? customerData.billing.connectedBy : null) ||
+    (customerData?.customer?.ownerRole && ['reseller', 'agent', 'dealer', 'sub_reseller'].includes(String(customerData.customer.ownerRole).toLowerCase()) ? customerData.customer.ownerName : null) ||
+    'Reseller';
+
   const handleRenew = async () => {
     if (!id || !customerData) return;
 
@@ -744,7 +767,7 @@ export default function CustomerDetailPage() {
         plan_price: renewForm.plan_price,
         bill_amount: Number(billAmount),
         send_sms: renewForm.send_sms,
-        renew_as_reseller: renewForm.renew_as_reseller,
+        renew_as_reseller: showRenewAsReseller ? renewForm.renew_as_reseller : false,
         pay_from_customer_balance: hasCustomerBalance ? renewForm.pay_from_customer_balance : false,
       };
 
@@ -2197,11 +2220,7 @@ export default function CustomerDetailPage() {
               {/* Options */}
               <div className="bg-gradient-to-br from-slate-50 to-indigo-50/30 dark:from-slate-900/50 dark:to-indigo-900/10 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-3 sm:p-4">
                 <div className="space-y-2.5">
-                  {Boolean(
-                    (customerData.billing as any)?.connectedByRole !== 'admin' ||
-                    (customerData.customer as any)?.ownerRole !== 'admin' ||
-                    (customerData.customer?.ownerId && String(user?.user_id) !== String(customerData.customer?.ownerId))
-                  ) && (
+                  {showRenewAsReseller && (
                     <div className="space-y-1">
                       <label className="flex items-center gap-2.5 cursor-pointer group p-2 rounded-lg hover:bg-white/50 dark:hover:bg-slate-800/50 transition-all">
                         <div className="relative">
@@ -2215,13 +2234,13 @@ export default function CustomerDetailPage() {
                         <div className="flex items-center gap-2 flex-1">
                           <UserIcon className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                           <span className="text-sm font-medium text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-                            Renew As Reseller {(customerData.billing as any)?.connectedBy || (customerData.billing as any)?.connectedByUsername || customerData.customer?.ownerName ? `(${(customerData.billing as any)?.connectedBy || (customerData.billing as any)?.connectedByUsername || customerData.customer?.ownerName})` : ''} ?
+                            Renew As Reseller {connectedResellerName ? `(${connectedResellerName})` : ''} ?
                           </span>
                         </div>
                       </label>
                       {renewForm.renew_as_reseller && (
                         <p className="text-xs text-indigo-600 dark:text-indigo-400 pl-8 font-medium">
-                          Bill amount will be deducted directly from {(customerData.billing as any)?.connectedBy || (customerData.billing as any)?.connectedByUsername || customerData.customer?.ownerName || 'the assigned reseller'}&apos;s account balance.
+                          Bill amount will be deducted directly from {connectedResellerName}&apos;s account balance.
                         </p>
                       )}
                     </div>

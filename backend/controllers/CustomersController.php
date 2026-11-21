@@ -534,17 +534,20 @@ class CustomersController {
             }
         }
 
+        $isResellerCustomer = false;
         if ($targetConnectedUser && in_array(strtolower($targetConnectedUser['role'] ?? ''), ['agent', 'dealer', 'sub_reseller', 'reseller'], true)) {
             $connectedFullName = trim(($targetConnectedUser['first_name'] ?? '') . ' ' . ($targetConnectedUser['last_name'] ?? ''));
             $connectedByName = $connectedFullName ?: ($targetConnectedUser['username'] ?: 'Reseller');
-            $connectedByRole = $targetConnectedUser['role'];
+            $connectedByRole = strtolower($targetConnectedUser['role']);
             $connectedById = (string)$targetConnectedUser['user_id'];
             $connectedByUsername = $targetConnectedUser['username'] ?? '';
+            $isResellerCustomer = true;
         } else {
             $connectedByName = 'Admin';
             $connectedByRole = 'admin';
             $connectedById = !empty($targetConnectedUser['user_id']) ? (string)$targetConnectedUser['user_id'] : null;
             $connectedByUsername = $targetConnectedUser['username'] ?? 'admin';
+            $isResellerCustomer = false;
         }
 
         $isHidePassword = HierarchySecurityService::hasPermission((int)$user['user_id'], 'hide_customer_password');
@@ -580,8 +583,9 @@ class CustomersController {
                     'ownerId' => $customer['owner_id'] ? (string)$customer['owner_id'] : null,
                     'ownerName' => $connectedByName,
                     'ownerRole' => $connectedByRole,
-                    'resellerId' => ($connectedByRole !== 'admin') ? $connectedById : null,
-                    'resellerName' => ($connectedByRole !== 'admin') ? $connectedByName : null,
+                    'resellerId' => $isResellerCustomer ? $connectedById : null,
+                    'resellerName' => $isResellerCustomer ? $connectedByName : null,
+                    'isResellerCustomer' => $isResellerCustomer,
                     'area' => $metadata['area_name'] ?? null,
                     'subArea' => $metadata['sub_area_name'] ?? null,
                     'createdAt' => $customer['created_at'],
@@ -630,6 +634,7 @@ class CustomersController {
                     'connectedById' => $connectedById,
                     'connectedByRole' => $connectedByRole,
                     'connectedByUsername' => $connectedByUsername,
+                    'isResellerCustomer' => $isResellerCustomer,
                     'location' => $customer['installation_address'] ?? '',
                 ],
                 'onu' => $onuData,

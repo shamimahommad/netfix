@@ -92,6 +92,11 @@ export interface CustomerDetailResponse {
       thana?: string | null;
       /** Owner user id (reseller/agent); when same as logged-in user, customer is "own" */
       ownerId?: string | null;
+      ownerName?: string | null;
+      ownerRole?: string | null;
+      resellerId?: string | null;
+      resellerName?: string | null;
+      isResellerCustomer?: boolean;
     };
     service: {
       packageName: string | null;
@@ -132,6 +137,7 @@ export interface CustomerDetailResponse {
       connectedByRole?: string | null;
       connectedById?: string | null;
       connectedByUsername?: string | null;
+      isResellerCustomer?: boolean;
       location: string | null;
     };
     onu: {
