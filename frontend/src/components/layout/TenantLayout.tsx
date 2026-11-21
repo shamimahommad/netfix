@@ -29,13 +29,13 @@ function getResellerMenuLabels(roleCode: string | undefined): { menu: string; li
   return { menu: 'Reseller', list: 'Reseller List' };
 }
 
-/** Report → first submenu label by role: Admin = Reseller Wise Customers, Reseller = Sub Reseller Wise Customers, etc. */
+/** Report → first submenu label by role: Admin = Reseller Customers, Reseller = Sub Reseller Customers, etc. */
 function getResellerWiseReportLabel(roleCode: string | undefined): string {
   const r = (roleCode ?? '').toLowerCase();
-  if (r === 'reseller') return 'Sub Reseller Wise Customers';
-  if (r === 'sub_reseller') return 'Agent Wise Customers';
+  if (r === 'reseller') return 'Sub Reseller Customers';
+  if (r === 'sub_reseller') return 'Agent Customers';
   if (r === 'agent') return 'My Customers';
-  return 'Reseller Wise Customers'; // admin, manager, tenant_admin, isp_admin
+  return 'Reseller Customers'; // admin, manager, tenant_admin, isp_admin
 }
 
 /**
@@ -162,7 +162,7 @@ export default function TenantLayout() {
                 { label: 'BTRC Monthly Return', path: '/dashboard/report/btrc' },
               ]
             : []),
-          { label: 'Financial Statement / Ledger', path: '/dashboard/report/ledger' },
+          { label: 'Financial Ledger', path: '/dashboard/report/ledger' },
           { label: 'Reconciliation Audit', path: '/dashboard/report/reconciliation' },
           { label: 'Online Transactions', path: '/dashboard/report/online-transactions' },
           { label: 'Merchant Payments', path: '/dashboard/report/merchant-payments' },

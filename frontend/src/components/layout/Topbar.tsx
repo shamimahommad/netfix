@@ -67,7 +67,7 @@ const getPageTitle = (pathname: string): string => {
     'dashboard/report/ledger': 'Financial Ledger',
     'dashboard/report/financial-ledger': 'Financial Ledger',
     'dashboard/report/reconciliation': 'Reconciliation Audit',
-    'dashboard/report/reseller-wise-customers': 'Reseller Wise Customers',
+    'dashboard/report/reseller-wise-customers': 'Reseller Customers',
     'dashboard/report/area-wise-customers': 'Area Wise Customers',
     'dashboard/report/server-wise-customers': 'Server Wise Customers',
     'dashboard/report': 'Reports & Analytics',
