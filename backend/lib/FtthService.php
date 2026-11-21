@@ -7,6 +7,7 @@
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/ActivityLogger.php';
+require_once __DIR__ . '/TenantSequenceService.php';
 
 class FtthService {
 
@@ -889,5 +890,75 @@ class FtthService {
         ");
         $stmt->execute(['tid' => $tenantId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Drag & Drop position update for Office / NOC Station
+     */
+    public static function updateNocLocation(int $tenantId, int $id, float $lat, float $lng): bool {
+        $db = Database::getConnection();
+        $stmt = $db->prepare("UPDATE ftth_noc_stations SET latitude = :lat, longitude = :lng WHERE id = :id AND tenant_id = :tid");
+        return $stmt->execute(['lat' => $lat, 'lng' => $lng, 'id' => $id, 'tid' => $tenantId]);
+    }
+
+    /**
+     * Drag & Drop position update for FTTH Box
+     */
+    public static function updateBoxLocation(int $tenantId, int $id, float $lat, float $lng): bool {
+        $db = Database::getConnection();
+        $stmt = $db->prepare("UPDATE ftth_boxes SET latitude = :lat, longitude = :lng WHERE id = :id AND tenant_id = :tid");
+        return $stmt->execute(['lat' => $lat, 'lng' => $lng, 'id' => $id, 'tid' => $tenantId]);
+    }
+
+    /**
+     * Create network device (OLT or Router) directly from FTTH module
+     */
+    public static function createDevice(int $tenantId, array $data): array {
+        $db = Database::getConnection();
+
+        $name = trim($data['device_name'] ?? $data['name'] ?? '');
+        if (empty($name)) {
+            throw new InvalidArgumentException('Device name is required');
+        }
+
+        $type = in_array($data['device_type'] ?? '', ['olt', 'router']) ? $data['device_type'] : 'olt';
+        $vendor = trim($data['vendor'] ?? ($type === 'olt' ? 'vsol' : 'mikrotik'));
+        $ip = trim($data['management_ip'] ?? $data['ip'] ?? '192.168.1.10');
+        $nocStationId = !empty($data['noc_station_id']) ? (int)$data['noc_station_id'] : null;
+        $ponType = $data['pon_type'] ?? ($type === 'olt' ? 'epon' : null);
+        $totalPonPorts = isset($data['total_pon_ports']) ? (int)$data['total_pon_ports'] : ($type === 'olt' ? 8 : null);
+
+        $code = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'device', 6);
+
+        $stmt = $db->prepare("
+            INSERT INTO network_devices 
+                (tenant_id, device_code, device_name, device_type, vendor, status, management_ip, pon_type, total_pon_ports, noc_station_id)
+            VALUES 
+                (:tid, :code, :name, :type, :vendor, 'active', :ip, :pon_type, :pon_ports, :nid)
+        ");
+        $stmt->execute([
+            'tid' => $tenantId,
+            'code' => $code,
+            'name' => $name,
+            'type' => $type,
+            'vendor' => strtolower($vendor),
+            'ip' => $ip,
+            'pon_type' => $ponType,
+            'pon_ports' => $totalPonPorts,
+            'nid' => $nocStationId,
+        ]);
+
+        $id = (int)$db->lastInsertId();
+
+        return [
+            'network_device_id' => $id,
+            'device_code' => $code,
+            'device_name' => $name,
+            'device_type' => $type,
+            'vendor' => $vendor,
+            'management_ip' => $ip,
+            'status' => 'active',
+            'noc_station_id' => $nocStationId,
+        ];
     }
 }

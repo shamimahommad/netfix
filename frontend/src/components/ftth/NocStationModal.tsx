@@ -39,7 +39,7 @@ export default function NocStationModal({ isOpen, onClose, onSuccess, stationToE
         setSelectedDeviceIds(stationToEdit.devices.map(d => d.network_device_id));
       } else {
         setName('');
-        setStationType('main_office');
+        setStationType('sub_pop');
         setLatitude('');
         setLongitude('');
         setAddress('');
@@ -55,10 +55,6 @@ export default function NocStationModal({ isOpen, onClose, onSuccess, stationToE
     try {
       const devs = await ftthService.getDevices();
       setAvailableDevices(devs);
-      // If creating new and no devices selected yet, select all unassigned devices by default
-      if (!stationToEdit) {
-        setSelectedDeviceIds(devs.map(d => d.network_device_id));
-      }
     } catch (err) {
       console.error('Failed to load devices:', err);
     } finally {
@@ -137,10 +133,10 @@ export default function NocStationModal({ isOpen, onClose, onSuccess, stationToE
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                {stationToEdit ? 'Edit Office / NOC Server Room' : 'Set Office / Central NOC Location'}
+                {stationToEdit ? 'Edit Office / POP Station' : 'Add Office / Sub POP Location'}
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Place your Main Office, Core MikroTik routers and OLT server room on the map
+                Setup your 1st Main Office, 2nd Branch Office, or Regional POP Station
               </p>
             </div>
           </div>
@@ -165,22 +161,22 @@ export default function NocStationModal({ isOpen, onClose, onSuccess, stationToE
                 required
                 value={name}
                 onChange={e => setName(e.target.value)}
-                placeholder="e.g. Head Office & Central NOC"
+                placeholder="e.g. 2nd Office - Sariyakandi Mor"
                 className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-hidden transition-all"
               />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Facility Type
+                Facility Category
               </label>
               <select
                 value={stationType}
                 onChange={e => setStationType(e.target.value as any)}
                 className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-hidden transition-all"
               >
-                <option value="main_office">Main Office & NOC</option>
-                <option value="sub_pop">Sub POP / Tower</option>
-                <option value="server_room">Server Room</option>
+                <option value="main_office">1st Main Office & NOC</option>
+                <option value="sub_pop">2nd Office / Sub POP</option>
+                <option value="server_room">3rd Regional Server Room</option>
               </select>
             </div>
           </div>

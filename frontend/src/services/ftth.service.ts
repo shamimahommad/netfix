@@ -207,6 +207,27 @@ export const ftthService = {
     const res = await api.get<{ success: boolean; data: FtthAvailableDevice[] }>('/ftth/devices');
     return res.data.data;
   },
+
+  async createDevice(data: {
+    device_name: string;
+    device_type: 'olt' | 'router';
+    vendor: string;
+    management_ip: string;
+    noc_station_id?: number | null;
+    pon_type?: string | null;
+    total_pon_ports?: number | null;
+  }): Promise<FtthAvailableDevice> {
+    const res = await api.post<{ success: boolean; message: string; data: FtthAvailableDevice }>('/ftth/devices', data);
+    return res.data.data;
+  },
+
+  async updateNocLocation(id: number, latitude: number, longitude: number): Promise<void> {
+    await api.patch(`/ftth/nocs/${id}/location`, { latitude, longitude });
+  },
+
+  async updateBoxLocation(id: number, latitude: number, longitude: number): Promise<void> {
+    await api.patch(`/ftth/boxes/${id}/location`, { latitude, longitude });
+  },
 };
 
 export default ftthService;

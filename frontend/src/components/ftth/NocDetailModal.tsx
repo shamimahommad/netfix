@@ -8,6 +8,7 @@ interface NocDetailModalProps {
   onClose: () => void;
   onEdit: (station: FtthNocStation) => void;
   onRunCable: (station: FtthNocStation) => void;
+  onAddDevice?: (station: FtthNocStation) => void;
 }
 
 export default function NocDetailModal({
@@ -16,6 +17,7 @@ export default function NocDetailModal({
   onClose,
   onEdit,
   onRunCable,
+  onAddDevice,
 }: NocDetailModalProps) {
   const [activeTab, setActiveTab] = useState<'olts' | 'routers'>('olts');
 
@@ -202,15 +204,30 @@ export default function NocDetailModal({
         </div>
 
         {/* Action Footer */}
-        <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={() => onEdit(station)}
-            className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-1.5 cursor-pointer"
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-            Edit Location / Devices
-          </button>
+        <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onEdit(station)}
+              className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              Edit Location
+            </button>
+            {onAddDevice && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onAddDevice(station);
+                }}
+                className="px-3.5 py-2 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Server className="w-3.5 h-3.5" />
+                + Add Device
+              </button>
+            )}
+          </div>
 
           <button
             type="button"
@@ -218,7 +235,7 @@ export default function NocDetailModal({
               onClose();
               onRunCable(station);
             }}
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
+            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
           >
             <Cable className="w-4 h-4" />
             <span>Run Feeder Fiber Cable to Box</span>

@@ -25,6 +25,7 @@ import FeasibilityCheckModal from '@/components/ftth/FeasibilityCheckModal';
 import NocStationModal from '@/components/ftth/NocStationModal';
 import NocDetailModal from '@/components/ftth/NocDetailModal';
 import AddCableModal from '@/components/ftth/AddCableModal';
+import AddDeviceModal from '@/components/ftth/AddDeviceModal';
 import { useToastContext } from '@/contexts/ToastContext';
 
 const DEFAULT_CENTER: [number, number] = [24.8967, 89.6521];
@@ -228,6 +229,10 @@ export default function FtthMapPage() {
   const [isAddCableOpen, setIsAddCableOpen] = useState(false);
   const [cablePreselectedNoc, setCablePreselectedNoc] = useState<FtthNocStation | null>(null);
 
+  // Add Device Modal
+  const [isAddDeviceOpen, setIsAddDeviceOpen] = useState(false);
+  const [devicePreselectedNocId, setDevicePreselectedNocId] = useState<number | null>(null);
+
   const loadData = async () => {
     setIsLoading(true);
     try {
@@ -321,24 +326,43 @@ export default function FtthMapPage() {
               Switch to Customer Status Map
             </button>
 
-            {/* Step 1: Office / NOC Station Button */}
+            {/* + Add Office / POP Station */}
             <button
               type="button"
               onClick={() => {
-                if (nocStations.length > 0) {
-                  setInspectingNocStation(nocStations[0]);
-                } else {
-                  setEditingNocStation(null);
-                  setIsNocModalOpen(true);
-                }
+                setEditingNocStation(null);
+                setIsNocModalOpen(true);
               }}
               className="px-3.5 py-1.5 rounded-xl border border-indigo-300 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
             >
               <Building2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              Office / OLT Station
+              + Add Office / POP
             </button>
 
-            {/* Step 2: Run Fiber Cable Button */}
+            {/* + Add Device (OLT / Router) */}
+            <button
+              type="button"
+              onClick={() => {
+                setDevicePreselectedNocId(nocStations[0]?.id || null);
+                setIsAddDeviceOpen(true);
+              }}
+              className="px-3.5 py-1.5 rounded-xl border border-purple-300 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 text-xs font-bold hover:bg-purple-100 dark:hover:bg-purple-900/60 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            >
+              <Server className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+              + Add Device
+            </button>
+
+            {/* + Deploy Box Button */}
+            <button
+              type="button"
+              onClick={() => setIsAddBoxOpen(true)}
+              className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm hover:shadow transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              + Deploy Box
+            </button>
+
+            {/* Run Fiber Cable Button */}
             <button
               type="button"
               onClick={() => {
@@ -349,16 +373,6 @@ export default function FtthMapPage() {
             >
               <Cable className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
               Run Fiber Cable
-            </button>
-
-            {/* Step 3: Deploy Box Button */}
-            <button
-              type="button"
-              onClick={() => setIsAddBoxOpen(true)}
-              className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm hover:shadow transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Deploy Box
             </button>
 
             {/* Feasibility Check */}
@@ -503,14 +517,34 @@ export default function FtthMapPage() {
               </Polyline>
             ))}
 
-            {/* Office / Central NOC Markers */}
+            {/* Office / Central NOC Markers (Fully Draggable) */}
             {showNocs && nocStations.map((station) => (
               <Marker
                 key={`noc-${station.id}`}
                 position={[station.latitude, station.longitude]}
                 icon={createNocMarkerIcon(station)}
+                draggable={true}
                 eventHandlers={{
                   click: () => setInspectingNocStation(station),
+                  dragend: async (e) => {
+                    const marker = e.target;
+                    const position = marker.getLatLng();
+                    const newLat = parseFloat(position.lat.toFixed(6));
+                    const newLng = parseFloat(position.lng.toFixed(6));
+
+                    // Optimistically update position
+                    setNocStations((prev) =>
+                      prev.map((n) => (n.id === station.id ? { ...n, latitude: newLat, longitude: newLng } : n))
+                    );
+
+                    try {
+                      await ftthService.updateNocLocation(station.id, newLat, newLng);
+                      toast.success(`📍 "${station.name}" moved to: ${newLat}, ${newLng}`);
+                      loadData();
+                    } catch (err) {
+                      toast.error('Failed to update office location on server');
+                    }
+                  },
                 }}
               >
                 <Popup className="ftth-noc-popup">
@@ -545,6 +579,9 @@ export default function FtthMapPage() {
                         <span>Outgoing Feeder Lines:</span>
                         <strong className="text-emerald-600 font-bold">{station.outgoing_cables_count} Lines</strong>
                       </div>
+                      <div className="p-1.5 rounded-lg bg-indigo-50/60 dark:bg-indigo-950/40 text-[10px] text-indigo-700 dark:text-indigo-300 font-medium">
+                        💡 Drag & Drop this marker to position your office precisely on the map!
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 pt-1">
@@ -573,12 +610,34 @@ export default function FtthMapPage() {
               </Marker>
             ))}
 
-            {/* FTTH Box Markers */}
+            {/* FTTH Box Markers (Fully Draggable) */}
             {showBoxes && boxes.map((box) => (
               <Marker
                 key={`box-${box.id}`}
                 position={[box.latitude, box.longitude]}
                 icon={createBoxMarkerIcon(box)}
+                draggable={true}
+                eventHandlers={{
+                  dragend: async (e) => {
+                    const marker = e.target;
+                    const position = marker.getLatLng();
+                    const newLat = parseFloat(position.lat.toFixed(6));
+                    const newLng = parseFloat(position.lng.toFixed(6));
+
+                    // Optimistically update position
+                    setBoxes((prev) =>
+                      prev.map((b) => (b.id === box.id ? { ...b, latitude: newLat, longitude: newLng } : b))
+                    );
+
+                    try {
+                      await ftthService.updateBoxLocation(box.id, newLat, newLng);
+                      toast.success(`📍 Box "${box.box_code}" moved to: ${newLat}, ${newLng}`);
+                      loadData();
+                    } catch (err) {
+                      toast.error('Failed to update box location on server');
+                    }
+                  },
+                }}
               >
                 <Popup className="ftth-box-popup">
                   <div className="w-[260px] text-left p-1">
@@ -678,6 +737,22 @@ export default function FtthMapPage() {
           setCablePreselectedNoc(st);
           setIsAddCableOpen(true);
         }}
+        onAddDevice={(st) => {
+          setDevicePreselectedNocId(st.id);
+          setIsAddDeviceOpen(true);
+        }}
+      />
+
+      {/* Add Device Modal (OLT / MikroTik) */}
+      <AddDeviceModal
+        isOpen={isAddDeviceOpen}
+        onClose={() => {
+          setIsAddDeviceOpen(false);
+          setDevicePreselectedNocId(null);
+        }}
+        onSuccess={loadData}
+        nocStations={nocStations}
+        defaultNocId={devicePreselectedNocId}
       />
 
       {/* Office / NOC Setup Modal */}

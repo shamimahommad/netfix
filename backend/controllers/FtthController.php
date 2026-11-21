@@ -262,4 +262,62 @@ class FtthController {
             Response::error($e->getMessage(), 400);
         }
     }
+
+    /**
+     * POST /ftth/devices
+     */
+    public static function createDevice(): void {
+        $tid = self::getTenant();
+        $body = json_decode(file_get_contents('php://input'), true) ?: [];
+        try {
+            $device = FtthService::createDevice($tid, $body);
+            Response::json(['success' => true, 'message' => 'Network device added successfully', 'data' => $device], 201);
+        } catch (Throwable $e) {
+            Response::error($e->getMessage(), 400);
+        }
+    }
+
+    /**
+     * PATCH /ftth/nocs/:id/location
+     */
+    public static function updateNocLocation(string $id): void {
+        $tid = self::getTenant();
+        $body = json_decode(file_get_contents('php://input'), true) ?: [];
+        $lat = (float)($body['latitude'] ?? 0);
+        $lng = (float)($body['longitude'] ?? 0);
+
+        if ($lat == 0 || $lng == 0) {
+            Response::error('Valid latitude and longitude are required', 400);
+            return;
+        }
+
+        try {
+            FtthService::updateNocLocation($tid, (int)$id, $lat, $lng);
+            Response::json(['success' => true, 'message' => 'Office location updated']);
+        } catch (Throwable $e) {
+            Response::error($e->getMessage(), 400);
+        }
+    }
+
+    /**
+     * PATCH /ftth/boxes/:id/location
+     */
+    public static function updateBoxLocation(string $id): void {
+        $tid = self::getTenant();
+        $body = json_decode(file_get_contents('php://input'), true) ?: [];
+        $lat = (float)($body['latitude'] ?? 0);
+        $lng = (float)($body['longitude'] ?? 0);
+
+        if ($lat == 0 || $lng == 0) {
+            Response::error('Valid latitude and longitude are required', 400);
+            return;
+        }
+
+        try {
+            FtthService::updateBoxLocation($tid, (int)$id, $lat, $lng);
+            Response::json(['success' => true, 'message' => 'Box location updated']);
+        } catch (Throwable $e) {
+            Response::error($e->getMessage(), 400);
+        }
+    }
 }
