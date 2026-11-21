@@ -515,20 +515,26 @@ class FtthService {
                 b_to.longitude AS to_lng,
                 CASE 
                     WHEN c.from_type = 'box' THEN b_from.box_name 
-                    ELSE nd.device_name 
+                    WHEN c.from_type = 'noc' THEN noc_direct.name
+                    ELSE COALESCE(nd.device_name, 'Main Office / OLT') 
                 END AS from_name,
                 CASE 
                     WHEN c.from_type = 'box' THEN b_from.latitude 
-                    ELSE NULL 
+                    WHEN c.from_type = 'noc' THEN noc_direct.latitude
+                    ELSE COALESCE(nd.latitude, noc_linked.latitude, noc_default.latitude) 
                 END AS from_lat,
                 CASE 
                     WHEN c.from_type = 'box' THEN b_from.longitude 
-                    ELSE NULL 
+                    WHEN c.from_type = 'noc' THEN noc_direct.longitude
+                    ELSE COALESCE(nd.longitude, noc_linked.longitude, noc_default.longitude) 
                 END AS from_lng
             FROM ftth_cables c
             LEFT JOIN ftth_boxes b_to ON b_to.id = c.to_box_id
             LEFT JOIN ftth_boxes b_from ON (c.from_type = 'box' AND b_from.id = c.from_id)
+            LEFT JOIN ftth_noc_stations noc_direct ON (c.from_type = 'noc' AND noc_direct.id = c.from_id)
             LEFT JOIN network_devices nd ON (c.from_type = 'olt' AND nd.network_device_id = c.from_id)
+            LEFT JOIN ftth_noc_stations noc_linked ON (noc_linked.id = nd.noc_station_id)
+            LEFT JOIN ftth_noc_stations noc_default ON (noc_default.tenant_id = c.tenant_id AND noc_default.station_type = 'main_office')
             WHERE c.tenant_id = :tid
             ORDER BY c.id ASC
         ");
@@ -653,5 +659,235 @@ class FtthService {
             'totalCables'       => $totalCables,
             'utilizationRate'   => $totalPorts > 0 ? (int)round(($occupied / $totalPorts) * 100) : 0,
         ];
+    }
+
+    /**
+     * Get all Office / NOC Stations with attached OLTs and MikroTik routers
+     */
+    public static function getNocStations(int $tenantId): array {
+        $db = Database::getConnection();
+
+        $stmt = $db->prepare("SELECT * FROM ftth_noc_stations WHERE tenant_id = :tid ORDER BY station_type = 'main_office' DESC, id ASC");
+        $stmt->execute(['tid' => $tenantId]);
+        $stations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Auto-initialize default Office / NOC if none exists for this tenant
+        if (empty($stations)) {
+            $tStmt = $db->prepare("SELECT tenant_name, business_address FROM tenants WHERE tenant_id = :tid LIMIT 1");
+            $tStmt->execute(['tid' => $tenantId]);
+            $tInfo = $tStmt->fetch(PDO::FETCH_ASSOC);
+
+            $addr = $tInfo['business_address'] ?? '';
+            $tName = $tInfo['tenant_name'] ?? 'ISP Core';
+
+            $defLat = 23.8103;
+            $defLng = 90.4125;
+            if (stripos($addr, 'Bogura') !== false || stripos($addr, 'Sariyakandi') !== false || $tenantId == 2) {
+                $defLat = 24.8967;
+                $defLng = 89.6521;
+            } elseif (stripos($addr, 'Dhanmondi') !== false) {
+                $defLat = 23.7461;
+                $defLng = 90.3742;
+            }
+
+            $ins = $db->prepare("
+                INSERT INTO ftth_noc_stations (tenant_id, name, station_type, latitude, longitude, address, contact_phone, coverage_radius_km)
+                VALUES (:tid, :name, 'main_office', :lat, :lng, :addr, '', 5.0)
+            ");
+            $ins->execute([
+                'tid' => $tenantId,
+                'name' => $tName . ' - Main Office & NOC',
+                'lat' => $defLat,
+                'lng' => $defLng,
+                'addr' => $addr ?: 'Head Office & Central Server Room',
+            ]);
+            $newId = (int)$db->lastInsertId();
+
+            // Link existing devices of this tenant to this NOC station if not linked
+            $db->exec("UPDATE network_devices SET noc_station_id = {$newId} WHERE tenant_id = {$tenantId} AND noc_station_id IS NULL");
+
+            // Re-fetch
+            $stmt->execute(['tid' => $tenantId]);
+            $stations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+
+        foreach ($stations as &$st) {
+            $st['id'] = (int)$st['id'];
+            $st['latitude'] = (float)$st['latitude'];
+            $st['longitude'] = (float)$st['longitude'];
+            $st['coverage_radius_km'] = (float)($st['coverage_radius_km'] ?? 5.0);
+
+            // Fetch attached devices
+            $isMain = ($st['station_type'] === 'main_office') ? 1 : 0;
+            $devStmt = $db->prepare("
+                SELECT 
+                    network_device_id,
+                    device_code,
+                    device_name,
+                    device_type,
+                    vendor,
+                    status,
+                    management_ip,
+                    pon_type,
+                    total_pon_ports,
+                    telemetry
+                FROM network_devices 
+                WHERE tenant_id = :tid AND (noc_station_id = :nid OR (noc_station_id IS NULL AND :is_main = 1))
+                ORDER BY device_type ASC, network_device_id ASC
+            ");
+            $devStmt->execute(['tid' => $tenantId, 'nid' => $st['id'], 'is_main' => $isMain]);
+            $devices = $devStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $olts = [];
+            $routers = [];
+            foreach ($devices as $d) {
+                if ($d['device_type'] === 'olt') {
+                    $olts[] = $d;
+                } else {
+                    $routers[] = $d;
+                }
+            }
+
+            $st['devices'] = $devices;
+            $st['olts'] = $olts;
+            $st['routers'] = $routers;
+            $st['olt_count'] = count($olts);
+            $st['router_count'] = count($routers);
+
+            // Count outgoing cables from this NOC or OLTs inside this NOC
+            $cableCountStmt = $db->prepare("
+                SELECT COUNT(*) FROM ftth_cables c
+                LEFT JOIN network_devices nd ON nd.network_device_id = c.from_id
+                WHERE c.tenant_id = :tid 
+                  AND (
+                    (c.from_type = 'noc' AND c.from_id = :nid)
+                    OR (c.from_type = 'olt' AND (nd.noc_station_id = :nid2 OR (nd.noc_station_id IS NULL AND :is_main2 = 1)))
+                  )
+            ");
+            $cableCountStmt->execute(['tid' => $tenantId, 'nid' => $st['id'], 'nid2' => $st['id'], 'is_main2' => $isMain]);
+            $st['outgoing_cables_count'] = (int)$cableCountStmt->fetchColumn();
+        }
+
+        return $stations;
+    }
+
+    /**
+     * Save or update Office / NOC station
+     */
+    public static function saveNocStation(int $tenantId, array $data): array {
+        $db = Database::getConnection();
+
+        $id = !empty($data['id']) ? (int)$data['id'] : 0;
+        $name = trim($data['name'] ?? '');
+        if (empty($name)) {
+            throw new InvalidArgumentException('Office / NOC station name is required');
+        }
+
+        $lat = (float)($data['latitude'] ?? 0);
+        $lng = (float)($data['longitude'] ?? 0);
+        if ($lat == 0 || $lng == 0) {
+            throw new InvalidArgumentException('Valid GPS coordinates (latitude and longitude) are required');
+        }
+
+        $type = in_array($data['station_type'] ?? '', ['main_office', 'sub_pop', 'server_room']) ? $data['station_type'] : 'main_office';
+        $address = !empty($data['address']) ? trim($data['address']) : '';
+        $phone = !empty($data['contact_phone']) ? trim($data['contact_phone']) : '';
+        $radius = (float)($data['coverage_radius_km'] ?? 5.0);
+        $notes = !empty($data['notes']) ? trim($data['notes']) : '';
+
+        if ($id > 0) {
+            $stmt = $db->prepare("
+                UPDATE ftth_noc_stations 
+                SET name = :name, station_type = :type, latitude = :lat, longitude = :lng, 
+                    address = :addr, contact_phone = :phone, coverage_radius_km = :radius, notes = :notes
+                WHERE id = :id AND tenant_id = :tid
+            ");
+            $stmt->execute([
+                'id' => $id,
+                'tid' => $tenantId,
+                'name' => $name,
+                'type' => $type,
+                'lat' => $lat,
+                'lng' => $lng,
+                'addr' => $address,
+                'phone' => $phone,
+                'radius' => $radius,
+                'notes' => $notes,
+            ]);
+        } else {
+            $stmt = $db->prepare("
+                INSERT INTO ftth_noc_stations 
+                    (tenant_id, name, station_type, latitude, longitude, address, contact_phone, coverage_radius_km, notes)
+                VALUES 
+                    (:tid, :name, :type, :lat, :lng, :addr, :phone, :radius, :notes)
+            ");
+            $stmt->execute([
+                'tid' => $tenantId,
+                'name' => $name,
+                'type' => $type,
+                'lat' => $lat,
+                'lng' => $lng,
+                'addr' => $address,
+                'phone' => $phone,
+                'radius' => $radius,
+                'notes' => $notes,
+            ]);
+            $id = (int)$db->lastInsertId();
+        }
+
+        // Handle device assignments (array of network_device_id)
+        if (isset($data['device_ids']) && is_array($data['device_ids'])) {
+            $deviceIds = array_map('intval', array_filter($data['device_ids']));
+            
+            // Unlink devices previously assigned to this NOC that are no longer in list
+            $unassign = $db->prepare("UPDATE network_devices SET noc_station_id = NULL WHERE tenant_id = :tid AND noc_station_id = :nid");
+            $unassign->execute(['tid' => $tenantId, 'nid' => $id]);
+
+            if (!empty($deviceIds)) {
+                $inClause = implode(',', $deviceIds);
+                $assign = $db->prepare("UPDATE network_devices SET noc_station_id = :nid WHERE tenant_id = :tid AND network_device_id IN ({$inClause})");
+                $assign->execute(['nid' => $id, 'tid' => $tenantId]);
+            }
+        }
+
+        return ['id' => $id, 'success' => true];
+    }
+
+    /**
+     * Delete secondary POP station
+     */
+    public static function deleteNocStation(int $tenantId, int $id): bool {
+        $db = Database::getConnection();
+        // Unlink devices first
+        $db->prepare("UPDATE network_devices SET noc_station_id = NULL WHERE tenant_id = :tid AND noc_station_id = :id")->execute(['tid' => $tenantId, 'id' => $id]);
+        $stmt = $db->prepare("DELETE FROM ftth_noc_stations WHERE id = :id AND tenant_id = :tid AND station_type != 'main_office'");
+        return $stmt->execute(['id' => $id, 'tid' => $tenantId]);
+    }
+
+    /**
+     * Get all network devices (OLTs & MikroTiks) for FTTH mapping
+     */
+    public static function getAvailableDevices(int $tenantId): array {
+        $db = Database::getConnection();
+        $stmt = $db->prepare("
+            SELECT 
+                nd.network_device_id,
+                nd.device_code,
+                nd.device_name,
+                nd.device_type,
+                nd.vendor,
+                nd.status,
+                nd.management_ip,
+                nd.pon_type,
+                nd.total_pon_ports,
+                nd.noc_station_id,
+                noc.name AS noc_station_name
+            FROM network_devices nd
+            LEFT JOIN ftth_noc_stations noc ON noc.id = nd.noc_station_id
+            WHERE nd.tenant_id = :tid
+            ORDER BY nd.device_type ASC, nd.device_name ASC
+        ");
+        $stmt->execute(['tid' => $tenantId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 }

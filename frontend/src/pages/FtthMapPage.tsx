@@ -9,23 +9,113 @@ import {
   Compass, 
   RefreshCw, 
   Layers, 
-  MapPin, 
-  Sliders, 
+  Building2, 
+  Server, 
+  Cable, 
   Wifi, 
-  ShieldAlert, 
-  Users, 
-  CheckCircle2,
-  Cable
+  Router,
+  MapPin,
+  ChevronRight
 } from 'lucide-react';
-import { ftthService, FtthBox, FtthCable, FtthStats } from '@/services/ftth.service';
+import { ftthService, FtthBox, FtthCable, FtthStats, FtthNocStation } from '@/services/ftth.service';
 import { customersService } from '@/services/customers.service';
 import BoxDetailModal from '@/components/ftth/BoxDetailModal';
 import AddBoxModal from '@/components/ftth/AddBoxModal';
 import FeasibilityCheckModal from '@/components/ftth/FeasibilityCheckModal';
+import NocStationModal from '@/components/ftth/NocStationModal';
+import NocDetailModal from '@/components/ftth/NocDetailModal';
+import AddCableModal from '@/components/ftth/AddCableModal';
 import { useToastContext } from '@/contexts/ToastContext';
 
-const DEFAULT_CENTER: [number, number] = [23.7480, 90.3770]; // Dhanmondi, Dhaka default center
+const DEFAULT_CENTER: [number, number] = [24.8967, 89.6521];
 const DEFAULT_ZOOM = 14;
+
+/** Create custom SVG Marker for Office / NOC Station */
+function createNocMarkerIcon(station: FtthNocStation): L.DivIcon {
+  const isMain = station.station_type === 'main_office';
+  const bgColor = isMain ? '#4338ca' : '#0369a1';
+  const badgeText = `${station.olt_count} OLT • ${station.router_count} R`;
+
+  const html = `
+    <div style="position: relative; width: 54px; height: 60px; margin-left: -27px; margin-top: -60px; text-align: center;">
+      <!-- Glowing Pulse Effect for Core Office -->
+      <div style="
+        position: absolute;
+        top: 2px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 44px;
+        height: 44px;
+        background: rgba(99, 102, 241, 0.3);
+        border-radius: 14px;
+        animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      "></div>
+
+      <!-- Icon Container -->
+      <div style="
+        position: relative;
+        width: 44px; 
+        height: 44px; 
+        margin: 0 auto; 
+        background: ${bgColor}; 
+        border: 2.5px solid #ffffff; 
+        border-radius: 14px; 
+        box-shadow: 0 6px 16px rgba(0,0,0,0.45);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #ffffff;
+      ">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"></path>
+          <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"></path>
+          <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"></path>
+          <path d="M10 6h4"></path>
+          <path d="M10 10h4"></path>
+          <path d="M10 14h4"></path>
+          <path d="M10 18h4"></path>
+        </svg>
+      </div>
+
+      <!-- Device Count Badge -->
+      <div style="
+        position: absolute;
+        top: -8px;
+        left: 50%;
+        transform: translateX(-50%);
+        white-space: nowrap;
+        background: #0f172a;
+        color: #e0e7ff;
+        font-size: 8.5px;
+        font-weight: 800;
+        font-family: monospace;
+        padding: 1.5px 6px;
+        border-radius: 999px;
+        border: 1px solid rgba(165, 180, 252, 0.6);
+        box-shadow: 0 2px 5px rgba(0,0,0,0.4);
+      ">
+        ${badgeText}
+      </div>
+
+      <!-- Pointer -->
+      <div style="
+        width: 0;
+        height: 0;
+        border-left: 7px solid transparent;
+        border-right: 7px solid transparent;
+        border-top: 9px solid ${bgColor};
+        margin: -1px auto 0;
+      "></div>
+    </div>
+  `;
+
+  return L.divIcon({
+    html,
+    className: 'ftth-noc-marker',
+    iconSize: [54, 60],
+    iconAnchor: [27, 60],
+  });
+}
 
 /** Create custom SVG Marker for FTTH Boxes */
 function createBoxMarkerIcon(box: FtthBox): L.DivIcon {
@@ -113,11 +203,13 @@ export default function FtthMapPage() {
 
   const [boxes, setBoxes] = useState<FtthBox[]>([]);
   const [cables, setCables] = useState<FtthCable[]>([]);
+  const [nocStations, setNocStations] = useState<FtthNocStation[]>([]);
   const [stats, setStats] = useState<FtthStats | null>(null);
   const [customers, setCustomers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Layer Visibility
+  const [showNocs, setShowNocs] = useState(true);
   const [showBoxes, setShowBoxes] = useState(true);
   const [showCables, setShowCables] = useState(true);
   const [showCustomers, setShowCustomers] = useState(false);
@@ -127,13 +219,23 @@ export default function FtthMapPage() {
   const [isAddBoxOpen, setIsAddBoxOpen] = useState(false);
   const [isFeasibilityOpen, setIsFeasibilityOpen] = useState(false);
 
+  // Office / NOC Modals
+  const [isNocModalOpen, setIsNocModalOpen] = useState(false);
+  const [editingNocStation, setEditingNocStation] = useState<FtthNocStation | null>(null);
+  const [inspectingNocStation, setInspectingNocStation] = useState<FtthNocStation | null>(null);
+
+  // Fiber Cable Modal
+  const [isAddCableOpen, setIsAddCableOpen] = useState(false);
+  const [cablePreselectedNoc, setCablePreselectedNoc] = useState<FtthNocStation | null>(null);
+
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [boxRes, cableRes, statRes] = await Promise.allSettled([
+      const [boxRes, cableRes, statRes, nocRes] = await Promise.allSettled([
         ftthService.getBoxes(),
         ftthService.getCables(),
         ftthService.getStats(),
+        ftthService.getNocStations(),
       ]);
 
       if (boxRes.status === 'fulfilled') {
@@ -149,6 +251,10 @@ export default function FtthMapPage() {
 
       if (statRes.status === 'fulfilled') {
         setStats(statRes.value);
+      }
+
+      if (nocRes.status === 'fulfilled') {
+        setNocStations(nocRes.value || []);
       }
     } catch (err: any) {
       const msg = err?.response?.data?.message || err?.message || 'Failed to load FTTH map data';
@@ -172,6 +278,13 @@ export default function FtthMapPage() {
     }
   }, [showCustomers]);
 
+  // Determine Map Initial Center: Focus on NOC if available, or first Box, or default
+  const mapCenter: [number, number] = nocStations.length > 0
+    ? [nocStations[0].latitude, nocStations[0].longitude]
+    : boxes.length > 0
+    ? [boxes[0].latitude, boxes[0].longitude]
+    : DEFAULT_CENTER;
+
   return (
     <div className="flex flex-col h-[calc(100vh-4.2rem)] min-h-[500px] bg-slate-100 dark:bg-slate-900">
       {/* Top Header & Telemetry Bar */}
@@ -179,20 +292,20 @@ export default function FtthMapPage() {
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           {/* Title & Mode Switcher */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md shadow-blue-500/20">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-600/10 dark:bg-indigo-400/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
               <Network className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white">
-                  FTTH Splitter & Box Network Map
+                  FTTH Optical Network Map
                 </h1>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                  Live GIS Topology
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                  GIS Live Topology
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Visual fiber distribution boxes, PLC splitters, and drop cable routing
+                Office / OLT server room, feeder cables, PLC splitters & drop routing
               </p>
             </div>
           </div>
@@ -208,15 +321,37 @@ export default function FtthMapPage() {
               Switch to Customer Status Map
             </button>
 
+            {/* Step 1: Office / NOC Station Button */}
             <button
               type="button"
-              onClick={() => setIsFeasibilityOpen(true)}
-              className="px-3.5 py-1.5 rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-xs font-bold hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              onClick={() => {
+                if (nocStations.length > 0) {
+                  setInspectingNocStation(nocStations[0]);
+                } else {
+                  setEditingNocStation(null);
+                  setIsNocModalOpen(true);
+                }
+              }}
+              className="px-3.5 py-1.5 rounded-xl border border-indigo-300 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
             >
-              <Compass className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              Feasibility Check
+              <Building2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              Office / OLT Station
             </button>
 
+            {/* Step 2: Run Fiber Cable Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setCablePreselectedNoc(nocStations[0] || null);
+                setIsAddCableOpen(true);
+              }}
+              className="px-3.5 py-1.5 rounded-xl border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-bold hover:bg-blue-100 dark:hover:bg-blue-900/60 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            >
+              <Cable className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              Run Fiber Cable
+            </button>
+
+            {/* Step 3: Deploy Box Button */}
             <button
               type="button"
               onClick={() => setIsAddBoxOpen(true)}
@@ -224,6 +359,16 @@ export default function FtthMapPage() {
             >
               <Plus className="w-3.5 h-3.5" />
               Deploy Box
+            </button>
+
+            {/* Feasibility Check */}
+            <button
+              type="button"
+              onClick={() => setIsFeasibilityOpen(true)}
+              className="px-3.5 py-1.5 rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-xs font-bold hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            >
+              <Compass className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              Feasibility Check
             </button>
 
             <button
@@ -243,11 +388,15 @@ export default function FtthMapPage() {
           {/* Quick Metrics */}
           <div className="flex items-center gap-4 flex-wrap text-slate-600 dark:text-slate-300 font-medium">
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-blue-600"></span>
-              Boxes: <strong className="text-slate-900 dark:text-white">{stats?.totalBoxes ?? boxes.length}</strong>
+              <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
+              Office / POPs: <strong className="text-slate-900 dark:text-white">{nocStations.length}</strong>
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+              <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+              FTTH Boxes: <strong className="text-slate-900 dark:text-white">{stats?.totalBoxes ?? boxes.length}</strong>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-teal-500"></span>
               Total Ports: <strong className="text-slate-900 dark:text-white">{stats?.totalPorts ?? 0}</strong>
             </span>
             <span className="flex items-center gap-1.5">
@@ -265,6 +414,15 @@ export default function FtthMapPage() {
             <span className="text-slate-400 font-semibold uppercase text-[10px] tracking-wider flex items-center gap-1">
               <Layers className="w-3 h-3" /> Layers:
             </span>
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showNocs}
+                onChange={(e) => setShowNocs(e.target.checked)}
+                className="rounded text-indigo-600"
+              />
+              <span className="font-semibold text-indigo-700 dark:text-indigo-300">Office / NOC</span>
+            </label>
             <label className="flex items-center gap-1.5 cursor-pointer">
               <input
                 type="checkbox"
@@ -298,16 +456,16 @@ export default function FtthMapPage() {
 
       {/* Main Map Canvas */}
       <div className="flex-1 min-h-0 relative">
-        {isLoading && boxes.length === 0 ? (
+        {isLoading && boxes.length === 0 && nocStations.length === 0 ? (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-200/50 dark:bg-slate-800/50 z-20">
             <div className="flex flex-col items-center gap-2">
-              <div className="w-10 h-10 rounded-full border-3 border-blue-500 border-t-transparent animate-spin" />
+              <div className="w-10 h-10 rounded-full border-3 border-indigo-500 border-t-transparent animate-spin" />
               <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">Loading FTTH infrastructure...</p>
             </div>
           </div>
         ) : (
           <MapContainer
-            center={boxes.length > 0 ? [boxes[0].latitude, boxes[0].longitude] : DEFAULT_CENTER}
+            center={mapCenter}
             zoom={DEFAULT_ZOOM}
             style={{ height: '100%', width: '100%' }}
             className="z-0"
@@ -335,11 +493,84 @@ export default function FtthMapPage() {
                   <div className="text-xs font-sans">
                     <strong className="text-slate-900">{cable.cableName}</strong>
                     <div className="text-[11px] text-slate-500">
-                      {cable.coreCount}-Core • ~{cable.lengthMeters || 0}m
+                      From: {cable.fromName} → To: {cable.toBoxName}
+                    </div>
+                    <div className="text-[10px] text-blue-600 font-mono">
+                      {cable.coreCount}-Core Optical Fiber
                     </div>
                   </div>
                 </Tooltip>
               </Polyline>
+            ))}
+
+            {/* Office / Central NOC Markers */}
+            {showNocs && nocStations.map((station) => (
+              <Marker
+                key={`noc-${station.id}`}
+                position={[station.latitude, station.longitude]}
+                icon={createNocMarkerIcon(station)}
+                eventHandlers={{
+                  click: () => setInspectingNocStation(station),
+                }}
+              >
+                <Popup className="ftth-noc-popup">
+                  <div className="w-[280px] text-left p-1">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                      <div>
+                        <h4 className="font-bold text-slate-900 text-sm">{station.name}</h4>
+                        <span className="text-[10px] text-indigo-600 font-bold uppercase">
+                          {station.station_type === 'main_office' ? 'Main Office & NOC' : 'Sub POP'}
+                        </span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                        {station.olt_count} OLTs
+                      </span>
+                    </div>
+
+                    <div className="py-2.5 space-y-1.5 text-xs text-slate-600">
+                      {station.address && (
+                        <p className="text-[11px] text-slate-500 truncate" title={station.address}>
+                          📍 {station.address}
+                        </p>
+                      )}
+                      <div className="flex justify-between">
+                        <span>MikroTik Routers:</span>
+                        <strong className="text-slate-900">{station.router_count} Installed</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>OLT Devices:</span>
+                        <strong className="text-slate-900">{station.olt_count} Units</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Outgoing Feeder Lines:</span>
+                        <strong className="text-emerald-600 font-bold">{station.outgoing_cables_count} Lines</strong>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInspectingNocStation(station);
+                        }}
+                        className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl transition-all cursor-pointer text-center"
+                      >
+                        Inspect NOC
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCablePreselectedNoc(station);
+                          setIsAddCableOpen(true);
+                        }}
+                        className="w-full py-1.5 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 font-semibold text-xs rounded-xl transition-all cursor-pointer text-center"
+                      >
+                        Run Cable
+                      </button>
+                    </div>
+                  </div>
+                </Popup>
+              </Marker>
             ))}
 
             {/* FTTH Box Markers */}
@@ -432,6 +663,46 @@ export default function FtthMapPage() {
           </MapContainer>
         )}
       </div>
+
+      {/* Office / NOC Detail Inspector Modal */}
+      <NocDetailModal
+        station={inspectingNocStation}
+        isOpen={Boolean(inspectingNocStation)}
+        onClose={() => setInspectingNocStation(null)}
+        onEdit={(st) => {
+          setInspectingNocStation(null);
+          setEditingNocStation(st);
+          setIsNocModalOpen(true);
+        }}
+        onRunCable={(st) => {
+          setCablePreselectedNoc(st);
+          setIsAddCableOpen(true);
+        }}
+      />
+
+      {/* Office / NOC Setup Modal */}
+      <NocStationModal
+        isOpen={isNocModalOpen}
+        stationToEdit={editingNocStation}
+        onClose={() => {
+          setIsNocModalOpen(false);
+          setEditingNocStation(null);
+        }}
+        onSuccess={loadData}
+      />
+
+      {/* Run Fiber Cable Modal */}
+      <AddCableModal
+        isOpen={isAddCableOpen}
+        onClose={() => {
+          setIsAddCableOpen(false);
+          setCablePreselectedNoc(null);
+        }}
+        onSuccess={loadData}
+        boxes={boxes}
+        nocStations={nocStations}
+        preselectedNoc={cablePreselectedNoc}
+      />
 
       {/* Box Detail Modal */}
       <BoxDetailModal

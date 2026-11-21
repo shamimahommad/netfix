@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { X, Network, MapPin, Sliders, CheckCircle2 } from 'lucide-react';
-import { ftthService, FtthBox } from '@/services/ftth.service';
+import React, { useState, useEffect } from 'react';
+import { X, Network, MapPin, Sliders, CheckCircle2, Cable } from 'lucide-react';
+import { ftthService, FtthBox, FtthAvailableDevice } from '@/services/ftth.service';
 import { useToastContext } from '@/contexts/ToastContext';
 
 interface AddBoxModalProps {
@@ -14,7 +14,7 @@ export const AddBoxModal: React.FC<AddBoxModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
-  defaultCoords = [23.7500, 90.3750],
+  defaultCoords = [24.8967, 89.6521],
 }) => {
   const toast = useToastContext();
   const [formData, setFormData] = useState({
@@ -29,8 +29,24 @@ export const AddBoxModal: React.FC<AddBoxModalProps> = ({
     longitude: defaultCoords[1],
     optical_input_power: '',
     notes: '',
+    olt_device_id: 0,
+    pon_port: 'PON 1',
+    auto_connect_cable: true,
   });
+  const [devices, setDevices] = useState<FtthAvailableDevice[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      ftthService.getDevices().then(devs => {
+        const olts = devs.filter(d => d.device_type === 'olt');
+        setDevices(olts.length > 0 ? olts : devs);
+        if (olts.length > 0) {
+          setFormData(prev => ({ ...prev, olt_device_id: olts[0].network_device_id }));
+        }
+      }).catch(() => {});
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -86,7 +102,27 @@ export const AddBoxModal: React.FC<AddBoxModalProps> = ({
         longitude: formData.longitude,
         optical_input_power: formData.optical_input_power !== '' ? parseFloat(formData.optical_input_power) : null,
         notes: formData.notes.trim() || null,
+        olt_device_id: formData.olt_device_id > 0 ? formData.olt_device_id : null,
+        pon_port: formData.pon_port || 'PON 1',
       });
+
+      // Auto connect fiber cable from OLT/Office if selected
+      if (formData.olt_device_id > 0 && formData.auto_connect_cable) {
+        try {
+          await ftthService.saveCable({
+            cableName: `Feeder Fiber - OLT to ${created.box_code}`,
+            coreCount: 12,
+            fromType: 'olt',
+            fromId: formData.olt_device_id,
+            toBoxId: created.id,
+            color: '#2563eb',
+            status: 'active',
+          });
+        } catch (cableErr) {
+          console.warn('Auto cable creation error:', cableErr);
+        }
+      }
+
       toast.success(`FTTH Box "${created.box_name}" added with ${created.total_ports} ports!`);
       onSuccess(created);
       onClose();
@@ -186,6 +222,53 @@ export const AddBoxModal: React.FC<AddBoxModalProps> = ({
                 <option value="1:16">1:16 PLC Splitter (16 Ports)</option>
                 <option value="1:32">1:32 PLC Splitter (32 Ports)</option>
               </select>
+            </div>
+          </div>
+
+          {/* Upstream Connection to Office / OLT */}
+          <div className="p-3 bg-indigo-50/40 dark:bg-indigo-950/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
+                <Cable className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                Upstream Connection (Office / OLT)
+              </span>
+              <label className="flex items-center gap-1.5 text-[11px] text-indigo-700 dark:text-indigo-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.auto_connect_cable}
+                  onChange={(e) => setFormData({ ...formData, auto_connect_cable: e.target.checked })}
+                  className="rounded text-indigo-600"
+                />
+                <span>Draw Fiber Line on Map</span>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label className="text-[11px] text-slate-500 dark:text-slate-400 mb-0.5 block">Feed from OLT:</label>
+                <select
+                  value={formData.olt_device_id}
+                  onChange={(e) => setFormData({ ...formData, olt_device_id: parseInt(e.target.value, 10) })}
+                  className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                >
+                  <option value={0}>Standalone / Not Connected</option>
+                  {devices.map(d => (
+                    <option key={d.network_device_id} value={d.network_device_id}>
+                      {d.device_name} ({d.vendor.toUpperCase()})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-500 dark:text-slate-400 mb-0.5 block">OLT PON Port:</label>
+                <input
+                  type="text"
+                  placeholder="e.g. PON 1"
+                  value={formData.pon_port}
+                  onChange={(e) => setFormData({ ...formData, pon_port: e.target.value })}
+                  className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                />
+              </div>
             </div>
           </div>
 

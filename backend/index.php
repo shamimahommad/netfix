@@ -621,6 +621,18 @@ if ($method === 'DELETE' && preg_match('#^/ftth/cables/(\d+)$#', $uri, $m)) {
 if ($method === 'GET' && $uri === '/ftth/stats') {
     FtthController::stats();
 }
+if ($method === 'GET' && $uri === '/ftth/nocs') {
+    FtthController::listNocs();
+}
+if ($method === 'POST' && $uri === '/ftth/nocs') {
+    FtthController::saveNoc();
+}
+if ($method === 'DELETE' && preg_match('#^/ftth/nocs/(\d+)$#', $uri, $m)) {
+    FtthController::deleteNoc($m[1]);
+}
+if ($method === 'GET' && $uri === '/ftth/devices') {
+    FtthController::listDevices();
+}
 
 // ---------------------------------------------------------------------
 // SMS GATEWAY & TEMPLATES

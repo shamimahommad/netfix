@@ -209,4 +209,57 @@ class FtthController {
             Response::error($e->getMessage(), 400);
         }
     }
+
+    /**
+     * GET /ftth/nocs
+     */
+    public static function listNocs(): void {
+        $tid = self::getTenant();
+        try {
+            $nocs = FtthService::getNocStations($tid);
+            Response::json(['success' => true, 'data' => $nocs]);
+        } catch (Throwable $e) {
+            Response::error($e->getMessage(), 400);
+        }
+    }
+
+    /**
+     * POST /ftth/nocs
+     */
+    public static function saveNoc(): void {
+        $tid = self::getTenant();
+        $body = json_decode(file_get_contents('php://input'), true) ?: [];
+        try {
+            $res = FtthService::saveNocStation($tid, $body);
+            Response::json(['success' => true, 'message' => 'Office / NOC station saved successfully', 'data' => $res]);
+        } catch (Throwable $e) {
+            Response::error($e->getMessage(), 400);
+        }
+    }
+
+    /**
+     * DELETE /ftth/nocs/:id
+     */
+    public static function deleteNoc(string $id): void {
+        $tid = self::getTenant();
+        try {
+            FtthService::deleteNocStation($tid, (int)$id);
+            Response::json(['success' => true, 'message' => 'NOC station deleted']);
+        } catch (Throwable $e) {
+            Response::error($e->getMessage(), 400);
+        }
+    }
+
+    /**
+     * GET /ftth/devices
+     */
+    public static function listDevices(): void {
+        $tid = self::getTenant();
+        try {
+            $devs = FtthService::getAvailableDevices($tid);
+            Response::json(['success' => true, 'data' => $devs]);
+        } catch (Throwable $e) {
+            Response::error($e->getMessage(), 400);
+        }
+    }
 }

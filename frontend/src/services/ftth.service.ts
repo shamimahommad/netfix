@@ -50,11 +50,44 @@ export interface FtthBox {
   updated_at?: string;
 }
 
+export interface FtthAvailableDevice {
+  network_device_id: number;
+  device_code: string;
+  device_name: string;
+  device_type: 'router' | 'olt' | 'switch';
+  vendor: string;
+  status: 'active' | 'offline' | 'warning';
+  management_ip: string;
+  pon_type?: string | null;
+  total_pon_ports?: number | null;
+  noc_station_id?: number | null;
+  noc_station_name?: string | null;
+}
+
+export interface FtthNocStation {
+  id: number;
+  tenant_id: number;
+  name: string;
+  station_type: 'main_office' | 'sub_pop' | 'server_room';
+  latitude: number;
+  longitude: number;
+  address: string | null;
+  contact_phone: string | null;
+  coverage_radius_km: number;
+  notes: string | null;
+  olt_count: number;
+  router_count: number;
+  outgoing_cables_count: number;
+  devices: FtthAvailableDevice[];
+  olts: FtthAvailableDevice[];
+  routers: FtthAvailableDevice[];
+}
+
 export interface FtthCable {
   id: number;
   cableName: string;
   coreCount: number;
-  fromType: 'olt' | 'box';
+  fromType: 'olt' | 'box' | 'noc';
   fromId: number | null;
   fromName: string;
   toBoxId: number;
@@ -153,6 +186,25 @@ export const ftthService = {
 
   async getStats(): Promise<FtthStats> {
     const res = await api.get<{ success: boolean; data: FtthStats }>('/ftth/stats');
+    return res.data.data;
+  },
+
+  async getNocStations(): Promise<FtthNocStation[]> {
+    const res = await api.get<{ success: boolean; data: FtthNocStation[] }>('/ftth/nocs');
+    return res.data.data;
+  },
+
+  async saveNocStation(data: Partial<FtthNocStation> & { device_ids?: number[] }): Promise<{ id: number }> {
+    const res = await api.post<{ success: boolean; message: string; data: { id: number } }>('/ftth/nocs', data);
+    return res.data.data;
+  },
+
+  async deleteNocStation(id: number): Promise<void> {
+    await api.delete(`/ftth/nocs/${id}`);
+  },
+
+  async getDevices(): Promise<FtthAvailableDevice[]> {
+    const res = await api.get<{ success: boolean; data: FtthAvailableDevice[] }>('/ftth/devices');
     return res.data.data;
   },
 };

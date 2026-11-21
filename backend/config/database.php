@@ -330,8 +330,9 @@ class Database {
                 `tenant_id` BIGINT UNSIGNED NOT NULL,
                 `cable_name` VARCHAR(100) NOT NULL,
                 `core_count` INT UNSIGNED NOT NULL DEFAULT 12,
-                `from_type` ENUM('olt', 'box') NOT NULL DEFAULT 'olt',
+                `from_type` ENUM('olt', 'box', 'noc') NOT NULL DEFAULT 'olt',
                 `from_id` BIGINT UNSIGNED DEFAULT NULL,
+                `from_noc_id` BIGINT UNSIGNED DEFAULT NULL,
                 `to_box_id` BIGINT UNSIGNED NOT NULL,
                 `color` VARCHAR(20) NOT NULL DEFAULT '#3b82f6',
                 `length_meters` INT UNSIGNED DEFAULT NULL,
@@ -342,6 +343,30 @@ class Database {
                 PRIMARY KEY (`id`),
                 KEY `idx_ftth_cable_tenant` (`tenant_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+            // Ensure FTTH NOC / Office Stations Table
+            $pdo->exec("CREATE TABLE IF NOT EXISTS `ftth_noc_stations` (
+                `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `tenant_id` BIGINT UNSIGNED NOT NULL,
+                `name` VARCHAR(100) NOT NULL,
+                `station_type` ENUM('main_office', 'sub_pop', 'server_room') NOT NULL DEFAULT 'main_office',
+                `latitude` DECIMAL(10, 8) NOT NULL,
+                `longitude` DECIMAL(11, 8) NOT NULL,
+                `address` VARCHAR(255) DEFAULT NULL,
+                `contact_phone` VARCHAR(50) DEFAULT NULL,
+                `coverage_radius_km` DECIMAL(5, 2) DEFAULT 5.00,
+                `notes` TEXT DEFAULT NULL,
+                `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                KEY `idx_noc_tenant` (`tenant_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+            self::ensureColumn($pdo, 'network_devices', 'noc_station_id', 'BIGINT UNSIGNED DEFAULT NULL');
+            self::ensureColumn($pdo, 'network_devices', 'latitude', 'DECIMAL(10, 8) DEFAULT NULL');
+            self::ensureColumn($pdo, 'network_devices', 'longitude', 'DECIMAL(11, 8) DEFAULT NULL');
+            self::ensureColumn($pdo, 'network_devices', 'address', 'VARCHAR(255) DEFAULT NULL');
+            self::ensureColumn($pdo, 'ftth_cables', 'from_noc_id', 'BIGINT UNSIGNED DEFAULT NULL');
 
             // Check if users table exists in the current database
             $stmt = $pdo->query("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'users' LIMIT 1");
