@@ -636,6 +636,9 @@ if ($method === 'GET' && $uri === '/ftth/devices') {
 if ($method === 'POST' && $uri === '/ftth/devices') {
     FtthController::createDevice();
 }
+if ($method === 'DELETE' && preg_match('#^/ftth/devices/(\d+)$#', $uri, $m)) {
+    FtthController::deleteDevice($m[1]);
+}
 if (($method === 'PATCH' || $method === 'POST') && preg_match('#^/ftth/nocs/(\d+)/location$#', $uri, $m)) {
     FtthController::updateNocLocation($m[1]);
 }

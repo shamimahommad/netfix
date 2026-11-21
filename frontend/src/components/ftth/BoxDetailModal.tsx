@@ -204,15 +204,17 @@ export const BoxDetailModal: React.FC<BoxDetailModalProps> = ({
 
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={handleDeleteBox}
-              className="p-2 text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl transition-colors"
-              title="Delete Box"
+              className="px-3 py-1.5 text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/50 border border-rose-200 dark:border-rose-900 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              title="Delete this Splitter Box"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete Box</span>
             </button>
             <button
               onClick={onClose}
-              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>

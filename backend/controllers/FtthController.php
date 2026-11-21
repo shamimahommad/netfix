@@ -320,4 +320,17 @@ class FtthController {
             Response::error($e->getMessage(), 400);
         }
     }
+
+    /**
+     * DELETE /ftth/devices/:id
+     */
+    public static function deleteDevice(string $id): void {
+        $tid = self::getTenant();
+        try {
+            FtthService::deleteDevice($tid, (int)$id);
+            Response::json(['success' => true, 'message' => 'Device deleted successfully']);
+        } catch (Throwable $e) {
+            Response::error($e->getMessage(), 400);
+        }
+    }
 }

@@ -1,6 +1,22 @@
 import React, { useState } from 'react';
-import { X, Building2, Server, Router, Network, Cable, Edit3, Phone, MapPin, Activity, CheckCircle2, AlertTriangle, ArrowRight } from 'lucide-react';
-import { FtthNocStation } from '@/services/ftth.service';
+import { 
+  X, 
+  Building2, 
+  Server, 
+  Router, 
+  Network, 
+  Cable, 
+  Edit3, 
+  Phone, 
+  MapPin, 
+  Activity, 
+  CheckCircle2, 
+  AlertTriangle, 
+  ArrowRight,
+  Trash2
+} from 'lucide-react';
+import { FtthNocStation, ftthService } from '@/services/ftth.service';
+import { useToastContext } from '@/contexts/ToastContext';
 
 interface NocDetailModalProps {
   station: FtthNocStation | null;
@@ -9,6 +25,7 @@ interface NocDetailModalProps {
   onEdit: (station: FtthNocStation) => void;
   onRunCable: (station: FtthNocStation) => void;
   onAddDevice?: (station: FtthNocStation) => void;
+  onRefresh: () => void;
 }
 
 export default function NocDetailModal({
@@ -18,10 +35,41 @@ export default function NocDetailModal({
   onEdit,
   onRunCable,
   onAddDevice,
+  onRefresh,
 }: NocDetailModalProps) {
+  const toast = useToastContext();
   const [activeTab, setActiveTab] = useState<'olts' | 'routers'>('olts');
 
   if (!isOpen || !station) return null;
+
+  const handleDeleteDevice = async (deviceId: number, deviceName: string) => {
+    if (!window.confirm(`Are you sure you want to delete "${deviceName}"? This will permanently remove the device.`)) {
+      return;
+    }
+    try {
+      await ftthService.deleteDevice(deviceId);
+      toast.success(`Device "${deviceName}" deleted successfully`);
+      onRefresh();
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Failed to delete device');
+    }
+  };
+
+  const handleDeleteStation = async () => {
+    if (!station) return;
+    if (!window.confirm(`Are you sure you want to delete office "${station.name}"?`)) {
+      return;
+    }
+    try {
+      await ftthService.deleteNocStation(station.id);
+      toast.success(`Station "${station.name}" deleted`);
+      onRefresh();
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Cannot delete main office');
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
@@ -153,6 +201,16 @@ export default function NocDetailModal({
                       <span className={`w-1.5 h-1.5 rounded-full ${olt.status === 'active' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
                       {olt.status.toUpperCase()}
                     </span>
+
+                    {/* Delete Device Button */}
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteDevice(olt.network_device_id, olt.device_name)}
+                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
+                      title="Delete this OLT"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
               ))
@@ -197,6 +255,16 @@ export default function NocDetailModal({
                     <span className={`w-1.5 h-1.5 rounded-full ${r.status === 'active' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
                     {r.status.toUpperCase()}
                   </span>
+
+                  {/* Delete Device Button */}
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteDevice(r.network_device_id, r.device_name)}
+                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
+                    title="Delete this Router"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
             ))
@@ -225,6 +293,17 @@ export default function NocDetailModal({
               >
                 <Server className="w-3.5 h-3.5" />
                 + Add Device
+              </button>
+            )}
+            {station.station_type !== 'main_office' && (
+              <button
+                type="button"
+                onClick={handleDeleteStation}
+                className="px-3 py-2 rounded-xl border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 text-xs font-bold hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors flex items-center gap-1.5 cursor-pointer"
+                title="Delete this branch office"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Delete Station
               </button>
             )}
           </div>

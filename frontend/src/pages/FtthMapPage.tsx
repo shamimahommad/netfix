@@ -15,7 +15,8 @@ import {
   Wifi, 
   Router,
   MapPin,
-  ChevronRight
+  ChevronRight,
+  Trash2
 } from 'lucide-react';
 import { ftthService, FtthBox, FtthCable, FtthStats, FtthNocStation } from '@/services/ftth.service';
 import { customersService } from '@/services/customers.service';
@@ -502,6 +503,19 @@ export default function FtthMapPage() {
                   opacity: 0.85,
                   dashArray: cable.status === 'cut' ? '6, 8' : undefined,
                 }}
+                eventHandlers={{
+                  click: async () => {
+                    if (window.confirm(`Are you sure you want to delete fiber cable "${cable.cableName}"?`)) {
+                      try {
+                        await ftthService.deleteCable(cable.id);
+                        toast.success('Fiber cable removed');
+                        loadData();
+                      } catch {
+                        toast.error('Failed to remove fiber cable');
+                      }
+                    }
+                  },
+                }}
               >
                 <Tooltip sticky direction="top" className="ftth-cable-tooltip">
                   <div className="text-xs font-sans">
@@ -511,6 +525,9 @@ export default function FtthMapPage() {
                     </div>
                     <div className="text-[10px] text-blue-600 font-mono">
                       {cable.coreCount}-Core Optical Fiber
+                    </div>
+                    <div className="text-[9px] text-slate-400 font-semibold pt-0.5">
+                      (Click line to delete)
                     </div>
                   </div>
                 </Tooltip>
@@ -685,15 +702,35 @@ export default function FtthMapPage() {
                       )}
                     </div>
 
-                    {/* Action Button */}
-                    <button
-                      type="button"
-                      onClick={() => setSelectedBoxId(box.id)}
-                      className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <Wifi className="w-3.5 h-3.5" />
-                      Manage Splitter Ports
-                    </button>
+                    {/* Action Buttons */}
+                    <div className="grid grid-cols-5 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedBoxId(box.id)}
+                        className="col-span-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Wifi className="w-3.5 h-3.5" />
+                        Manage Splitter Ports
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (window.confirm(`Are you sure you want to delete box "${box.box_name}" (${box.box_code})?`)) {
+                            try {
+                              await ftthService.deleteBox(box.id);
+                              toast.success(`Box "${box.box_code}" deleted`);
+                              loadData();
+                            } catch {
+                              toast.error('Failed to delete box');
+                            }
+                          }
+                        }}
+                        className="col-span-1 py-2 bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-200 dark:border-rose-900 rounded-xl flex items-center justify-center cursor-pointer transition-colors"
+                        title="Delete this box"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </Popup>
               </Marker>
@@ -741,6 +778,7 @@ export default function FtthMapPage() {
           setDevicePreselectedNocId(st.id);
           setIsAddDeviceOpen(true);
         }}
+        onRefresh={loadData}
       />
 
       {/* Add Device Modal (OLT / MikroTik) */}

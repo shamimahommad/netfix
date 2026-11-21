@@ -961,4 +961,18 @@ class FtthService {
             'noc_station_id' => $nocStationId,
         ];
     }
+
+    /**
+     * Delete network device (OLT or Router) safely
+     */
+    public static function deleteDevice(int $tenantId, int $deviceId): bool {
+        $db = Database::getConnection();
+        // Unlink from ftth_boxes
+        $db->prepare("UPDATE ftth_boxes SET olt_device_id = NULL WHERE tenant_id = :tid AND olt_device_id = :did")->execute(['tid' => $tenantId, 'did' => $deviceId]);
+        // Delete cables originating from this OLT
+        $db->prepare("DELETE FROM ftth_cables WHERE tenant_id = :tid AND from_type = 'olt' AND from_id = :did")->execute(['tid' => $tenantId, 'did' => $deviceId]);
+        // Delete device
+        $stmt = $db->prepare("DELETE FROM network_devices WHERE network_device_id = :did AND tenant_id = :tid");
+        return $stmt->execute(['did' => $deviceId, 'tid' => $tenantId]);
+    }
 }

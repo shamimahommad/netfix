@@ -228,6 +228,10 @@ export const ftthService = {
   async updateBoxLocation(id: number, latitude: number, longitude: number): Promise<void> {
     await api.patch(`/ftth/boxes/${id}/location`, { latitude, longitude });
   },
+
+  async deleteDevice(id: number): Promise<void> {
+    await api.delete(`/ftth/devices/${id}`);
+  },
 };
 
 export default ftthService;
