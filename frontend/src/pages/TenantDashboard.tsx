@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePermissions } from '@/hooks/usePermissions';
+import { SystemHealthModal } from '@/components/common';
 import {
   LineChart,
   Line,
@@ -113,6 +114,7 @@ export default function TenantDashboard() {
   const [loadingExpired, setLoadingExpired] = useState(false);
   const [loadingMoreExpired, setLoadingMoreExpired] = useState(false);
   const [collapsedExpired, setCollapsedExpired] = useState(false);
+  const [isHealthModalOpen, setIsHealthModalOpen] = useState(false);
 
   const { selectedTenant } = useTenantStore();
   const navigate = useNavigate();
@@ -838,11 +840,16 @@ export default function TenantDashboard() {
               </div>
             </div>
 
-            {/* Quick status badge */}
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50 text-xs font-semibold">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-              <span>Billing Healthy</span>
-            </div>
+            {/* Quick status badge / Health Check trigger */}
+            <button
+              type="button"
+              onClick={() => setIsHealthModalOpen(true)}
+              className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50 text-xs font-semibold transition-all cursor-pointer shadow-xs"
+              title="Click to view live system health diagnostics"
+            >
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 animate-pulse" />
+              <span>System Healthy</span>
+            </button>
           </div>
         </div>
       </div>
@@ -1607,6 +1614,12 @@ export default function TenantDashboard() {
           )}
         </div>
       </div>
+
+      {/* System Health Diagnostics Modal */}
+      <SystemHealthModal
+        isOpen={isHealthModalOpen}
+        onClose={() => setIsHealthModalOpen(false)}
+      />
     </div>
   );
 }

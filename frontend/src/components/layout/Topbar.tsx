@@ -1,6 +1,8 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { Activity } from 'lucide-react';
 import { MenuIcon, LogoutIcon, SettingsIcon } from '../icons/Icons';
+import { SystemHealthModal } from '@/components/common';
 import { useTenantStore } from '@/stores/tenantStore';
 import { useAuthStore } from '@/stores/authStore';
 import { tenantsService } from '@/services/tenants.service';
@@ -155,6 +157,7 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
   const { theme, toggleTheme } = useTheme();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isAvatarDropdownOpen, setIsAvatarDropdownOpen] = useState(false);
+  const [isHealthModalOpen, setIsHealthModalOpen] = useState(false);
   const [availableTenants, setAvailableTenants] = useState<Tenant[]>([]);
   const [isLoadingTenants, setIsLoadingTenants] = useState(false);
   
@@ -840,6 +843,19 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
               </button>
               <button
                 type="button"
+                onClick={() => { setIsHealthModalOpen(true); setIsAvatarDropdownOpen(false); }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors"
+              >
+                <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 shrink-0">
+                  <Activity className="w-4 h-4 animate-pulse" />
+                </span>
+                <div>
+                  <p className="font-semibold text-xs text-slate-900 dark:text-slate-100">System Health</p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Database & telemetry status</p>
+                </div>
+              </button>
+              <button
+                type="button"
                 onClick={() => { navigate('/dashboard/settings'); setIsAvatarDropdownOpen(false); }}
                 className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors"
               >
@@ -937,6 +953,16 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
               </button>
               <button
                 type="button"
+                onClick={() => { setIsHealthModalOpen(true); setIsAvatarDropdownOpen(false); }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+              >
+                <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 shrink-0">
+                  <Activity className="w-4 h-4 animate-pulse" />
+                </span>
+                System Health
+              </button>
+              <button
+                type="button"
                 onClick={() => { navigate('/dashboard/settings'); setIsAvatarDropdownOpen(false); }}
                 className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-900/20"
               >
@@ -990,6 +1016,12 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
           <LogoutIcon />
         </button>
       </div>
+
+      {/* System Health Diagnostics Modal */}
+      <SystemHealthModal
+        isOpen={isHealthModalOpen}
+        onClose={() => setIsHealthModalOpen(false)}
+      />
     </header>
     </>
   );

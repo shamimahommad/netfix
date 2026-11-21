@@ -42,6 +42,7 @@ require_once __DIR__ . '/controllers/PublicTopupController.php';
 require_once __DIR__ . '/controllers/CompanyProfileController.php';
 require_once __DIR__ . '/controllers/SaaSPackagesController.php';
 require_once __DIR__ . '/controllers/SaaSPlatformBillingController.php';
+require_once __DIR__ . '/controllers/HealthController.php';
 
 // Parse Request Path and Method
 $rawUri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
@@ -59,24 +60,8 @@ if ($uri === '') {
 // ---------------------------------------------------------------------
 // HEALTH CHECK & SYSTEM INIT
 // ---------------------------------------------------------------------
-if ($uri === '/' || $uri === '/health') {
-    $dbStatus = 'disconnected';
-    try {
-        $db = Database::getConnection();
-        $count = (int)$db->query("SELECT COUNT(*) FROM users")->fetchColumn();
-        $dbStatus = "Connected to MySQL netfix_db ({$count} users)";
-    } catch (Throwable $e) {
-        $dbStatus = "Service unavailable";
-    }
-
-    Response::json([
-        'status' => 'healthy',
-        'service' => 'NetFix ISP SaaS Pure PHP REST API Engine',
-        'version' => '1.0.0',
-        'php_version' => PHP_VERSION,
-        'database' => $dbStatus,
-        'timestamp' => date('c'),
-    ]);
+if (in_array($uri, ['/', '/health', '/healthcheck', '/health-check', '/ping', '/status', '/api/health', '/api/healthcheck'], true)) {
+    HealthController::check();
 }
 
 if ($uri === '/system/init-db') {
