@@ -409,7 +409,7 @@ export default function SmsSendPage() {
                           className="w-full px-4 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors flex items-center justify-between text-sm cursor-pointer"
                         >
                           <div className="min-w-0 pr-3">
-                            <p className="font-semibold text-slate-900 dark:text-slate-100 truncate">{c.fullName || c.name}</p>
+                            <p className="font-semibold text-slate-900 dark:text-slate-100 truncate">{c.fullName || (c as any).name}</p>
                             <p className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate">
                               {c.phone} {c.username ? `• @${c.username}` : ''}
                             </p>
@@ -432,7 +432,7 @@ export default function SmsSendPage() {
                       key={c.customerId}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 text-xs font-semibold border border-blue-200/80 dark:border-blue-800/80 shadow-xs"
                     >
-                      <span>{c.fullName || c.name}</span>
+                      <span>{c.fullName || (c as any).name}</span>
                       <span className="text-blue-500 dark:text-blue-400 font-mono text-[11px]">({c.phone})</span>
                       <button
                         type="button"

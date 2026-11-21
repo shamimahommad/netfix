@@ -109,14 +109,14 @@ export default function SaaSDashboard() {
       tenantName: tenant.tenantName,
       tenantSlug: tenant.tenantCode.toLowerCase(),
       businessEmail: tenant.businessEmail,
-      businessPhone: tenant.businessPhone || undefined,
+      businessPhone: tenant.businessPhone ?? null,
       countryCode: tenant.countryCode,
       status: tenant.status,
       createdAt: tenant.createdAt,
       totalCustomers: tenant.totalCustomers,
       totalRouters: tenant.totalRouters,
       totalOlts: tenant.totalOlts,
-    });
+    } as any);
     toast.success(`Switched context to ${tenant.tenantName}`);
     navigate('/dashboard');
   };

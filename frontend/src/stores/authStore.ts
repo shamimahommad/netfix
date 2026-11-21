@@ -51,6 +51,8 @@ export const useAuthStore = create<AuthState>()(
       user: getInitialUser(),
       balance: null,
       isAuthenticated: !!getInitialUser() && typeof window !== 'undefined' && !!localStorage.getItem('access_token'),
+      impersonated: false,
+      impersonatedBy: null,
       isSaas: () => {
         const user = getInitialUser();
         return typeof window !== 'undefined' && !!localStorage.getItem('access_token') && user?.user_type === 'saas';

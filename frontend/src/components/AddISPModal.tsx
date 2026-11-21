@@ -107,6 +107,7 @@ export default function AddISPModal({ isOpen, onClose, onSuccess }: AddISPModalP
       onSuccess();
       onClose();
       setFormData({
+        tenantCode: '',
         tenantName: '',
         tenantSlug: '',
         businessEmail: '',

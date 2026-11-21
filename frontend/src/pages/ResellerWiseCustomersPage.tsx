@@ -240,7 +240,7 @@ export default function ResellerWiseCustomersPage() {
                           key={col.key}
                           className={`py-3 px-4 text-sm ${col.colorClass} ${col.align === 'right' ? 'text-right' : 'text-left'}`}
                         >
-                          {isClickable ? (
+                          {isClickable && drillUrl ? (
                             <button
                               type="button"
                               onClick={() => navigate(drillUrl)}

@@ -46,6 +46,7 @@ export interface MeResponse {
 
 export interface ImpersonateResponse {
   redirect_url: string;
+  access_token?: string;
 }
 
 export interface CanImpersonateResponse {

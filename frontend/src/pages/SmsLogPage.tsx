@@ -225,20 +225,20 @@ export default function SmsLogPage() {
                 ) : (
                   data.map((row) => (
                     <tr
-                      key={row.id}
+                      key={row.smsLogId || (row as any).id}
                       className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
                     >
                       <td className="px-4 py-3.5 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
                         {formatDate(row.createdAt)}
                       </td>
                       <td className="px-4 py-3.5 font-mono text-xs font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
-                        {row.recipient}
+                        {row.toNumber || (row as any).recipient}
                       </td>
                       <td className="px-4 py-3.5 text-slate-700 dark:text-slate-300 max-w-xs xl:max-w-md truncate">
                         <span title={row.message}>{row.message}</span>
                       </td>
                       <td className="px-4 py-3.5 text-slate-600 dark:text-slate-400 text-xs">
-                        <span className="capitalize font-medium">{row.provider || 'default'}</span>
+                        <span className="capitalize font-medium">{row.providerName || (row as any).provider || 'default'}</span>
                       </td>
                       <td className="px-4 py-3.5 whitespace-nowrap">
                         <StatusBadge status={row.status} />

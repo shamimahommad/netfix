@@ -1013,9 +1013,9 @@ export default function TenantDashboard() {
                                 }
                               }}
                               className="text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:underline truncate max-w-[120px] sm:max-w-[140px] block font-medium text-left"
-                              title={inv.username || inv.customerName || inv.customerCode || ''}
+                              title={inv.username || inv.customerName || (inv as any).customerCode || ''}
                             >
-                              {inv.username || inv.customerName || inv.customerCode || '—'}
+                              {inv.username || inv.customerName || (inv as any).customerCode || '—'}
                             </button>
                           </td>
                           <td className="py-1.5 text-right font-semibold text-emerald-600 dark:text-emerald-400">

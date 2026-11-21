@@ -934,7 +934,7 @@ export default function ModernCustomerView(props: CustomerViewProps) {
 }
 
 function servicePackageName(customerData: CustomerDetailResponse['data']) {
-  return (customerData as any).service?.packageName || customerData.network?.package || '—';
+  return (customerData as any).service?.packageName || (customerData.network as any)?.package || '—';
 }
 
 function serviceBillingCycle(customerData: CustomerDetailResponse['data']) {
