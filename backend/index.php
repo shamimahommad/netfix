@@ -44,6 +44,7 @@ require_once __DIR__ . '/controllers/SaaSPackagesController.php';
 require_once __DIR__ . '/controllers/SaaSPlatformBillingController.php';
 require_once __DIR__ . '/controllers/HealthController.php';
 require_once __DIR__ . '/controllers/BillingCronController.php';
+require_once __DIR__ . '/controllers/FtthController.php';
 
 // Parse Request Path and Method
 $rawUri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
@@ -579,6 +580,46 @@ if ($method === 'PUT' && preg_match('#^/service-area/sub-areas/([^/]+)$#', $uri,
 }
 if ($method === 'DELETE' && preg_match('#^/service-area/sub-areas/([^/]+)$#', $uri, $m)) {
     ServiceAreaController::deleteSubArea($m[1]);
+}
+
+// ---------------------------------------------------------------------
+// FTTH SPLITTER & BOX NETWORK MAP
+// ---------------------------------------------------------------------
+if ($method === 'GET' && $uri === '/ftth/boxes') {
+    FtthController::listBoxes();
+}
+if ($method === 'POST' && $uri === '/ftth/boxes') {
+    FtthController::createBox();
+}
+if ($method === 'GET' && preg_match('#^/ftth/boxes/(\d+)$#', $uri, $m)) {
+    FtthController::getBox($m[1]);
+}
+if ($method === 'PUT' && preg_match('#^/ftth/boxes/(\d+)$#', $uri, $m)) {
+    FtthController::updateBox($m[1]);
+}
+if ($method === 'DELETE' && preg_match('#^/ftth/boxes/(\d+)$#', $uri, $m)) {
+    FtthController::deleteBox($m[1]);
+}
+if ($method === 'POST' && preg_match('#^/ftth/boxes/(\d+)/assign$#', $uri, $m)) {
+    FtthController::assignPort($m[1]);
+}
+if ($method === 'POST' && preg_match('#^/ftth/boxes/(\d+)/unassign$#', $uri, $m)) {
+    FtthController::unassignPort($m[1]);
+}
+if ($method === 'GET' && $uri === '/ftth/nearest') {
+    FtthController::findNearest();
+}
+if ($method === 'GET' && $uri === '/ftth/cables') {
+    FtthController::listCables();
+}
+if ($method === 'POST' && $uri === '/ftth/cables') {
+    FtthController::saveCable();
+}
+if ($method === 'DELETE' && preg_match('#^/ftth/cables/(\d+)$#', $uri, $m)) {
+    FtthController::deleteCable($m[1]);
+}
+if ($method === 'GET' && $uri === '/ftth/stats') {
+    FtthController::stats();
 }
 
 // ---------------------------------------------------------------------

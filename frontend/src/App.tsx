@@ -58,6 +58,7 @@ import FinancialLedgerPage from './pages/FinancialLedgerPage';
 import ReconciliationReportPage from './pages/ReconciliationReportPage';
 import OnlineTransactionsPage from './pages/OnlineTransactionsPage';
 import MapPage from './pages/MapPage';
+import FtthMapPage from './pages/FtthMapPage';
 import ActivityLogsPage from './pages/ActivityLogsPage';
 import PaymentCallbackPage from './pages/PaymentCallbackPage';
 import CustomerLoginPage from './pages/CustomerLoginPage';
@@ -263,6 +264,14 @@ function AppContent() {
                 element={
                   <FeatureGuard feature="map">
                     <MapPage />
+                  </FeatureGuard>
+                }
+              />
+              <Route
+                path="map/ftth"
+                element={
+                  <FeatureGuard feature="map">
+                    <FtthMapPage />
                   </FeatureGuard>
                 }
               />

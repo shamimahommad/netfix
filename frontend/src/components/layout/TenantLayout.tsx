@@ -176,7 +176,12 @@ export default function TenantLayout() {
       label: 'Map',
       icon: <MapIcon />,
       submenu: [
-        ...(isMapEnabled ? [{ label: 'Customer Map', path: '/dashboard/map' }] : []),
+        ...(isMapEnabled
+          ? [
+              { label: 'Customer Map', path: '/dashboard/map' },
+              { label: 'FTTH / Box Map', path: '/dashboard/map/ftth' },
+            ]
+          : []),
         { label: 'Area', path: '/dashboard/service-area/areas' },
         { label: 'Sub Area', path: '/dashboard/service-area/sub-areas' },
       ],

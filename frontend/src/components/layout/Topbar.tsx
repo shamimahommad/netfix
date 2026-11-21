@@ -50,6 +50,7 @@ const getPageTitle = (pathname: string): string => {
     'dashboard/service-area/areas': 'Service Areas',
     'dashboard/service-area/sub-areas': 'Service Sub Areas',
     'dashboard/map': 'Network Coverage Map',
+    'dashboard/map/ftth': 'FTTH Splitter & Box Network Map',
     'dashboard/support/ticket': 'Support Tickets',
     'dashboard/support': 'Customer Support',
     'dashboard/network/mikrotik': 'MikroTik Routers',

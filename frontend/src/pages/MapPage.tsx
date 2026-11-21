@@ -155,13 +155,23 @@ export default function MapPage() {
               </span>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => navigate('/dashboard')}
-            className="px-3 py-1.5 rounded-lg border border-sky-200 dark:border-sky-600 bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-teal-300 text-sm font-medium hover:bg-sky-100 dark:hover:bg-sky-800/50 transition-colors"
-          >
-            Back to Dashboard
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard/map/ftth')}
+              className="px-3 py-1.5 rounded-lg border border-teal-500 bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-sm font-medium hover:bg-teal-100 dark:hover:bg-teal-800/50 transition-colors flex items-center gap-1.5"
+            >
+              <span>FTTH / Box Map</span>
+              <span className="text-[10px] bg-teal-200 dark:bg-teal-800 text-teal-800 dark:text-teal-200 px-1 py-0.5 rounded font-mono font-bold">GIS</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard')}
+              className="px-3 py-1.5 rounded-lg border border-sky-200 dark:border-sky-600 bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-teal-300 text-sm font-medium hover:bg-sky-100 dark:hover:bg-sky-800/50 transition-colors"
+            >
+              Back to Dashboard
+            </button>
+          </div>
         </div>
         {error && (
           <p className="mt-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>

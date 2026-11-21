@@ -262,6 +262,78 @@ CREATE TABLE `customers` (
   KEY `idx_cust_tenant_owner` (`tenant_id`,`owner_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `ftth_box_ports`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `ftth_box_ports` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) unsigned NOT NULL,
+  `box_id` bigint(20) unsigned NOT NULL,
+  `port_number` int(10) unsigned NOT NULL,
+  `customer_id` bigint(20) unsigned DEFAULT NULL,
+  `onu_mac` varchar(30) DEFAULT NULL,
+  `optical_rx_power` decimal(5,2) DEFAULT NULL,
+  `status` enum('available','occupied','reserved','damaged') NOT NULL DEFAULT 'available',
+  `cable_color` varchar(30) DEFAULT NULL,
+  `core_number` int(10) unsigned DEFAULT NULL,
+  `notes` varchar(255) DEFAULT NULL,
+  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_box_port` (`box_id`,`port_number`),
+  KEY `idx_port_tenant` (`tenant_id`),
+  KEY `idx_port_customer` (`customer_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `ftth_boxes`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `ftth_boxes` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) unsigned NOT NULL,
+  `box_name` varchar(100) NOT NULL,
+  `box_code` varchar(50) NOT NULL,
+  `box_type` enum('splitter_box','tj_box','odf','pole_box') NOT NULL DEFAULT 'splitter_box',
+  `latitude` decimal(10,8) NOT NULL,
+  `longitude` decimal(11,8) NOT NULL,
+  `address` varchar(255) DEFAULT NULL,
+  `pole_number` varchar(50) DEFAULT NULL,
+  `total_ports` int(10) unsigned NOT NULL DEFAULT 8,
+  `splitter_ratio` varchar(20) NOT NULL DEFAULT '1:8',
+  `olt_device_id` bigint(20) unsigned DEFAULT NULL,
+  `pon_port` varchar(50) DEFAULT NULL,
+  `upstream_box_id` bigint(20) unsigned DEFAULT NULL,
+  `optical_input_power` decimal(5,2) DEFAULT NULL,
+  `status` enum('active','full','maintenance','damaged') NOT NULL DEFAULT 'active',
+  `notes` text DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_tenant_box_code` (`tenant_id`,`box_code`),
+  KEY `idx_ftth_box_tenant` (`tenant_id`),
+  KEY `idx_ftth_box_location` (`latitude`,`longitude`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `ftth_cables`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `ftth_cables` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) unsigned NOT NULL,
+  `cable_name` varchar(100) NOT NULL,
+  `core_count` int(10) unsigned NOT NULL DEFAULT 12,
+  `from_type` enum('olt','box') NOT NULL DEFAULT 'olt',
+  `from_id` bigint(20) unsigned DEFAULT NULL,
+  `to_box_id` bigint(20) unsigned NOT NULL,
+  `color` varchar(20) NOT NULL DEFAULT '#3b82f6',
+  `length_meters` int(10) unsigned DEFAULT NULL,
+  `status` enum('active','cut','high_loss','maintenance') NOT NULL DEFAULT 'active',
+  `route_coords` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`route_coords`)),
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_ftth_cable_tenant` (`tenant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `invoices`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
