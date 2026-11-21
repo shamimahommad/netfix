@@ -19,16 +19,22 @@ class OltSyncService {
      * Synchronize a specific OLT device with local database storage.
      * Only connects to hardware if interval has elapsed or if $force is true.
      */
-    public static function sync(PDO $db, array $oltDev, bool $force = false, int $intervalSeconds = self::DEFAULT_SYNC_INTERVAL_SECONDS): array {
+    public static function sync(PDO $db, array $oltDev, bool $force = false, ?int $intervalSeconds = null): array {
         $deviceId = (int)$oltDev['network_device_id'];
         $tenantId = (int)$oltDev['tenant_id'];
+
+        if ($intervalSeconds === null) {
+            $settings = self::getSettings($tenantId);
+            $intervalSeconds = $settings['syncIntervalMinutes'] * 60;
+        }
 
         $lastSyncTime = !empty($oltDev['last_sync_at']) ? strtotime($oltDev['last_sync_at']) : 0;
         $now = time();
         $ageSeconds = $now - $lastSyncTime;
 
-        // If not explicitly forced, always return local stored DB data instantly in < 5ms
-        if (!$force) {
+        // Only connect to hardware if $force is true OR device has never synced OR interval has elapsed
+        $needsSync = $force || ($lastSyncTime === 0) || ($ageSeconds >= $intervalSeconds);
+        if (!$needsSync) {
             return self::getLocalData($db, $tenantId, $deviceId, $oltDev);
         }
 
@@ -406,13 +412,17 @@ class OltSyncService {
         ];
         $system['totalPonPorts'] = $totalPonPorts;
 
+        $settings = self::getSettings($tenantId);
+        $syncIntervalMins = $settings['syncIntervalMinutes'] ?? 120;
+
         return [
             'isStored' => true,
             'isSynced' => $isSynced,
             'isOnline' => $isSynced,
             'lastSyncAt' => $lastSync,
             'syncAgeMinutes' => $syncAgeMinutes,
-            'nextScheduledSyncMinutes' => max(0, 120 - ($syncAgeMinutes ?? 0)),
+            'syncIntervalMinutes' => $syncIntervalMins,
+            'nextScheduledSyncMinutes' => max(0, $syncIntervalMins - ($syncAgeMinutes ?? 0)),
             'system' => $system,
             'model' => $telemetry['model'] ?? $system['model'] ?? $defaultModel,
             'firmware' => $telemetry['firmware'] ?? $system['firmware'] ?? null,
@@ -426,6 +436,338 @@ class OltSyncService {
             'totalOnusOnline' => $totalOnline,
             'totalOnusOffline' => max(0, $totalStored - $totalOnline),
         ];
+    }
+
+    /**
+     * Get OLT sync settings (checks tenant-specific, then global SaaS tenant_id = 0)
+     */
+    public static function getSettings(?int $tenantId = null): array {
+        $db = Database::getConnection();
+        self::ensureOltCronSchema($db);
+
+        $rows = [];
+
+        // Try tenant-specific if tenantId given
+        if ($tenantId !== null && $tenantId > 0) {
+            $stmt = $db->prepare("SELECT setting_key, setting_value FROM tenant_settings WHERE tenant_id = :tid AND setting_key LIKE 'olt_sync_%'");
+            $stmt->execute(['tid' => $tenantId]);
+            $rows = $stmt->fetchAll(PDO::FETCH_KEY_PAIR) ?: [];
+        }
+
+        // Fall back to global (tenant_id = 0)
+        if (empty($rows)) {
+            $stmt = $db->query("SELECT setting_key, setting_value FROM tenant_settings WHERE tenant_id = 0 AND setting_key LIKE 'olt_sync_%'");
+            $rows = $stmt->fetchAll(PDO::FETCH_KEY_PAIR) ?: [];
+        }
+
+        return [
+            'autoSyncEnabled' => ($rows['olt_sync_enabled'] ?? '1') === '1',
+            'syncIntervalMinutes' => max(5, (int)($rows['olt_sync_interval'] ?? 120)),
+            'syncTimeoutSeconds' => max(10, min(120, (int)($rows['olt_sync_timeout'] ?? 30))),
+        ];
+    }
+
+    /**
+     * Save OLT sync settings (restricted to SaaS Admin or Tenant Admin)
+     */
+    public static function saveSettings(array $settings, ?int $tenantId = null): bool {
+        $db = Database::getConnection();
+        self::ensureOltCronSchema($db);
+
+        $targetTenantId = ($tenantId !== null) ? $tenantId : 0;
+
+        $enabled = isset($settings['autoSyncEnabled']) ? ($settings['autoSyncEnabled'] ? '1' : '0') : null;
+        $interval = isset($settings['syncIntervalMinutes']) ? (string)max(5, (int)$settings['syncIntervalMinutes']) : null;
+        $timeout = isset($settings['syncTimeoutSeconds']) ? (string)max(10, min(120, (int)$settings['syncTimeoutSeconds'])) : null;
+
+        $items = [
+            'olt_sync_enabled' => $enabled,
+            'olt_sync_interval' => $interval,
+            'olt_sync_timeout' => $timeout,
+        ];
+
+        $stmt = $db->prepare("INSERT INTO tenant_settings (tenant_id, setting_key, setting_value, created_at, updated_at) 
+            VALUES (:tid, :k, :v, NOW(), NOW()) 
+            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()");
+
+        foreach ($items as $k => $v) {
+            if ($v !== null) {
+                $stmt->execute(['tid' => $targetTenantId, 'k' => $k, 'v' => $v]);
+            }
+        }
+
+        // If saving global (0), also propagate to all existing rows
+        if ($targetTenantId === 0) {
+            foreach ($items as $k => $v) {
+                if ($v !== null) {
+                    $uStmt = $db->prepare("UPDATE tenant_settings SET setting_value = :v, updated_at = NOW() WHERE setting_key = :k");
+                    $uStmt->execute(['v' => $v, 'k' => $k]);
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Run Scheduled OLT Sync Job across all eligible active OLTs
+     */
+    public static function runScheduledSync(?int $tenantId = null, string $triggerType = 'scheduled', bool $force = false): array {
+        $startTime = microtime(true);
+        $db = Database::getConnection();
+        self::ensureOltCronSchema($db);
+
+        $settings = self::getSettings($tenantId);
+        $intervalSeconds = $settings['syncIntervalMinutes'] * 60;
+
+        // If auto-sync is disabled and this is a scheduled cron run, skip execution
+        if (!$settings['autoSyncEnabled'] && !$force && $triggerType === 'scheduled') {
+            return [
+                'success' => false,
+                'status' => 'disabled',
+                'message' => 'OLT Auto-Sync Cron is currently disabled in SaaS Admin settings.',
+                'totalOlts' => 0,
+                'syncedOlts' => 0,
+                'failedOlts' => 0,
+                'skippedOlts' => 0,
+                'durationMs' => 0,
+            ];
+        }
+
+        // 1. Initialize run record in olt_cron_runs
+        $runStmt = $db->prepare("INSERT INTO olt_cron_runs (tenant_id, trigger_type, status, started_at) 
+            VALUES (:tid, :trigger, 'running', NOW())");
+        $runStmt->execute([
+            'tid' => $tenantId,
+            'trigger' => $triggerType,
+        ]);
+        $runId = (int)$db->lastInsertId();
+
+        // 2. Query active OLT devices
+        if ($tenantId !== null && $tenantId > 0) {
+            $stmt = $db->prepare("SELECT * FROM network_devices WHERE device_type = 'olt' AND status = 'active' AND tenant_id = :tid");
+            $stmt->execute(['tid' => $tenantId]);
+        } else {
+            $stmt = $db->query("SELECT * FROM network_devices WHERE device_type = 'olt' AND status = 'active'");
+        }
+        $olts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $totalOlts = count($olts);
+        $syncedCount = 0;
+        $failedCount = 0;
+        $skippedCount = 0;
+        $totalOnus = 0;
+        $onlineOnus = 0;
+        $offlineOnus = 0;
+        $errors = [];
+        $syncedDetails = [];
+
+        $now = time();
+
+        foreach ($olts as $olt) {
+            $oltId = (int)$olt['network_device_id'];
+            $oltName = $olt['device_name'];
+            $lastSync = !empty($olt['last_sync_at']) ? strtotime($olt['last_sync_at']) : 0;
+            $age = $now - $lastSync;
+
+            $isDue = $force || ($lastSync === 0) || ($age >= $intervalSeconds);
+
+            if (!$isDue) {
+                $skippedCount++;
+                $syncedDetails[] = [
+                    'oltId' => $oltId,
+                    'name' => $oltName,
+                    'ip' => $olt['management_ip'],
+                    'status' => 'skipped',
+                    'reason' => 'Synced ' . round($age / 60) . ' mins ago (Interval: ' . $settings['syncIntervalMinutes'] . 'm)',
+                ];
+                continue;
+            }
+
+            try {
+                $res = self::sync($db, $olt, true, $intervalSeconds);
+                if (!empty($res['syncError'])) {
+                    $failedCount++;
+                    $errors[] = "{$oltName}: {$res['syncError']}";
+                    $syncedDetails[] = [
+                        'oltId' => $oltId,
+                        'name' => $oltName,
+                        'ip' => $olt['management_ip'],
+                        'status' => 'failed',
+                        'error' => $res['syncError'],
+                    ];
+                } else {
+                    $syncedCount++;
+                    $totalOnus += (int)($res['totalOnus'] ?? 0);
+                    $onlineOnus += (int)($res['totalOnusOnline'] ?? 0);
+                    $offlineOnus += (int)($res['totalOnusOffline'] ?? 0);
+                    $syncedDetails[] = [
+                        'oltId' => $oltId,
+                        'name' => $oltName,
+                        'ip' => $olt['management_ip'],
+                        'status' => 'synced',
+                        'totalOnus' => (int)($res['totalOnus'] ?? 0),
+                        'onlineOnus' => (int)($res['totalOnusOnline'] ?? 0),
+                    ];
+                }
+            } catch (\Throwable $e) {
+                $failedCount++;
+                $errors[] = "{$oltName}: " . $e->getMessage();
+                $syncedDetails[] = [
+                    'oltId' => $oltId,
+                    'name' => $oltName,
+                    'ip' => $olt['management_ip'],
+                    'status' => 'failed',
+                    'error' => $e->getMessage(),
+                ];
+            }
+        }
+
+        $durationMs = (int)round((microtime(true) - $startTime) * 1000);
+        $finalStatus = ($failedCount > 0 && $syncedCount === 0 && $totalOlts > 0) ? 'failed' : 'completed';
+
+        // 3. Update olt_cron_runs table
+        $upStmt = $db->prepare("UPDATE olt_cron_runs SET 
+            status = :status,
+            total_olts = :tot,
+            synced_olts = :synced,
+            failed_olts = :failed,
+            skipped_olts = :skipped,
+            total_onus = :onus,
+            online_onus = :on_onus,
+            offline_onus = :off_onus,
+            duration_ms = :dur,
+            error_summary = :err,
+            completed_at = NOW()
+            WHERE id = :rid");
+
+        $upStmt->execute([
+            'status' => $finalStatus,
+            'tot' => $totalOlts,
+            'synced' => $syncedCount,
+            'failed' => $failedCount,
+            'skipped' => $skippedCount,
+            'onus' => $totalOnus,
+            'on_onus' => $onlineOnus,
+            'off_onus' => $offlineOnus,
+            'dur' => $durationMs,
+            'err' => !empty($errors) ? implode('; ', array_slice($errors, 0, 5)) : null,
+            'rid' => $runId,
+        ]);
+
+        return [
+            'success' => ($finalStatus === 'completed'),
+            'runId' => $runId,
+            'status' => $finalStatus,
+            'triggerType' => $triggerType,
+            'totalOlts' => $totalOlts,
+            'syncedOlts' => $syncedCount,
+            'failedOlts' => $failedCount,
+            'skippedOlts' => $skippedCount,
+            'totalOnus' => $totalOnus,
+            'onlineOnus' => $onlineOnus,
+            'offlineOnus' => $offlineOnus,
+            'durationMs' => $durationMs,
+            'errors' => $errors,
+            'details' => $syncedDetails,
+            'timestamp' => date('Y-m-d H:i:s'),
+        ];
+    }
+
+    /**
+     * Get detailed status, metrics, and history for OLT Cron
+     */
+    public static function getStatus(?int $tenantId = null): array {
+        $db = Database::getConnection();
+        self::ensureOltCronSchema($db);
+
+        $settings = self::getSettings($tenantId);
+        $intervalMinutes = $settings['syncIntervalMinutes'];
+
+        // Metrics
+        $totalStmt = $db->query("SELECT COUNT(*) FROM network_devices WHERE device_type = 'olt'");
+        $totalOlts = (int)$totalStmt->fetchColumn();
+
+        $activeStmt = $db->query("SELECT COUNT(*) FROM network_devices WHERE device_type = 'olt' AND status = 'active'");
+        $activeOlts = (int)$activeStmt->fetchColumn();
+
+        $syncedWindowStmt = $db->prepare("SELECT COUNT(*) FROM network_devices 
+            WHERE device_type = 'olt' AND status = 'active' AND last_sync_at >= DATE_SUB(NOW(), INTERVAL :mins MINUTE)");
+        $syncedWindowStmt->execute(['mins' => $intervalMinutes]);
+        $syncedInWindow = (int)$syncedWindowStmt->fetchColumn();
+
+        $needsSync = max(0, $activeOlts - $syncedInWindow);
+
+        $onuStmt = $db->query("SELECT COUNT(*) as total, SUM(CASE WHEN status = 'online' THEN 1 ELSE 0 END) as online_cnt FROM olt_onus");
+        $onuData = $onuStmt->fetch(PDO::FETCH_ASSOC);
+        $totalOnus = (int)($onuData['total'] ?? 0);
+        $onlineOnus = (int)($onuData['online_cnt'] ?? 0);
+
+        // Last Run
+        $lastRunStmt = $db->query("SELECT * FROM olt_cron_runs ORDER BY id DESC LIMIT 1");
+        $lastRun = $lastRunStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+
+        // History
+        $histStmt = $db->query("SELECT * FROM olt_cron_runs ORDER BY id DESC LIMIT 10");
+        $history = $histStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $cronScriptPath = realpath(__DIR__ . '/../cron/sync_olt.php') ?: (__DIR__ . '/../cron/sync_olt.php');
+
+        return [
+            'engineStatus' => $settings['autoSyncEnabled'] ? 'active' : 'paused',
+            'serverTime' => date('Y-m-d H:i:s'),
+            'settings' => $settings,
+            'metrics' => [
+                'totalOlts' => $totalOlts,
+                'activeOlts' => $activeOlts,
+                'syncedInWindow' => $syncedInWindow,
+                'needsSync' => $needsSync,
+                'totalOnus' => $totalOnus,
+                'onlineOnus' => $onlineOnus,
+            ],
+            'lastRun' => $lastRun,
+            'history' => $history,
+            'cronCommands' => [
+                'linux' => "*/15 * * * * php " . $cronScriptPath . " >> /var/log/netfix_olt_sync.log 2>&1",
+                'windows' => 'php "' . $cronScriptPath . '"',
+                'webUrl' => '/cron/sync-olt',
+            ],
+        ];
+    }
+
+    /**
+     * Ensures olt_cron_runs table exists
+     */
+    public static function ensureOltCronSchema(PDO $db): void {
+        static $checked = false;
+        if ($checked) return;
+
+        try {
+            $db->exec("CREATE TABLE IF NOT EXISTS `olt_cron_runs` (
+              `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+              `tenant_id` bigint(20) unsigned DEFAULT NULL,
+              `trigger_type` enum('scheduled','manual','api') NOT NULL DEFAULT 'scheduled',
+              `status` enum('running','completed','failed') NOT NULL DEFAULT 'running',
+              `total_olts` int(11) NOT NULL DEFAULT 0,
+              `synced_olts` int(11) NOT NULL DEFAULT 0,
+              `failed_olts` int(11) NOT NULL DEFAULT 0,
+              `skipped_olts` int(11) NOT NULL DEFAULT 0,
+              `total_onus` int(11) NOT NULL DEFAULT 0,
+              `online_onus` int(11) NOT NULL DEFAULT 0,
+              `offline_onus` int(11) NOT NULL DEFAULT 0,
+              `duration_ms` int(11) NOT NULL DEFAULT 0,
+              `error_summary` text DEFAULT NULL,
+              `started_at` datetime NOT NULL,
+              `completed_at` datetime DEFAULT NULL,
+              PRIMARY KEY (`id`),
+              KEY `idx_olt_cron_tenant` (`tenant_id`),
+              KEY `idx_olt_cron_status` (`status`),
+              KEY `idx_olt_cron_started` (`started_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            $checked = true;
+        } catch (\Throwable $e) {
+            error_log("Failed to ensure olt_cron_runs table: " . $e->getMessage());
+        }
     }
 
     /**

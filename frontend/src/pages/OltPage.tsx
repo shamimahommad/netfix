@@ -16,6 +16,7 @@ import { Lock, Zap, Radio, Key, RefreshCw, X, CheckCircle2, AlertTriangle, Globe
 import { useAuthStore } from '@/stores/authStore';
 import { useTenantStore } from '@/stores/tenantStore';
 import { tenantsService } from '@/services/tenants.service';
+import { oltCronService } from '@/services/oltCron.service';
 import { Tenant } from '@/types/tenant.types';
 
 const getStatusBadgeClass = (status: NetworkDevice['status']): string => {
@@ -266,6 +267,30 @@ export default function OltPage() {
   }, [devices]);
 
   usePingStatus(deviceIds, devices.length > 0, minInterval);
+
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
+
+  const handleSyncAllOlts = async () => {
+    if (isSyncingAll) return;
+    setIsSyncingAll(true);
+    showLoading('Syncing OLTs...', 'Triggering hardware synchronization for all active OLT devices...');
+    try {
+      const res = await oltCronService.runSync(true);
+      closeAlert();
+      if (res.success) {
+        showSuccess('Sync Complete', res.message || 'All active OLTs synchronized successfully');
+        loadDevices(selectedTenantFilter);
+      } else {
+        showError('Sync Issue', res.message || 'Some OLTs failed to sync');
+        loadDevices(selectedTenantFilter);
+      }
+    } catch (e: any) {
+      closeAlert();
+      showError('Sync Failed', e?.response?.data?.message || e?.message || 'Failed to trigger OLT sync');
+    } finally {
+      setIsSyncingAll(false);
+    }
+  };
 
   const loadDevices = async (tenantFilter?: string) => {
     if (devices.length === 0) {
@@ -590,18 +615,29 @@ export default function OltPage() {
           </span>
         }
         actions={
-          <button
-            onClick={() => {
-              resetForm();
-              setShowAddModal(true);
-            }}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-lg transition-all shadow-sm active:scale-95"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Add OLT
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSyncAllOlts}
+              disabled={isSyncingAll}
+              className="inline-flex items-center gap-2 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium text-sm rounded-lg transition-all border border-slate-300 dark:border-slate-700 shadow-sm active:scale-95 disabled:opacity-50"
+              title="Trigger hardware sync for all active OLT devices"
+            >
+              <RefreshCw className={`w-4 h-4 text-blue-500 ${isSyncingAll ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">{isSyncingAll ? 'Syncing...' : 'Sync All OLTs'}</span>
+            </button>
+            <button
+              onClick={() => {
+                resetForm();
+                setShowAddModal(true);
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-lg transition-all shadow-sm active:scale-95"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Add OLT
+            </button>
+          </div>
         }
       />
 

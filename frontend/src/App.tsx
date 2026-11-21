@@ -11,6 +11,7 @@ import TenantLayout from './components/layout/TenantLayout';
 import SaaSDashboard from './pages/SaaSDashboard';
 import SaaSPackagesPage from './pages/SaaSPackagesPage';
 import SaaSPlatformBillingPage from './pages/SaaSPlatformBillingPage';
+import SaaSSettingsPage from './pages/SaaSSettingsPage';
 import TenantDashboard from './pages/TenantDashboard';
 import CustomersPage from './pages/CustomersPage';
 import CustomerDetailPage from './pages/CustomerDetailPage';
@@ -204,7 +205,7 @@ function AppContent() {
               <Route path="billing" element={<SaaSPlatformBillingPage />} />
               <Route path="customers" element={<PlaceholderPage title="Global Customers" description="View and manage customer accounts across all ISP tenants." />} />
               <Route path="network" element={<PlaceholderPage title="Network Infrastructure" description="Global network telemetry, router nodes, and cloud server health." />} />
-              <Route path="settings" element={<PlaceholderPage title="SaaS System Settings" description="Configure global platform preferences, security, API integrations, and maintenance schedules." />} />
+              <Route path="settings" element={<SaaSSettingsPage />} />
               <Route index element={<Navigate to="/saas/dashboard" replace />} />
             </Route>
 

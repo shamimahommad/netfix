@@ -44,6 +44,7 @@ require_once __DIR__ . '/controllers/SaaSPackagesController.php';
 require_once __DIR__ . '/controllers/SaaSPlatformBillingController.php';
 require_once __DIR__ . '/controllers/HealthController.php';
 require_once __DIR__ . '/controllers/BillingCronController.php';
+require_once __DIR__ . '/controllers/OltCronController.php';
 require_once __DIR__ . '/controllers/FtthController.php';
 require_once __DIR__ . '/controllers/BtrcReportController.php';
 
@@ -290,6 +291,18 @@ if ($method === 'POST' && $uri === '/billing/cutoff/run') {
 }
 if ($method === 'POST' && $uri === '/billing/cutoff/settings') {
     BillingCronController::saveSettings();
+}
+if ($method === 'GET' && in_array($uri, ['/saas/cron/olt/status', '/cron/olt/status', '/network/olt/cron/status'], true)) {
+    OltCronController::status();
+}
+if ($method === 'POST' && in_array($uri, ['/saas/cron/olt/settings', '/cron/olt/settings'], true)) {
+    OltCronController::saveSettings();
+}
+if ($method === 'POST' && in_array($uri, ['/saas/cron/olt/run', '/cron/olt/run', '/network/olt/cron/run'], true)) {
+    OltCronController::run();
+}
+if (($method === 'GET' || $method === 'POST') && in_array($uri, ['/cron/sync-olt', '/api/cron/sync-olt'], true)) {
+    OltCronController::webCron();
 }
 
 // ---------------------------------------------------------------------
