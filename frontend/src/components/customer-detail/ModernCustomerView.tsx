@@ -539,10 +539,10 @@ export default function ModernCustomerView(props: CustomerViewProps) {
               </div>
               <button
                 type="button"
-                onClick={onLogs}
+                onClick={() => onLogs()}
                 className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
               >
-                Task Logs →
+                Customer Logs →
               </button>
             </div>
 

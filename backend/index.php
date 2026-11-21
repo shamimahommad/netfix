@@ -36,6 +36,7 @@ require_once __DIR__ . '/controllers/CustomerPortalController.php';
 require_once __DIR__ . '/controllers/UsersController.php';
 require_once __DIR__ . '/controllers/SearchController.php';
 require_once __DIR__ . '/controllers/TaskLogsController.php';
+require_once __DIR__ . '/controllers/CustomerLogsController.php';
 require_once __DIR__ . '/controllers/ActivityLogsController.php';
 require_once __DIR__ . '/lib/ActivityLogger.php';
 require_once __DIR__ . '/controllers/PublicTopupController.php';
@@ -832,6 +833,9 @@ if ($method === 'GET' && $uri === '/search/customers') {
 }
 if ($method === 'GET' && preg_match('#^/task-logs/customers/([^/]+)$#', $uri, $m)) {
     TaskLogsController::getByCustomerId($m[1]);
+}
+if ($method === 'GET' && preg_match('#^/customers/logs/([^/]+)$#', $uri, $m)) {
+    CustomerLogsController::getLogs($m[1]);
 }
 if ($method === 'GET' && $uri === '/task-logs/check') {
     TaskLogsController::check();

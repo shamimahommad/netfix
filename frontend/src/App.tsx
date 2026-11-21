@@ -43,6 +43,7 @@ import ResellerPage from './pages/ResellerPage';
 import PlanPermissionPage from './pages/PlanPermissionPage';
 import LoginLogPage from './pages/LoginLogPage';
 import CustomerTaskLogsPage from './pages/CustomerTaskLogsPage';
+import CustomerLogsPage from './pages/CustomerLogsPage';
 import CustomerInvoicesPage from './pages/CustomerInvoicesPage';
 import BulkCustomerRenewPage from './pages/BulkCustomerRenewPage';
 import RechargeHistoryPage from './pages/RechargeHistoryPage';
@@ -222,7 +223,8 @@ function AppContent() {
               <Route path="pppoe-logs" element={<PppoeLogsPage />} />
               <Route path="customers" element={<Navigate to="/dashboard/customers/all" replace />} />
               <Route path="customers/pppoe-logs" element={<Navigate to="/dashboard/pppoe-logs" replace />} />
-              <Route path="customers/task-logs/:customerId" element={<CustomerTaskLogsPage />} />
+              <Route path="customers/task-logs/:customerId" element={<CustomerLogsPage />} />
+              <Route path="customers/logs/:customerId" element={<CustomerLogsPage />} />
               <Route path="customers/:type" element={<CustomersPage />} />
               <Route path="customers/view/:id" element={<CustomerDetailPage />} />
               <Route path="customers/view/:id/invoices" element={<CustomerInvoicesPage />} />

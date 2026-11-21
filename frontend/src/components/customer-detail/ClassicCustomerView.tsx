@@ -1,7 +1,7 @@
 import React from 'react';
 import { CustomerDetailResponse } from '@/types/customer.types';
 import { isLifetimeExpiry } from '@/lib/formatExpiry';
-import { LayoutGrid, Sparkles } from 'lucide-react';
+import { LayoutGrid, Sparkles, ChevronUp, ChevronDown, Server, MessageSquare, PhoneCall, ClipboardList, Activity, CreditCard as LucideCreditCard } from 'lucide-react';
 
 export interface CustomerViewProps {
   id: string;
@@ -23,7 +23,7 @@ export interface CustomerViewProps {
   onBack: () => void;
   onEdit: () => void;
   onSms: () => void;
-  onLogs: () => void;
+  onLogs: (tab?: string) => void;
   onCash: () => void;
   onRenew: () => void;
   onMigrate: () => void;
@@ -266,6 +266,21 @@ export default function ClassicCustomerView(props: CustomerViewProps) {
 
   const { customer, billing, network, onu } = customerData;
 
+  const [isLogsDropdownOpen, setIsLogsDropdownOpen] = React.useState(false);
+  const logsDropdownRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (logsDropdownRef.current && !logsDropdownRef.current.contains(e.target as Node)) {
+        setIsLogsDropdownOpen(false);
+      }
+    };
+    if (isLogsDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isLogsDropdownOpen]);
+
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-sky-50 via-teal-50/30 to-cyan-50 dark:from-slate-900 dark:via-sky-950/30 dark:to-slate-900 p-2 sm:p-4">
       <div className="w-full max-w-7xl mx-auto space-y-3 sm:space-y-4">
@@ -420,13 +435,105 @@ export default function ClassicCustomerView(props: CustomerViewProps) {
                   <DevicePhoneMobileIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                   <span className="truncate">SMS</span>
                 </button>
-                <button
-                  onClick={onLogs}
-                  className="flex items-center justify-center gap-1 sm:gap-2 px-1.5 py-1.5 sm:px-3 sm:py-2.5 bg-sky-600 hover:bg-sky-700 dark:bg-teal-700 dark:hover:bg-teal-600 text-white rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg shadow-md min-w-0"
-                >
-                  <DocumentTextIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
-                  <span className="truncate">Logs</span>
-                </button>
+
+                {/* Logs Dropdown Split Button */}
+                <div className="relative min-w-0" ref={logsDropdownRef}>
+                  <div className="inline-flex w-full rounded-lg sm:rounded-xl shadow-md overflow-hidden bg-sky-600 hover:bg-sky-700 dark:bg-teal-700 dark:hover:bg-teal-600 transition-all duration-300 hover:shadow-lg">
+                    <button
+                      type="button"
+                      onClick={() => onLogs()}
+                      className="flex-1 flex items-center justify-center gap-1 sm:gap-1.5 px-1.5 py-1.5 sm:px-2.5 sm:py-2.5 text-white text-xs sm:text-sm font-semibold min-w-0 truncate"
+                      title="View Customer Logs"
+                    >
+                      <DocumentTextIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+                      <span className="truncate">Logs</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsLogsDropdownOpen((prev) => !prev);
+                      }}
+                      className="px-1.5 sm:px-2 border-l border-white/20 text-white hover:bg-black/15 transition-colors flex items-center justify-center"
+                      title="Logs Options"
+                    >
+                      {isLogsDropdownOpen ? (
+                        <ChevronDown className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      ) : (
+                        <ChevronUp className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Dropup / Dropdown Menu */}
+                  {isLogsDropdownOpen && (
+                    <div className="absolute bottom-full mb-1.5 right-0 w-48 sm:w-52 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                      <div className="px-3 py-1 border-b border-slate-100 dark:border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Select Log Category
+                      </div>
+                      <button
+                        onClick={() => {
+                          setIsLogsDropdownOpen(false);
+                          onLogs('mac');
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                      >
+                        <Server className="w-4 h-4 text-indigo-500" />
+                        <span>MAC Logs</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsLogsDropdownOpen(false);
+                          onLogs('sms');
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                      >
+                        <MessageSquare className="w-4 h-4 text-sky-500" />
+                        <span>SMS Logs</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsLogsDropdownOpen(false);
+                          onLogs('calls');
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                      >
+                        <PhoneCall className="w-4 h-4 text-emerald-500" />
+                        <span>Call Logs</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsLogsDropdownOpen(false);
+                          onLogs('tasks');
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                      >
+                        <ClipboardList className="w-4 h-4 text-amber-500" />
+                        <span>Task Logs</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsLogsDropdownOpen(false);
+                          onLogs('sessions');
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                      >
+                        <Activity className="w-4 h-4 text-teal-500" />
+                        <span>Sessions</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsLogsDropdownOpen(false);
+                          onLogs('recharge');
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                      >
+                        <LucideCreditCard className="w-4 h-4 text-rose-500" />
+                        <span>Recharge History</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

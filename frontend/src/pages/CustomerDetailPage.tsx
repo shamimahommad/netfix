@@ -1393,7 +1393,7 @@ export default function CustomerDetailPage() {
       }
       setIsSmsModalOpen(true);
     },
-    onLogs: () => navigate(`/dashboard/customers/task-logs/${id}`),
+    onLogs: (tab?: string) => navigate(`/dashboard/customers/logs/${id}${tab ? `?tab=${tab}` : ''}`),
     onCash: () => {
       if (!canCollectPayment) {
         toast.error('Permission denied: You do not have permission to collect payments');
