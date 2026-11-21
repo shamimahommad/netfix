@@ -15,6 +15,7 @@ import { usersService, ReceivedByOption } from '@/services/users.service';
 import { formatCustomerIdDisplay } from '@/lib/formatCustomerId';
 import { isLifetimeExpiry } from '@/lib/formatExpiry';
 import { useAuthStore } from '@/stores/authStore';
+import { usePermissions } from '@/hooks/usePermissions';
 import ClassicCustomerView, { CustomerViewProps } from '@/components/customer-detail/ClassicCustomerView';
 import ModernCustomerView from '@/components/customer-detail/ModernCustomerView';
 import { getCustomerViewTemplate, setCustomerViewTemplate, CustomerViewTemplate } from '@/lib/customerViewTemplate';
@@ -322,6 +323,22 @@ export default function CustomerDetailPage() {
   const location = useLocation();
   const toast = useToastContext();
   const { user } = useAuthStore();
+  const {
+    canCreateCustomer,
+    canEditCustomer,
+    canDeleteCustomer,
+    canExtendDate,
+    canChangePackage,
+    canChangeZone,
+    canRecharge,
+    canPartialRenew,
+    canCollectPayment,
+    canViewInvoice,
+    canSendSms,
+    pppoeDisconnect,
+    pppoeBindMac,
+    hideCustomerPassword,
+  } = usePermissions();
   const [customerData, setCustomerData] = useState<CustomerDetailResponse['data'] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -470,8 +487,9 @@ export default function CustomerDetailPage() {
     if (isRenewModalOpen && customerData) {
       // Initialize form with current customer data
       if (customerData.service && customerData.billing) {
+        const initialCycle = (!canPartialRenew || customerData.service.billingCycle === 'monthly') ? 'Monthly' : 'Day-based';
         setRenewForm({
-          billing_cycle: customerData.service.billingCycle === 'monthly' ? 'Monthly' : 'Day-based',
+          billing_cycle: initialCycle,
           no_of_month: 1,
           selected_days: 30,
           plan_id: '', // Will be set when packages load
@@ -672,6 +690,11 @@ export default function CustomerDetailPage() {
     // Validate form
     if (!renewForm.plan_id) {
       toast.error('Please select a plan');
+      return;
+    }
+
+    if (renewForm.billing_cycle === 'Day-based' && !canPartialRenew) {
+      toast.error('Partial (day-based) renewal is not permitted for your account. Please select Monthly renewal.');
       return;
     }
 
@@ -1012,6 +1035,10 @@ export default function CustomerDetailPage() {
   };
 
   const handleBindMac = async () => {
+    if (!pppoeBindMac) {
+      toast.error('Permission denied: You do not have permission to bind or unbind MAC addresses');
+      return;
+    }
     if (!id || !customerData) return;
 
     const hasCallerId = macBindingStatus?.hasCallerId || false;
@@ -1141,6 +1168,10 @@ export default function CustomerDetailPage() {
   };
 
   const confirmDisconnectSession = async () => {
+    if (!pppoeDisconnect) {
+      toast.error('Permission denied: You do not have permission to disconnect active sessions');
+      return;
+    }
     if (!id || !customerData) return;
 
     setIsDisconnecting(true);
@@ -1320,8 +1351,18 @@ export default function CustomerDetailPage() {
       toast.success(`Switched to ${tpl === 'modern' ? 'Modern Pro' : 'Classic'} design layout`);
     },
     onBack: () => navigate('/dashboard/customers'),
-    onEdit: () => navigate(`/dashboard/customers/edit/${id}`),
+    onEdit: () => {
+      if (!canEditCustomer) {
+        toast.error('Permission denied: You do not have permission to edit customer details');
+        return;
+      }
+      navigate(`/dashboard/customers/edit/${id}`);
+    },
     onSms: () => {
+      if (!canSendSms) {
+        toast.error('Permission denied: You do not have permission to send SMS');
+        return;
+      }
       const phone = customerData?.customer.phone || customerData?.customer.mobileNumber || '';
       setSmsPhone(phone);
       if (!smsMessage) {
@@ -1331,14 +1372,42 @@ export default function CustomerDetailPage() {
     },
     onLogs: () => navigate(`/dashboard/customers/task-logs/${id}`),
     onCash: () => {
+      if (!canCollectPayment) {
+        toast.error('Permission denied: You do not have permission to collect payments');
+        return;
+      }
       setCashReceivedForm({ amount: '', notes: '', receivedByUserId: '', receivedByRole: '', sendSms: true });
       setIsCashReceivedModalOpen(true);
     },
-    onRenew: () => setIsRenewModalOpen(true),
-    onMigrate: () => setIsChangePackageModalOpen(true),
+    onRenew: () => {
+      if (!canRecharge) {
+        toast.error('Permission denied: You do not have permission to recharge customer subscriptions');
+        return;
+      }
+      setIsRenewModalOpen(true);
+    },
+    onMigrate: () => {
+      if (!canChangePackage) {
+        toast.error('Permission denied: You do not have permission to change customer package');
+        return;
+      }
+      setIsChangePackageModalOpen(true);
+    },
     onSuspendRestore: handleSuspendRestore,
-    onMarkLeftActivate: isLeft ? handleActivate : handleMarkLeft,
-    onInvoices: () => navigate(`/dashboard/customers/view/${id}/invoices`),
+    onMarkLeftActivate: () => {
+      if (!canDeleteCustomer) {
+        toast.error('Permission denied: You do not have permission to cancel or mark customer left');
+        return;
+      }
+      isLeft ? handleActivate() : handleMarkLeft();
+    },
+    onInvoices: () => {
+      if (!canViewInvoice) {
+        toast.error('Permission denied: You do not have permission to view invoices');
+        return;
+      }
+      navigate(`/dashboard/customers/view/${id}/invoices`);
+    },
     onLiveTraffic: () => {
       if (customerData && customerData.network.username && customerData.network.serverName) {
         const sId = (customerData.network as any).serverId || (customerData.network as any).networkDeviceId || '';
@@ -1359,7 +1428,13 @@ export default function CustomerDetailPage() {
       setSyncResult(null);
       handleSync();
     },
-    onDisconnectOpen: () => setIsDisconnectModalOpen(true),
+    onDisconnectOpen: () => {
+      if (!pppoeDisconnect) {
+        toast.error('Permission denied: You do not have permission to disconnect active sessions');
+        return;
+      }
+      setIsDisconnectModalOpen(true);
+    },
     onCopy: handleCopy,
     formatCurrencyBDT,
     formatDate,
@@ -1368,6 +1443,15 @@ export default function CustomerDetailPage() {
     formatTraffic,
     getAccountStatusBadgeClass,
     getBillingStatusBadgeClass,
+    hideCustomerPassword,
+    canCollectPayment,
+    canRecharge,
+    canChangePackage,
+    canDeleteCustomer,
+    canViewInvoice,
+    canSendSms,
+    pppoeDisconnect,
+    pppoeBindMac,
   };
 
   return (
@@ -1944,7 +2028,13 @@ export default function CustomerDetailPage() {
                     className="w-full px-3 py-2.5 pl-10 rounded-lg border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236366f1%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22/%3E%3C/svg%3E')] bg-no-repeat bg-right-2 bg-[length:18px_18px] pr-8 transition-all text-sm"
                   >
                     <option value="Monthly">Monthly</option>
-                    <option value="Day-based">Day-based</option>
+                    {canPartialRenew ? (
+                      <option value="Day-based">Day-based</option>
+                    ) : (
+                      <option value="Day-based" disabled>
+                        Day-based (Partial Renewal Disabled)
+                      </option>
+                    )}
                   </select>
                   <CreditCardIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-500 pointer-events-none" />
                 </div>

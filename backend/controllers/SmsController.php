@@ -115,6 +115,10 @@ class SmsController {
     public static function send(): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
+
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_send_sms');
+
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
         $toNumbers = $data['toNumbers'] ?? [];

@@ -12,6 +12,10 @@ class PaymentsController {
     public static function create(): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
+
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_collect_payment');
+
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
         $customerId = $data['customerId'] ?? null;
@@ -87,6 +91,26 @@ class PaymentsController {
             }
 
             $db->commit();
+
+            try {
+                require_once __DIR__ . '/../lib/ActivityLogger.php';
+                ActivityLogger::log([
+                    'tenant_id' => $tenantId,
+                    'user_id' => $user['user_id'] ?? null,
+                    'log_type' => 'activity',
+                    'action' => 'payment_collected',
+                    'module' => 'billing',
+                    'target_id' => (string)$customerId,
+                    'target_type' => 'customer',
+                    'description' => "Collected payment of ৳{$amount} via {$method} for customer #{$customerId}",
+                    'metadata' => [
+                        'customer_id' => $customerId,
+                        'amount' => $amount,
+                        'method' => $method,
+                        'reference' => $ref,
+                    ],
+                ]);
+            } catch (\Throwable $actErr) {}
 
             Response::json([
                 'success' => true,

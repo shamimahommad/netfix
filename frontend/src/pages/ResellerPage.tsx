@@ -38,6 +38,7 @@ import { useToastContext } from '@/contexts/ToastContext';
 import { useAuthStore } from '@/stores/authStore';
 import { usePermissions } from '@/hooks/usePermissions';
 import { ResellerHierarchyTree } from '@/components/reseller/ResellerHierarchyTree';
+import { ResellerPermissionModal } from '@/components/reseller/ResellerPermissionModal';
 import api from '@/lib/api';
 
 const RESELLER_ROLE_LABELS: Record<string, string> = {
@@ -345,6 +346,7 @@ export default function ResellerPage() {
   const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [userPanelUser, setUserPanelUser] = useState<Reseller | null>(null);
+  const [permissionModalUser, setPermissionModalUser] = useState<Reseller | null>(null);
   const [addBalanceUserId, setAddBalanceUserId] = useState<string | null>(null);
   const [addBalanceAmount, setAddBalanceAmount] = useState('');
   const [rechargeAction, setRechargeAction] = useState<'credit' | 'debit'>('credit');
@@ -907,22 +909,24 @@ export default function ResellerPage() {
                       </td>
                       <td className="p-3">
                         <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAddBalanceUserId(r.userId);
-                              setAddBalanceAmount('');
-                              setRechargeAction('credit');
-                              setRechargeMethod('cash');
-                              setRechargeTransactionId('');
-                              setRechargeRemarks('');
-                              setRechargeSendSms(false);
-                            }}
-                            className="p-2 rounded-lg bg-cyan-100 hover:bg-cyan-200 dark:bg-cyan-900/40 dark:hover:bg-cyan-800/50 text-cyan-700 dark:text-cyan-300"
-                            title="Add Balance / Recharge"
-                          >
-                            <RechargeIcon />
-                          </button>
+                          {permissions.canTransferBalance && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAddBalanceUserId(r.userId);
+                                setAddBalanceAmount('');
+                                setRechargeAction('credit');
+                                setRechargeMethod('cash');
+                                setRechargeTransactionId('');
+                                setRechargeRemarks('');
+                                setRechargeSendSms(false);
+                              }}
+                              className="p-2 rounded-lg bg-cyan-100 hover:bg-cyan-200 dark:bg-cyan-900/40 dark:hover:bg-cyan-800/50 text-cyan-700 dark:text-cyan-300"
+                              title="Add Balance / Recharge"
+                            >
+                              <Wallet className="w-4 h-4" />
+                            </button>
+                          )}
                           {canImpersonateMap[r.userId] && (
                             <button
                               type="button"
@@ -1001,23 +1005,25 @@ export default function ResellerPage() {
             </div>
             {/* Actions — unified elegant rows, accent left border */}
             <div className="p-2.5 overflow-y-auto flex-1 min-h-0 space-y-1 bg-slate-50/30 dark:bg-slate-900/30">
-              <button
-                type="button"
-                onClick={() => {
-                  setAddBalanceUserId(userPanelUser.userId);
-                  setAddBalanceAmount('');
-                  setRechargeAction('credit');
-                  setRechargeMethod('cash');
-                  setRechargeTransactionId('');
-                  setRechargeRemarks('');
-                  setRechargeSendSms(false);
-                  setUserPanelUser(null);
-                }}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium rounded-xl bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-sky-900/20 border-l-4 border-teal-400 dark:border-teal-500 shadow-sm hover:shadow transition-all"
-              >
-                <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-teal-100 dark:bg-teal-900/50 text-teal-600 dark:text-teal-400"><RechargeIcon /></span>
-                Recharge
-              </button>
+              {permissions.canTransferBalance && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddBalanceUserId(userPanelUser.userId);
+                    setAddBalanceAmount('');
+                    setRechargeAction('credit');
+                    setRechargeMethod('cash');
+                    setRechargeTransactionId('');
+                    setRechargeRemarks('');
+                    setRechargeSendSms(false);
+                    setUserPanelUser(null);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium rounded-xl bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:bg-sky-50 dark:hover:bg-sky-900/20 border-l-4 border-teal-400 dark:border-teal-500 shadow-sm hover:shadow transition-all"
+                >
+                  <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-teal-100 dark:bg-teal-900/50 text-teal-600 dark:text-teal-400"><RechargeIcon /></span>
+                  Recharge
+                </button>
+              )}
               {canImpersonateMap[userPanelUser.userId] && (
                 <button
                   type="button"
@@ -1028,32 +1034,67 @@ export default function ResellerPage() {
                   Login as user
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => { handleStatus(userPanelUser.userId, userPanelUser.status); setUserPanelUser(null); }}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium rounded-xl bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-900/20 border-l-4 border-amber-400 dark:border-amber-500 shadow-sm hover:shadow transition-all"
-              >
-                <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400">
-                  {userPanelUser.status === 'active' ? <UserMinusIcon /> : <PlayIcon />}
-                </span>
-                {userPanelUser.status === 'active' ? 'Suspend' : 'Restore'}
-              </button>
-              <button type="button" onClick={() => toast.info('Edit Permission – coming soon')}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium rounded-xl bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 border-slate-300 dark:border-slate-600 shadow-sm hover:shadow transition-all">
-                <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400"><LockIcon /></span>
-                Edit Permission
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  navigate(`/dashboard/reseller/plan-permission/${userPanelUser.userId}`);
-                  setUserPanelUser(null);
-                }}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium rounded-xl bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 border-slate-300 dark:border-slate-600 shadow-sm hover:shadow transition-all"
-              >
-                <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400"><DocumentIcon /></span>
-                Plan Permission
-              </button>
+              {(() => {
+                const isAdmin = userPanelUser.role === 'admin' || userPanelUser.role === 'isp_admin';
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isAdmin) return;
+                      handleStatus(userPanelUser.userId, userPanelUser.status);
+                      setUserPanelUser(null);
+                    }}
+                    disabled={isAdmin}
+                    title={isAdmin ? 'Admin account status cannot be modified' : undefined}
+                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium rounded-xl bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-900/20 border-l-4 border-amber-400 dark:border-amber-500 shadow-sm hover:shadow transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400">
+                      {userPanelUser.status === 'active' ? <UserMinusIcon /> : <PlayIcon />}
+                    </span>
+                    <span>{userPanelUser.status === 'active' ? 'Suspend' : 'Restore'}</span>
+                    {isAdmin && (
+                      <span className="ml-auto text-[11px] font-normal text-slate-400 dark:text-slate-500">
+                        (Protected)
+                      </span>
+                    )}
+                  </button>
+                );
+              })()}
+              {permissions.canManagePermissions && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPermissionModalUser(userPanelUser);
+                    setUserPanelUser(null);
+                  }}
+                  disabled={['admin', 'isp_admin', 'saas_admin'].includes(userPanelUser.role?.toLowerCase() || '')}
+                  title={['admin', 'isp_admin', 'saas_admin'].includes(userPanelUser.role?.toLowerCase() || '') ? 'Root admin permissions cannot be altered' : undefined}
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium rounded-xl bg-white dark:bg-slate-800/80 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 border-l-4 border-indigo-400 dark:border-indigo-500 shadow-sm hover:shadow transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400">
+                    <LockIcon />
+                  </span>
+                  <span>Edit Permission</span>
+                  {['admin', 'isp_admin', 'saas_admin'].includes(userPanelUser.role?.toLowerCase() || '') && (
+                    <span className="ml-auto text-[11px] font-normal text-slate-400 dark:text-slate-500">
+                      (Protected)
+                    </span>
+                  )}
+                </button>
+              )}
+              {permissions.canAssignPackage && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigate(`/dashboard/reseller/plan-permission/${userPanelUser.userId}`);
+                    setUserPanelUser(null);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium rounded-xl bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 border-slate-300 dark:border-slate-600 shadow-sm hover:shadow transition-all"
+                >
+                  <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400"><DocumentIcon /></span>
+                  Plan Permission
+                </button>
+              )}
               <button type="button" onClick={() => toast.info('Zone Permission – coming soon')}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium rounded-xl bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 border-l-4 border-slate-300 dark:border-slate-600 shadow-sm hover:shadow transition-all">
                 <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400"><MapPinIcon /></span>
@@ -1107,16 +1148,36 @@ export default function ResellerPage() {
                 <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400"><Lock className="w-4 h-4" /></span>
                 Reset Password
               </button>
-              <button
-                type="button"
-                onClick={() => { handleDelete(userPanelUser.userId); setUserPanelUser(null); }}
-                disabled={impersonated}
-                title={impersonated ? 'Disabled during impersonation' : undefined}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium rounded-xl bg-white dark:bg-slate-800/80 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 border-l-4 border-rose-400 dark:border-rose-500 shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-rose-100 dark:bg-rose-900/50 text-rose-600 dark:text-rose-400"><TrashIcon /></span>
-                Delete
-              </button>
+              {(() => {
+                const isAdmin = userPanelUser.role === 'admin' || userPanelUser.role === 'isp_admin';
+                const isDeleteDisabled = impersonated || isAdmin;
+                const deleteTitle = isAdmin
+                  ? 'Admin account cannot be deleted'
+                  : impersonated
+                  ? 'Disabled during impersonation'
+                  : undefined;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isAdmin) return;
+                      handleDelete(userPanelUser.userId);
+                      setUserPanelUser(null);
+                    }}
+                    disabled={isDeleteDisabled}
+                    title={deleteTitle}
+                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium rounded-xl bg-white dark:bg-slate-800/80 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 border-l-4 border-rose-400 dark:border-rose-500 shadow-sm hover:shadow transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-rose-100 dark:bg-rose-900/50 text-rose-600 dark:text-rose-400"><TrashIcon /></span>
+                    <span>Delete</span>
+                    {isAdmin && (
+                      <span className="ml-auto text-[11px] font-normal text-slate-400 dark:text-slate-500">
+                        (Protected)
+                      </span>
+                    )}
+                  </button>
+                );
+              })()}
             </div>
             <div className="p-3 border-t border-slate-200 dark:border-slate-700 shrink-0">
               <button
@@ -1129,6 +1190,15 @@ export default function ResellerPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Reseller Permission Modal */}
+      {permissionModalUser && (
+        <ResellerPermissionModal
+          user={permissionModalUser}
+          onClose={() => setPermissionModalUser(null)}
+          onSuccess={() => loadList()}
+        />
       )}
 
       {/* Balance Recharge modal — elegant sky/teal theme */}

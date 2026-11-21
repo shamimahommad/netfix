@@ -223,7 +223,8 @@ class CustomersController {
         }
 
         $now = time();
-        $formatted = array_map(function($row) use ($now, $callerId) {
+        $isHidePassword = HierarchySecurityService::hasPermission($callerId, 'hide_customer_password');
+        $formatted = array_map(function($row) use ($now, $callerId, $isHidePassword) {
             $expiresAtTs = !empty($row['expiry_date']) ? strtotime($row['expiry_date']) : null;
             $dueAmount = (float)($row['balance_due'] ?? 0);
 
@@ -265,7 +266,7 @@ class CustomersController {
                 'mobile' => $row['phone'],
                 'email' => $row['email'],
                 'username' => $row['username'],
-                'password' => $row['password'] ?? '',
+                'password' => $isHidePassword ? '••••••••' : ($row['password'] ?? ''),
                 'status' => $row['status'],
                 'billing_status' => $billingStatus,
                 'billingStatus' => $billingStatus,
@@ -546,6 +547,8 @@ class CustomersController {
             $connectedByUsername = $targetConnectedUser['username'] ?? 'admin';
         }
 
+        $isHidePassword = HierarchySecurityService::hasPermission((int)$user['user_id'], 'hide_customer_password');
+
         Response::json([
             'success' => true,
             'data' => [
@@ -595,7 +598,8 @@ class CustomersController {
                     'networkDeviceId' => $net['network_device_id'] ?? null,
                     'serverName' => $net['device_name'] ?? 'Core Router',
                     'username' => $net['username'] ?? '',
-                    'password' => $net['password'] ?? '',
+                    'password' => $isHidePassword ? '••••••••' : ($net['password'] ?? ''),
+                    'isPasswordHidden' => $isHidePassword,
                     'ipAddress' => $net['current_ip'] ?? $net['remote_address'] ?? null,
                     'macAddress' => $effectiveMac,
                     'activeMacAddress' => $effectiveMac,
@@ -1008,6 +1012,26 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                 error_log("MikroTik auto-provision notice on customer creation: " . $mkErr->getMessage());
             }
 
+            try {
+                require_once __DIR__ . '/../lib/ActivityLogger.php';
+                ActivityLogger::log([
+                    'tenant_id' => $tenantId,
+                    'user_id' => $user['user_id'] ?? null,
+                    'log_type' => 'client_task',
+                    'action' => 'customer_onboard',
+                    'module' => 'customers',
+                    'target_id' => (string)$customerId,
+                    'target_type' => 'customer',
+                    'description' => "Created and onboarded new customer #{$customerCode} ({$fullName}) with username {$username}",
+                    'metadata' => [
+                        'customer_id' => $customerId,
+                        'customer_code' => $customerCode,
+                        'username' => $username,
+                        'full_name' => $fullName,
+                    ],
+                ]);
+            } catch (\Throwable $actErr) {}
+
             Response::json([
                 'success' => true,
                 'message' => 'Customer onboarded successfully with active package and credentials',
@@ -1119,6 +1143,9 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         if (isset($data['metadata']) && is_array($data['metadata'])) {
             $meta = array_merge($meta, $data['metadata']);
         }
+        if (isset($data['area']) || isset($data['subArea']) || isset($data['zoneId']) || isset($data['service_area_id'])) {
+            HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_change_zone');
+        }
         if (isset($data['area'])) $meta['area_name'] = $data['area'];
         if (isset($data['subArea'])) $meta['sub_area_name'] = $data['subArea'];
         if (isset($data['dob'])) $meta['dob'] = $data['dob'];
@@ -1207,6 +1234,7 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         }
 
         if (isset($data['ipAddress']) || isset($data['ip_address']) || isset($data['remote_address'])) {
+            HierarchySecurityService::requirePermission((int)$user['user_id'], 'pppoe_static_ip');
             $newIp = trim($data['ipAddress'] ?? $data['ip_address'] ?? $data['remote_address']);
             $netFields[] = "remote_address = :rip";
             $netParams['rip'] = $newIp ?: null;
@@ -1221,6 +1249,7 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         // 3. Handle Package / Access Profile update if passed
         $newPlanId = $data['planId'] ?? $data['plan_id'] ?? $data['access_profile_id'] ?? null;
         if (!empty($newPlanId)) {
+            HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_change_package');
             $stmtPlan = $db->prepare("UPDATE customer_services SET access_profile_id = :pid WHERE customer_id = :cid");
             $stmtPlan->execute(['pid' => $newPlanId, 'cid' => $realCid]);
         }
@@ -1284,9 +1313,25 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
 
         // 6. Handle expiryDate if passed
         if (!empty($data['expiryDate']) || !empty($data['expiry_date'])) {
+            HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_extend_date');
             $expDate = trim($data['expiryDate'] ?? $data['expiry_date']);
             $stmtExp = $db->prepare("UPDATE customer_services SET expires_at = :exp WHERE customer_id = :cid");
             $stmtExp->execute(['exp' => $expDate, 'cid' => $realCid]);
+
+            try {
+                require_once __DIR__ . '/../lib/ActivityLogger.php';
+                ActivityLogger::log([
+                    'tenant_id' => $tenantId,
+                    'user_id' => $user['user_id'] ?? null,
+                    'log_type' => 'client_task',
+                    'action' => 'extend_expiry_date',
+                    'module' => 'customers',
+                    'target_id' => (string)$realCid,
+                    'target_type' => 'customer',
+                    'description' => "Modified validity expiration date to {$expDate} for customer #{$realCid}",
+                    'metadata' => ['customer_id' => $realCid, 'new_expiry' => $expDate],
+                ]);
+            } catch (\Throwable $actErr) {}
         }
 
         Response::json([
@@ -1363,6 +1408,24 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             $stmtDel->execute(['id' => $cid]);
 
             $db->commit();
+
+            try {
+                require_once __DIR__ . '/../lib/ActivityLogger.php';
+                ActivityLogger::log([
+                    'tenant_id' => $customerTenantId,
+                    'user_id' => $user['user_id'] ?? null,
+                    'log_type' => 'client_task',
+                    'action' => 'customer_delete',
+                    'module' => 'customers',
+                    'target_id' => (string)$cid,
+                    'target_type' => 'customer',
+                    'description' => "Permanently deleted customer record #{$cid} (" . ($customer['full_name'] ?? 'Customer') . ")",
+                    'metadata' => [
+                        'customer_id' => $cid,
+                        'customer_code' => $customer['customer_code'] ?? null,
+                    ],
+                ]);
+            } catch (\Throwable $actErr) {}
         } catch (\Throwable $e) {
             $db->rollBack();
             Response::error('Failed to permanently delete customer: ' . $e->getMessage(), 500);
@@ -1811,6 +1874,21 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         require_once __DIR__ . '/../lib/MikrotikSyncService.php';
         $res = MikrotikSyncService::disconnect($db, $realCid, $tenantId);
 
+        try {
+            require_once __DIR__ . '/../lib/ActivityLogger.php';
+            ActivityLogger::log([
+                'tenant_id' => $tenantId,
+                'user_id' => $user['user_id'] ?? null,
+                'log_type' => 'client_task',
+                'action' => 'pppoe_disconnect',
+                'module' => 'network',
+                'target_id' => (string)$realCid,
+                'target_type' => 'customer',
+                'description' => "Disconnected active PPPoE session from MikroTik router for customer #{$realCid}",
+                'metadata' => ['customer_id' => $realCid, 'action' => 'disconnect'],
+            ]);
+        } catch (\Throwable $actErr) {}
+
         Response::json($res);
     }
 
@@ -1827,6 +1905,21 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
 
         require_once __DIR__ . '/../lib/MikrotikSyncService.php';
         $res = MikrotikSyncService::toggleSuspend($db, $realCid, $tenantId);
+
+        try {
+            require_once __DIR__ . '/../lib/ActivityLogger.php';
+            ActivityLogger::log([
+                'tenant_id' => $tenantId,
+                'user_id' => $user['user_id'] ?? null,
+                'log_type' => 'client_task',
+                'action' => 'suspend_toggle',
+                'module' => 'customers',
+                'target_id' => (string)$realCid,
+                'target_type' => 'customer',
+                'description' => "Toggled customer suspension status for subscriber #{$realCid}",
+                'metadata' => ['customer_id' => $realCid, 'result' => $res],
+            ]);
+        } catch (\Throwable $actErr) {}
 
         Response::json($res);
     }
@@ -1847,6 +1940,21 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
 
         require_once __DIR__ . '/../lib/MikrotikSyncService.php';
         $res = MikrotikSyncService::bindMac($db, $realCid, $mac, $tenantId);
+
+        try {
+            require_once __DIR__ . '/../lib/ActivityLogger.php';
+            ActivityLogger::log([
+                'tenant_id' => $tenantId,
+                'user_id' => $user['user_id'] ?? null,
+                'log_type' => 'client_task',
+                'action' => 'bind_mac_address',
+                'module' => 'network',
+                'target_id' => (string)$realCid,
+                'target_type' => 'customer',
+                'description' => "Bound caller MAC address (" . ($mac ?: 'Caller MAC') . ") to PPPoE subscriber #{$realCid}",
+                'metadata' => ['customer_id' => $realCid, 'mac' => $mac],
+            ]);
+        } catch (\Throwable $actErr) {}
 
         Response::json($res);
     }
@@ -1893,10 +2001,27 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
     }
 
     public static function markLeft(string $id): void {
-        AuthMiddleware::requireAuth();
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_delete_customer');
         $db = Database::getConnection();
         $stmt = $db->prepare("UPDATE customers SET status = 'cancelled' WHERE customer_id = :cid");
         $stmt->execute(['cid' => $id]);
+
+        try {
+            require_once __DIR__ . '/../lib/ActivityLogger.php';
+            ActivityLogger::log([
+                'tenant_id' => $tenantId ?? 1,
+                'user_id' => $user['user_id'] ?? null,
+                'log_type' => 'client_task',
+                'action' => 'customer_left',
+                'module' => 'customers',
+                'target_id' => (string)$id,
+                'target_type' => 'customer',
+                'description' => "Marked customer account #{$id} as left/cancelled",
+                'metadata' => ['customer_id' => $id, 'status' => 'cancelled'],
+            ]);
+        } catch (\Throwable $actErr) {}
 
         Response::json([
             'success' => true,
@@ -1905,10 +2030,27 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
     }
 
     public static function activateLeft(string $id): void {
-        AuthMiddleware::requireAuth();
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_edit_customer');
         $db = Database::getConnection();
         $stmt = $db->prepare("UPDATE customers SET status = 'active' WHERE customer_id = :cid");
         $stmt->execute(['cid' => $id]);
+
+        try {
+            require_once __DIR__ . '/../lib/ActivityLogger.php';
+            ActivityLogger::log([
+                'tenant_id' => $tenantId ?? 1,
+                'user_id' => $user['user_id'] ?? null,
+                'log_type' => 'client_task',
+                'action' => 'customer_reactivated',
+                'module' => 'customers',
+                'target_id' => (string)$id,
+                'target_type' => 'customer',
+                'description' => "Reactivated previously cancelled customer #{$id}",
+                'metadata' => ['customer_id' => $id, 'status' => 'active'],
+            ]);
+        } catch (\Throwable $actErr) {}
 
         Response::json([
             'success' => true,

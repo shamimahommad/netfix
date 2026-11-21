@@ -239,6 +239,23 @@ class BillingController {
             $billingCycle = $data['billing_cycle'] ?? (isset($data['selected_days']) && (int)$data['selected_days'] < 30 ? 'Day-based' : 'Monthly');
             $isDayBased = ($billingCycle === 'Day-based' || (isset($data['selected_days']) && (int)$data['selected_days'] > 0 && empty($data['no_of_month'])));
 
+            $callerUserId = (int)($user['user_id'] ?? 0);
+            require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+
+            // Permission check 1: General recharge permission
+            if (!HierarchySecurityService::hasPermission($callerUserId, 'can_recharge')) {
+                $db->rollBack();
+                Response::error('You do not have permission to recharge or renew customer services', 403);
+                return;
+            }
+
+            // Permission check 2: Partial renewal (Day-based)
+            if ($isDayBased && !HierarchySecurityService::hasPermission($callerUserId, 'can_partial_renew')) {
+                $db->rollBack();
+                Response::error('Partial (day-based) renewal is not permitted for your account. You can only renew full month(s).', 403);
+                return;
+            }
+
             $months = max(1, (int)($data['billing_cycle_months'] ?? $data['no_of_month'] ?? 1));
             $days = isset($data['selected_days']) && (int)$data['selected_days'] > 0 ? (int)$data['selected_days'] : ($months * 30);
             $planId = $data['package_id'] ?? $data['plan_id'] ?? 1;
@@ -400,6 +417,26 @@ class BillingController {
                 error_log("Mikrotik renew sync notice: " . $mtErr->getMessage());
             }
 
+            try {
+                require_once __DIR__ . '/../lib/ActivityLogger.php';
+                ActivityLogger::log([
+                    'tenant_id' => $tenantId,
+                    'user_id' => $user['user_id'] ?? null,
+                    'log_type' => 'client_task',
+                    'action' => 'client_renew',
+                    'module' => 'billing',
+                    'target_id' => (string)$customerId,
+                    'target_type' => 'customer',
+                    'description' => "Renewed customer subscription #{$customerId}: {$renewNotes} (৳{$totalAmount})",
+                    'metadata' => [
+                        'customer_id' => $customerId,
+                        'new_expire_date' => $newExpireDate,
+                        'amount' => $totalAmount,
+                        'mode' => $renewMode,
+                    ],
+                ]);
+            } catch (\Throwable $actErr) {}
+
             Response::json([
                 'success' => true,
                 'message' => 'Service renewed and secret synchronized' . $mtMsg,
@@ -426,6 +463,10 @@ class BillingController {
     public static function changePackage(): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
+
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_change_package');
+
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
         $customerId = $data['customer_id'] ?? null;
@@ -438,6 +479,24 @@ class BillingController {
         $db = Database::getConnection();
         $stmt = $db->prepare("UPDATE customer_services SET access_profile_id = :pid WHERE customer_id = :cid AND tenant_id = :tid");
         $stmt->execute(['pid' => $planId, 'cid' => $customerId, 'tid' => $tenantId]);
+
+        try {
+            require_once __DIR__ . '/../lib/ActivityLogger.php';
+            ActivityLogger::log([
+                'tenant_id' => $tenantId,
+                'user_id' => $user['user_id'] ?? null,
+                'log_type' => 'client_task',
+                'action' => 'change_package',
+                'module' => 'billing',
+                'target_id' => (string)$customerId,
+                'target_type' => 'customer',
+                'description' => "Migrated customer #{$customerId} to Plan ID #{$planId}",
+                'metadata' => [
+                    'customer_id' => $customerId,
+                    'plan_id' => $planId,
+                ],
+            ]);
+        } catch (\Throwable $actErr) {}
 
         Response::json([
             'success' => true,
@@ -455,11 +514,20 @@ class BillingController {
         $offset = ($page - 1) * $limit;
 
         $callerId = (int)$user['user_id'];
+        HierarchySecurityService::requirePermission($callerId, 'can_view_invoice');
+
         $scope = HierarchySecurityService::getDownwardScopeClause($callerId, $tenantId ? (int)$tenantId : null, 'c', 'u');
         $where = ["i.tenant_id = :tid"];
         $params = array_merge(['tid' => $tenantId], $scope['params']);
         if (!empty($scope['whereSql'])) {
             $where[] = $scope['whereSql'];
+        }
+
+        // Hide downline invoices if caller has hide_downline_invoices granted
+        if (HierarchySecurityService::hasPermission($callerId, 'hide_downline_invoices')) {
+            $where[] = "(c.owner_id = :direct_caller_id OR i.created_by = :direct_caller_id2)";
+            $params['direct_caller_id'] = $callerId;
+            $params['direct_caller_id2'] = $callerId;
         }
 
         if (!empty($_GET['status']) && $_GET['status'] !== 'all') {
@@ -573,6 +641,7 @@ class BillingController {
 
     public static function invoiceDetail(string $id): void {
         $user = AuthMiddleware::requireAuth();
+        HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_view_invoice');
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
@@ -615,6 +684,7 @@ class BillingController {
      */
     public static function customerInvoices(string $customerId): void {
         $user = AuthMiddleware::requireAuth();
+        HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_view_invoice');
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
@@ -731,6 +801,7 @@ class BillingController {
      */
     public static function cancelInvoice(string $id): void {
         $user = AuthMiddleware::requireAuth();
+        HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_edit_invoice');
         $role = strtolower(trim($user['role'] ?? ''));
         $allowedRoles = ['admin', 'saas_admin', 'isp_admin', 'tenant_admin', 'manager', 'super_admin'];
         if (!in_array($role, $allowedRoles, true)) {
@@ -749,6 +820,7 @@ class BillingController {
      */
     public static function returnInvoice(string $id): void {
         $user = AuthMiddleware::requireAuth();
+        HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_edit_invoice');
         $tenantId = AuthMiddleware::getTenantId();
 
         $role = strtolower(trim($user['role'] ?? ''));

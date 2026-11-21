@@ -17,7 +17,7 @@ class ResellersController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $where = ["u.role IN ('reseller', 'sub_reseller', 'dealer', 'agent')"];
+        $where = ["u.role IN ('admin', 'isp_admin', 'reseller', 'sub_reseller', 'dealer', 'agent')"];
         $params = [];
 
         if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
@@ -188,6 +188,7 @@ class ResellersController {
 
     public static function create(): void {
         $currentUser = AuthMiddleware::requireAuth();
+        HierarchySecurityService::requirePermission((int)$currentUser['user_id'], 'can_manage_sub_tier');
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
@@ -555,12 +556,18 @@ class ResellersController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT user_id, tenant_id FROM users WHERE user_id = :id LIMIT 1");
+        $stmt = $db->prepare("SELECT user_id, tenant_id, role FROM users WHERE user_id = :id LIMIT 1");
         $stmt->execute(['id' => $id]);
         $targetUser = $stmt->fetch();
 
         if (!$targetUser) {
             Response::error('User not found', 404);
+        }
+
+        // Prevent deleting admin accounts
+        $targetRole = strtolower($targetUser['role'] ?? '');
+        if (in_array($targetRole, ['admin', 'isp_admin', 'super_admin', 'saas_admin', 'tenant_admin'], true)) {
+            Response::error('Admin accounts cannot be deleted', 403);
         }
 
         $callerRole = $currentUser['role'] ?? '';
@@ -580,6 +587,7 @@ class ResellersController {
 
     public static function addBalance(): void {
         $currentUser = AuthMiddleware::requireAuth();
+        HierarchySecurityService::requirePermission((int)$currentUser['user_id'], 'can_transfer_balance');
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
@@ -607,6 +615,7 @@ class ResellersController {
 
     public static function transferBalance(): void {
         $currentUser = AuthMiddleware::requireAuth();
+        HierarchySecurityService::requirePermission((int)$currentUser['user_id'], 'can_transfer_balance');
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
@@ -628,6 +637,21 @@ class ResellersController {
                 $notes,
                 $tenantId ? (int)$tenantId : null
             );
+
+            try {
+                require_once __DIR__ . '/../lib/ActivityLogger.php';
+                ActivityLogger::log([
+                    'tenant_id' => $tenantId ? (int)$tenantId : 1,
+                    'user_id' => (int)$currentUser['user_id'],
+                    'log_type' => 'activity',
+                    'action' => 'balance_transfer',
+                    'module' => 'reseller',
+                    'target_id' => (string)$toUserId,
+                    'target_type' => 'reseller',
+                    'description' => "Transferred balance of ৳{$amount} from user #{$fromUserId} to user #{$toUserId} ({$notes})",
+                    'metadata' => ['from_user' => $fromUserId, 'to_user' => $toUserId, 'amount' => $amount],
+                ]);
+            } catch (\Throwable $actErr) {}
             Response::json(['success' => true, 'data' => $result]);
         } catch (Throwable $e) {
             Response::error($e->getMessage(), 400);
@@ -729,6 +753,7 @@ class ResellersController {
 
     public static function putPlanPermissions(string $userId): void {
         $currentUser = AuthMiddleware::requireAuth();
+        HierarchySecurityService::requirePermission((int)$currentUser['user_id'], 'can_assign_package');
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $items = $data['items'] ?? [];
@@ -764,6 +789,126 @@ class ResellersController {
         } catch (DomainException $de) {
             Response::error($de->getMessage(), 400);
         } catch (Throwable $e) {
+            Response::error("Failed to update permissions: " . $e->getMessage(), 500);
+        }
+    }
+
+    public static function getPermissions(string $userId): void {
+        $currentUser = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $targetUserId = (int)$userId;
+        $stmt = $db->prepare("SELECT user_id, username, first_name, last_name, role, tenant_id FROM users WHERE user_id = :uid LIMIT 1");
+        $stmt->execute(['uid' => $targetUserId]);
+        $targetUser = $stmt->fetch();
+
+        if (!$targetUser) {
+            Response::error('User not found', 404);
+        }
+
+        $callerRole = strtolower($currentUser['role'] ?? '');
+        $isLevel0 = in_array($callerRole, ['admin', 'isp_admin', 'manager', 'tenant_admin', 'saas_admin', 'super_admin'], true);
+        if (!$isLevel0) {
+            HierarchySecurityService::requirePermission((int)$currentUser['user_id'], 'can_manage_permissions');
+            if (!HierarchySecurityService::isStrictSubordinate((int)$currentUser['user_id'], $targetUserId)) {
+                Response::error("Access denied: You cannot view permissions for user #{$targetUserId}", 403);
+            }
+        }
+
+        if ($callerRole !== 'saas_admin' && !empty($targetUser['tenant_id']) && (string)$targetUser['tenant_id'] !== (string)$tenantId) {
+            Response::error('Access denied', 403);
+        }
+
+        $permStmt = $db->prepare("
+            SELECT p.permission_id, p.permission_code, p.name, p.category, p.description,
+                   CASE WHEN up.granted = 1 THEN 1 ELSE 0 END as granted
+            FROM permissions p
+            LEFT JOIN user_permissions up ON up.permission_id = p.permission_id AND up.user_id = :uid
+            ORDER BY p.category ASC, p.permission_id ASC
+        ");
+        $permStmt->execute(['uid' => $targetUserId]);
+        $permissions = $permStmt->fetchAll();
+
+        foreach ($permissions as &$p) {
+            $p['permission_id'] = (int)$p['permission_id'];
+            $p['granted'] = (bool)$p['granted'];
+        }
+        unset($p);
+
+        Response::json([
+            'success' => true,
+            'user' => [
+                'userId' => (string)$targetUser['user_id'],
+                'username' => $targetUser['username'],
+                'name' => trim(($targetUser['first_name'] ?? '') . ' ' . ($targetUser['last_name'] ?? '')),
+                'role' => $targetUser['role']
+            ],
+            'permissions' => $permissions
+        ]);
+    }
+
+    public static function putPermissions(string $userId): void {
+        $currentUser = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $targetUserId = (int)$userId;
+        $stmt = $db->prepare("SELECT user_id, username, role, tenant_id FROM users WHERE user_id = :uid LIMIT 1");
+        $stmt->execute(['uid' => $targetUserId]);
+        $targetUser = $stmt->fetch();
+
+        if (!$targetUser) {
+            Response::error('User not found', 404);
+        }
+
+        $callerRole = strtolower($currentUser['role'] ?? '');
+        $isLevel0 = in_array($callerRole, ['admin', 'isp_admin', 'manager', 'tenant_admin', 'saas_admin', 'super_admin'], true);
+        if (!$isLevel0) {
+            HierarchySecurityService::requirePermission((int)$currentUser['user_id'], 'can_manage_permissions');
+            if (!HierarchySecurityService::isStrictSubordinate((int)$currentUser['user_id'], $targetUserId)) {
+                Response::error("Access denied: You cannot configure permissions for user #{$targetUserId}", 403);
+            }
+        }
+
+        if ($callerRole !== 'saas_admin' && !empty($targetUser['tenant_id']) && (string)$targetUser['tenant_id'] !== (string)$tenantId) {
+            Response::error('Access denied', 403);
+        }
+
+        $input = json_decode(file_get_contents('php://input'), true) ?: [];
+        $permissionIds = $input['permission_ids'] ?? [];
+        if (!is_array($permissionIds)) {
+            $permissionIds = [];
+        }
+
+        try {
+            $db->beginTransaction();
+
+            // Fetch all permission IDs from system
+            $allPermIds = $db->query("SELECT permission_id FROM permissions")->fetchAll(PDO::FETCH_COLUMN) ?: [];
+
+            $delStmt = $db->prepare("DELETE FROM user_permissions WHERE user_id = :uid");
+            $delStmt->execute(['uid' => $targetUserId]);
+
+            if (!empty($allPermIds)) {
+                $insStmt = $db->prepare("INSERT INTO user_permissions (user_id, permission_id, granted, created_at) VALUES (:uid, :pid, :granted, NOW())");
+                foreach ($allPermIds as $pid) {
+                    $pidInt = (int)$pid;
+                    $isGranted = in_array($pidInt, $permissionIds, true) ? 1 : 0;
+                    $insStmt->execute([
+                        'uid' => $targetUserId,
+                        'pid' => $pidInt,
+                        'granted' => $isGranted
+                    ]);
+                }
+            }
+
+            $db->commit();
+            Response::json(['success' => true, 'message' => 'Permissions updated successfully']);
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
             Response::error("Failed to update permissions: " . $e->getMessage(), 500);
         }
     }

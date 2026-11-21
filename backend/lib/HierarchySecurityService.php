@@ -432,6 +432,9 @@ class HierarchySecurityService {
 
         // Level 0 has full authority
         if (self::getHierarchyLevel($user['role']) === 0 || $user['role'] === 'saas_admin') {
+            if (str_starts_with($permissionCode, 'hide_')) {
+                return false;
+            }
             return true;
         }
 
@@ -454,18 +457,21 @@ class HierarchySecurityService {
         $defaults = [
             self::ROLE_RESELLER => [
                 'can_create_customer', 'can_edit_customer', 'can_view_invoice', 
-                'can_recharge', 'can_manage_sub_tier', 'can_assign_package', 'can_transfer_balance'
+                'can_recharge', 'can_manage_sub_tier', 'can_assign_package', 'can_transfer_balance',
+                'can_export_data', 'can_send_sms', 'pppoe_manage', 'pppoe_disconnect', 'pppoe_bind_mac',
             ],
             self::ROLE_SUB_RESELLER => [
                 'can_create_customer', 'can_edit_customer', 'can_view_invoice', 
-                'can_recharge', 'can_manage_sub_tier', 'can_assign_package', 'can_transfer_balance'
+                'can_recharge', 'can_manage_sub_tier', 'can_assign_package', 'can_transfer_balance',
+                'can_export_data', 'can_send_sms', 'pppoe_manage', 'pppoe_disconnect', 'pppoe_bind_mac',
             ],
             self::ROLE_DEALER => [
                 'can_create_customer', 'can_edit_customer', 'can_view_invoice', 
-                'can_recharge', 'can_manage_sub_tier', 'can_assign_package', 'can_transfer_balance'
+                'can_recharge', 'can_manage_sub_tier', 'can_assign_package', 'can_transfer_balance',
+                'can_export_data', 'can_send_sms', 'pppoe_manage', 'pppoe_disconnect', 'pppoe_bind_mac',
             ],
             self::ROLE_AGENT => [
-                'can_create_customer', 'can_view_invoice', 'can_recharge'
+                'can_create_customer', 'can_view_invoice', 'can_recharge', 'can_send_sms',
             ],
         ];
 

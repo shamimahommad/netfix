@@ -57,6 +57,7 @@ import FinancialLedgerPage from './pages/FinancialLedgerPage';
 import ReconciliationReportPage from './pages/ReconciliationReportPage';
 import OnlineTransactionsPage from './pages/OnlineTransactionsPage';
 import MapPage from './pages/MapPage';
+import ActivityLogsPage from './pages/ActivityLogsPage';
 import PaymentCallbackPage from './pages/PaymentCallbackPage';
 import CustomerLoginPage from './pages/CustomerLoginPage';
 import CustomerDashboardPage from './pages/CustomerDashboardPage';
@@ -252,6 +253,9 @@ function AppContent() {
               <Route path="report/customer-payments" element={<CustomerPaymentsPage />} />
               <Route path="report/recharge-history" element={<RechargeHistoryPage />} />
               <Route path="report/invoices" element={<InvoicesReportPage />} />
+              <Route path="report/activity-logs" element={<ActivityLogsPage />} />
+              <Route path="activity-logs" element={<ActivityLogsPage />} />
+              <Route path="support/activity-log" element={<ActivityLogsPage />} />
               <Route
                 path="map"
                 element={

@@ -41,6 +41,32 @@ CREATE TABLE `access_profiles` (
   KEY `idx_profile_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `activity_logs`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `activity_logs` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) unsigned NOT NULL,
+  `user_id` bigint(20) unsigned DEFAULT NULL,
+  `log_type` enum('activity','login','client_task','plan_update') NOT NULL DEFAULT 'activity',
+  `action` varchar(100) NOT NULL,
+  `module` varchar(100) DEFAULT NULL,
+  `target_id` varchar(100) DEFAULT NULL,
+  `target_type` varchar(50) DEFAULT NULL,
+  `description` text DEFAULT NULL,
+  `metadata` longtext DEFAULT NULL,
+  `ip_address` varchar(45) DEFAULT NULL,
+  `user_agent` varchar(255) DEFAULT NULL,
+  `browser` varchar(100) DEFAULT NULL,
+  `platform` varchar(100) DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_act_tenant_type_created` (`tenant_id`,`log_type`,`created_at` DESC),
+  KEY `idx_act_tenant_user_created` (`tenant_id`,`user_id`,`created_at` DESC),
+  KEY `idx_act_tenant_action` (`tenant_id`,`action`),
+  KEY `idx_act_target` (`tenant_id`,`target_type`,`target_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `client_task_logs`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;

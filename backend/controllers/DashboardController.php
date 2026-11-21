@@ -55,6 +55,8 @@ class DashboardController {
         $stmt->execute($custParams);
         $t = $stmt->fetch() ?: [];
 
+        $hideSales = HierarchySecurityService::hasPermission($callerId, 'hide_dashboard_sales');
+
         Response::json([
             'totalCustomers' => (int)($c['total_customers'] ?? 0),
             'totalActive' => (int)($c['active_customers'] ?? 0),
@@ -65,15 +67,16 @@ class DashboardController {
             'expiredCustomers' => (int)($c['expired_customers'] ?? 0),
             'suspendedCustomers' => (int)($c['suspended_customers'] ?? 0),
             'leftCustomers' => (int)($c['left_customers'] ?? 0),
-            'todayCollection' => (float)($t['today_collection'] ?? 0),
-            'thisMonthCollection' => (float)($t['this_month_collection'] ?? 0),
-            'lastMonthCollection' => (float)($t['last_month_collection'] ?? 0),
+            'todayCollection' => $hideSales ? 0.0 : (float)($t['today_collection'] ?? 0),
+            'thisMonthCollection' => $hideSales ? 0.0 : (float)($t['this_month_collection'] ?? 0),
+            'lastMonthCollection' => $hideSales ? 0.0 : (float)($t['last_month_collection'] ?? 0),
             'hotspotTotal' => 0,
             'hotspotActive' => 0,
             'hotspotExpired' => 0,
-            'onlinePaymentToday' => (float)($t['online_today'] ?? 0),
-            'onlinePaymentThisMonth' => (float)($t['online_this_month'] ?? 0),
-            'onlinePaymentLastMonth' => (float)($t['online_last_month'] ?? 0),
+            'onlinePaymentToday' => $hideSales ? 0.0 : (float)($t['online_today'] ?? 0),
+            'onlinePaymentThisMonth' => $hideSales ? 0.0 : (float)($t['online_this_month'] ?? 0),
+            'onlinePaymentLastMonth' => $hideSales ? 0.0 : (float)($t['online_last_month'] ?? 0),
+            'isSalesHidden' => $hideSales,
         ]);
     }
 
@@ -180,38 +183,61 @@ class DashboardController {
         $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 15;
         $db = Database::getConnection();
 
+        // Ensure table exists & seed initial baseline logs if empty
+        require_once __DIR__ . '/ActivityLogsController.php';
+        ActivityLogsController::syncInitialLogsIfEmpty($db, (int)$tenantId);
+
         $callerId = (int)$user['user_id'];
         $role = strtolower($user['role'] ?? '');
         $isLevel0 = (HierarchySecurityService::getHierarchyLevel($role) === 0 || $role === 'saas_admin');
 
-        $where = ["t.tenant_id = :tid"];
+        $where = ["l.tenant_id = :tid"];
         $params = ['tid' => $tenantId];
 
+        // Downward Hierarchy Access Control:
+        // Level 0 (ISP Admin / Manager): Can see all activities within the tenant.
+        // Level > 0 (Reseller, Sub-Reseller, Dealer, Agent):
+        // Can ONLY see actions performed by themselves OR by their strictly subordinate downline users.
+        // Under no circumstances can a lower tier user see an upper tier's (Admin / parent) activity,
+        // nor any sibling/peer reseller's activities.
         if (!$isLevel0) {
             $rawPath = $user['hierarchy_path'] ?? "/{$callerId}/";
             $userPath = '/' . trim($rawPath, '/') . '/';
             $params['scope_uid'] = $callerId;
             $params['scope_path_wildcard'] = $userPath . '%';
-            $where[] = "(c.owner_id = :scope_uid OR u_owner.hierarchy_path LIKE :scope_path_wildcard OR c.owner_path LIKE :scope_path_wildcard OR t.initiator_user_id = :scope_uid OR t.collector_user_id = :scope_uid)";
+            $where[] = "(l.user_id = :scope_uid OR (u.hierarchy_path LIKE :scope_path_wildcard AND u.user_id != :scope_uid))";
         }
 
         $whereSql = implode(' AND ', $where);
 
         $stmt = $db->prepare("SELECT 
-            t.transaction_id as logId,
-            COALESCE(t.customer_id, 0) as customerId,
-            t.transaction_type as actionType,
-            CONCAT(t.transaction_type, ' - ৳', t.amount) as actionTitle,
-            t.description as actionDetails,
-            COALESCE(u.first_name, u.username, 'System') as performedByName,
-            t.initiator_role as performedByRole,
-            DATE_FORMAT(t.created_at, '%Y-%m-%dT%H:%i:%sZ') as createdAt
-            FROM transactions t
-            LEFT JOIN customers c ON c.customer_id = t.customer_id
-            LEFT JOIN users u_owner ON u_owner.user_id = c.owner_id
-            LEFT JOIN users u ON u.user_id = t.initiator_user_id
+            l.id as logId,
+            COALESCE(CAST(l.target_id AS UNSIGNED), 0) as customerId,
+            l.log_type as actionType,
+            CASE 
+                WHEN l.action = 'client_renew' THEN 'Subscription Renewed'
+                WHEN l.action = 'customer_onboard' THEN 'Customer Created'
+                WHEN l.action = 'user_login' THEN 'User Login'
+                WHEN l.action = 'extend_expiry_date' THEN 'Expiry Extended'
+                WHEN l.action = 'change_package' THEN 'Package Changed'
+                WHEN l.action = 'balance_transfer' THEN 'Balance Transferred'
+                WHEN l.action = 'bind_mac_address' THEN 'MAC Address Bound'
+                WHEN l.action = 'customer_delete' THEN 'Customer Deleted'
+                WHEN l.action = 'customer_left' THEN 'Marked as Left'
+                WHEN l.action = 'customer_reactivated' THEN 'Customer Reactivated'
+                WHEN l.action = 'pppoe_disconnect' THEN 'PPPoE Disconnected'
+                WHEN l.action = 'suspend_toggle' THEN 'Status Toggled'
+                WHEN l.action = 'payment_collected' THEN 'Payment Received'
+                ELSE REPLACE(CONCAT(UCASE(LEFT(l.action, 1)), SUBSTRING(l.action, 2)), '_', ' ')
+            END as actionTitle,
+            l.description as actionDetails,
+            COALESCE(NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), ''), u.username, 'System') as performedByName,
+            COALESCE(u.role, 'system') as performedByRole,
+            DATE_FORMAT(l.created_at, '%Y-%m-%dT%H:%i:%sZ') as createdAt
+            FROM activity_logs l
+            LEFT JOIN users u ON u.user_id = l.user_id
             WHERE {$whereSql}
-            ORDER BY t.created_at DESC
+            ORDER BY l.id DESC
             LIMIT :lim");
 
         foreach ($params as $k => $v) {
@@ -219,7 +245,7 @@ class DashboardController {
         }
         $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
         $stmt->execute();
-        $items = $stmt->fetchAll();
+        $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         Response::json([
             'success' => true,

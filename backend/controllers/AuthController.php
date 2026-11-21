@@ -110,13 +110,33 @@ class AuthController {
                 'browser' => $browser,
                 'os' => $os,
             ]);
+
+            require_once __DIR__ . '/../lib/ActivityLogger.php';
+            ActivityLogger::log([
+                'tenant_id' => $user['tenant_id'] ?? 1,
+                'user_id' => $user['user_id'],
+                'log_type' => 'login',
+                'action' => 'user_login',
+                'module' => 'auth',
+                'description' => "User {$user['username']} logged in via web portal",
+                'ip_address' => $ip,
+                'browser' => $browser,
+                'platform' => $os,
+            ]);
         } catch (Throwable $e) {}
 
-        // Resolve assigned server for non-admin downlines
+        // Resolve assigned server and permissions for user
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         $assignedServer = null;
         if ($userType !== 'saas' && !in_array(strtolower($user['role'] ?? ''), ['admin', 'isp_admin', 'manager', 'saas_admin'], true)) {
-            require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             $assignedServer = HierarchySecurityService::getAssignedServer((int)$user['user_id']);
+        }
+
+        $permCodesStmt = $db->query("SELECT permission_code FROM permissions");
+        $allPermCodes = $permCodesStmt ? $permCodesStmt->fetchAll(PDO::FETCH_COLUMN) : [];
+        $permissions = [];
+        foreach ($allPermCodes as $pCode) {
+            $permissions[$pCode] = HierarchySecurityService::hasPermission((int)$user['user_id'], $pCode);
         }
 
         Response::json([
@@ -131,6 +151,7 @@ class AuthController {
                 'role_code' => $user['role'],
                 'assigned_server_id' => $assignedServer ? $assignedServer['id'] : null,
                 'assigned_server_name' => $assignedServer ? $assignedServer['name'] : null,
+                'permissions' => $permissions,
             ],
             'redirect_url' => $userType === 'saas' ? '/saas/dashboard' : '/dashboard',
         ]);
@@ -255,19 +276,24 @@ class AuthController {
         $role = $user['role'] ?? '';
         $level = HierarchySecurityService::getHierarchyLevel($role);
 
-        // Fetch granular action permissions
-        $permCodes = [
-            'can_create_customer',
-            'can_edit_customer',
-            'can_delete_customer',
-            'can_view_invoice',
-            'can_recharge',
-            'can_manage_sub_tier',
-            'can_assign_package',
-            'can_transfer_balance'
-        ];
+        // Fetch all granular action permissions from permissions table
+        $permCodesStmt = $db->query("SELECT permission_code FROM permissions");
+        $allPermCodes = $permCodesStmt ? $permCodesStmt->fetchAll(PDO::FETCH_COLUMN) : [];
+        if (empty($allPermCodes)) {
+            $allPermCodes = [
+                'can_create_customer',
+                'can_edit_customer',
+                'can_delete_customer',
+                'can_view_invoice',
+                'can_recharge',
+                'can_partial_renew',
+                'can_manage_sub_tier',
+                'can_assign_package',
+                'can_transfer_balance'
+            ];
+        }
         $permissions = [];
-        foreach ($permCodes as $pCode) {
+        foreach ($allPermCodes as $pCode) {
             $permissions[$pCode] = HierarchySecurityService::hasPermission($uid, $pCode);
         }
 

@@ -36,6 +36,8 @@ require_once __DIR__ . '/controllers/CustomerPortalController.php';
 require_once __DIR__ . '/controllers/UsersController.php';
 require_once __DIR__ . '/controllers/SearchController.php';
 require_once __DIR__ . '/controllers/TaskLogsController.php';
+require_once __DIR__ . '/controllers/ActivityLogsController.php';
+require_once __DIR__ . '/lib/ActivityLogger.php';
 require_once __DIR__ . '/controllers/PublicTopupController.php';
 require_once __DIR__ . '/controllers/CompanyProfileController.php';
 require_once __DIR__ . '/controllers/SaaSPackagesController.php';
@@ -404,6 +406,12 @@ if ($method === 'GET' && preg_match('#^/resellers/([^/]+)/plan-permissions$#', $
 if ($method === 'PUT' && preg_match('#^/resellers/([^/]+)/plan-permissions$#', $uri, $m)) {
     ResellersController::putPlanPermissions($m[1]);
 }
+if ($method === 'GET' && preg_match('#^/resellers/([^/]+)/permissions$#', $uri, $m)) {
+    ResellersController::getPermissions($m[1]);
+}
+if ($method === 'PUT' && preg_match('#^/resellers/([^/]+)/permissions$#', $uri, $m)) {
+    ResellersController::putPermissions($m[1]);
+}
 if ($method === 'GET' && preg_match('#^/resellers/([^/]+)/ledger$#', $uri, $m)) {
     ResellersController::ledger($m[1]);
 }
@@ -737,6 +745,22 @@ if ($method === 'GET' && preg_match('#^/task-logs/customers/([^/]+)$#', $uri, $m
 }
 if ($method === 'GET' && $uri === '/task-logs/check') {
     TaskLogsController::check();
+}
+
+// ---------------------------------------------------------------------
+// ACTIVITY & AUDIT LOGS
+// ---------------------------------------------------------------------
+if ($method === 'GET' && $uri === '/activity-logs/stats') {
+    ActivityLogsController::stats();
+}
+if ($method === 'GET' && $uri === '/activity-logs/filters') {
+    ActivityLogsController::filters();
+}
+if ($method === 'GET' && ($uri === '/activity-logs' || $uri === '/activity-logs/list')) {
+    ActivityLogsController::list();
+}
+if ($method === 'GET' && preg_match('#^/activity-logs/detail/([^/]+)$#', $uri, $m)) {
+    ActivityLogsController::detail($m[1]);
 }
 
 // ---------------------------------------------------------------------

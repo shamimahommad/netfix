@@ -9,6 +9,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { searchService, SearchCustomerResult } from '@/services/search.service';
 import { formatCustomerIdDisplay } from '@/lib/formatCustomerId';
 import { smsService } from '@/services/sms.service';
+import { usePermissions } from '@/hooks/usePermissions';
 import axios, { CancelTokenSource } from 'axios';
 
 interface TopbarProps {
@@ -148,6 +149,7 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
     }
   }, [pageTitle]);
   const { user, balance, refreshMe, logout } = useAuthStore();
+  const { hideDashboardBalance, canSendSms } = usePermissions();
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [smsBalance, setSmsBalance] = useState<number | null>(null);
   const { theme, toggleTheme } = useTheme();
@@ -720,10 +722,12 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
             <span className="hidden sm:inline-flex items-center px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs sm:text-sm font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
               P{user.user_id}
             </span>
-            <span className="hidden sm:inline-flex items-center px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs sm:text-sm font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700" title="SMS credit balance">
-              SMS: {smsBalance != null ? smsBalance.toLocaleString('en-BD') : '—'}
-            </span>
-            {(userType === 'isp' || userType === 'tenant') && (
+            {canSendSms && (
+              <span className="hidden sm:inline-flex items-center px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs sm:text-sm font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700" title="SMS credit balance">
+                SMS: {smsBalance != null ? smsBalance.toLocaleString('en-BD') : '—'}
+              </span>
+            )}
+            {(userType === 'isp' || userType === 'tenant') && !hideDashboardBalance && (
               <>
                 <span className={`inline-flex items-center px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs sm:text-sm font-bold border ${
                   balance != null && balance < 0

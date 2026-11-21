@@ -44,6 +44,15 @@ export interface CustomerViewProps {
   formatTraffic: (bytes: number | string | null | undefined) => string;
   getAccountStatusBadgeClass: (status: any) => string;
   getBillingStatusBadgeClass: (status: any) => string;
+  hideCustomerPassword?: boolean;
+  canCollectPayment?: boolean;
+  canRecharge?: boolean;
+  canChangePackage?: boolean;
+  canDeleteCustomer?: boolean;
+  canViewInvoice?: boolean;
+  canSendSms?: boolean;
+  pppoeDisconnect?: boolean;
+  pppoeBindMac?: boolean;
 }
 
 // Classic SVG Icons
@@ -244,6 +253,15 @@ export default function ClassicCustomerView(props: CustomerViewProps) {
     formatTraffic,
     getAccountStatusBadgeClass,
     getBillingStatusBadgeClass,
+    hideCustomerPassword,
+    canCollectPayment,
+    canRecharge,
+    canChangePackage,
+    canDeleteCustomer,
+    canViewInvoice,
+    canSendSms,
+    pppoeDisconnect,
+    pppoeBindMac,
   } = props;
 
   const { customer, billing, network, onu } = customerData;
@@ -494,7 +512,8 @@ export default function ClassicCustomerView(props: CustomerViewProps) {
               <div className="pt-3 border-t border-sky-200/60 dark:border-slate-600 mt-3 grid grid-cols-3 gap-1 sm:gap-2">
                 <button
                   onClick={onCash}
-                  disabled={billing.billingStatus === 'Left'}
+                  disabled={billing.billingStatus === 'Left' || canCollectPayment === false}
+                  title={canCollectPayment === false ? 'No permission to collect payments' : undefined}
                   className="flex items-center justify-center gap-1 sm:gap-2 px-1.5 py-1.5 sm:px-3 sm:py-2.5 bg-teal-500 hover:bg-teal-600 dark:bg-teal-600 dark:hover:bg-teal-500 text-white rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg shadow-md disabled:opacity-50 min-w-0"
                 >
                   <CurrencyDollarIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
@@ -502,7 +521,8 @@ export default function ClassicCustomerView(props: CustomerViewProps) {
                 </button>
                 <button
                   onClick={onRenew}
-                  disabled={billing.billingStatus === 'Left'}
+                  disabled={billing.billingStatus === 'Left' || canRecharge === false}
+                  title={canRecharge === false ? 'No permission to recharge subscriptions' : undefined}
                   className="flex items-center justify-center gap-1 sm:gap-2 px-1.5 py-1.5 sm:px-3 sm:py-2.5 bg-sky-500 hover:bg-sky-600 dark:bg-teal-600 dark:hover:bg-teal-500 text-white rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg shadow-md disabled:opacity-50 min-w-0"
                 >
                   <CalendarIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
@@ -510,8 +530,8 @@ export default function ClassicCustomerView(props: CustomerViewProps) {
                 </button>
                 <button
                   onClick={onMigrate}
-                  disabled={billing.billingStatus !== 'Expired'}
-                  title={billing.billingStatus !== 'Expired' ? 'Only expired customers can migrate' : undefined}
+                  disabled={billing.billingStatus !== 'Expired' || canChangePackage === false}
+                  title={canChangePackage === false ? 'No permission to change packages' : (billing.billingStatus !== 'Expired' ? 'Only expired customers can migrate' : undefined)}
                   className="flex items-center justify-center gap-1 sm:gap-2 px-1.5 py-1.5 sm:px-3 sm:py-2.5 bg-amber-500 hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500 text-white rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed min-w-0"
                 >
                   <DocumentTextIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
@@ -532,14 +552,17 @@ export default function ClassicCustomerView(props: CustomerViewProps) {
                 </button>
                 <button
                   onClick={onInvoices}
-                  className="flex items-center justify-center gap-1 sm:gap-2 px-1.5 py-1.5 sm:px-3 sm:py-2.5 bg-sky-600 hover:bg-sky-700 dark:bg-teal-600 dark:hover:bg-teal-500 text-white rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg shadow-md min-w-0"
+                  disabled={canViewInvoice === false}
+                  title={canViewInvoice === false ? 'No permission to view invoices' : undefined}
+                  className="flex items-center justify-center gap-1 sm:gap-2 px-1.5 py-1.5 sm:px-3 sm:py-2.5 bg-sky-600 hover:bg-sky-700 dark:bg-teal-600 dark:hover:bg-teal-500 text-white rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg shadow-md disabled:opacity-50 min-w-0"
                 >
                   <DocumentTextIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
                   <span className="truncate">Invoices</span>
                 </button>
                 <button
                   onClick={onMarkLeftActivate}
-                  disabled={isMarkingLeft || isActivating || (isLeft ? network.protocolType !== 'pppoe' : false)}
+                  disabled={isMarkingLeft || isActivating || canDeleteCustomer === false || (isLeft ? network.protocolType !== 'pppoe' : false)}
+                  title={canDeleteCustomer === false ? 'No permission to cancel or mark customer left' : undefined}
                   className={`flex items-center justify-center gap-1 sm:gap-2 px-1.5 py-1.5 sm:px-3 sm:py-2.5 rounded-lg sm:rounded-xl text-xs sm:text-sm font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 min-w-0 ${
                     isLeft ? 'bg-teal-500 hover:bg-teal-600 dark:bg-teal-600 dark:hover:bg-teal-500 text-white' : 'bg-amber-500 hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500 text-white'
                   }`}
@@ -566,7 +589,7 @@ export default function ClassicCustomerView(props: CustomerViewProps) {
             <div className="space-y-2">
               <InfoRow label="Server" value={network.serverName || '—'} />
               <InfoRow label="Username" value={network.username || '—'} />
-              <InfoRow label="Password" value={network.password || '—'} />
+              <InfoRow label="Password" value={hideCustomerPassword || (network as any)?.isPasswordHidden ? '••••••••' : (network.password || '—')} />
               <InfoRow label="Save Mac" value={network.macAddress || '—'} />
               <InfoRow 
                 label="Device/Vendor" 

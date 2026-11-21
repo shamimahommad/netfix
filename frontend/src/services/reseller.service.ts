@@ -94,6 +94,26 @@ export interface ListResellersParams {
   serverId?: string;
 }
 
+export interface PermissionItem {
+  permission_id: number;
+  permission_code: string;
+  name: string;
+  category: string;
+  description: string;
+  granted: boolean;
+}
+
+export interface UserPermissionsResponse {
+  success: boolean;
+  user: {
+    userId: string;
+    username: string;
+    name: string;
+    role: string;
+  };
+  permissions: PermissionItem[];
+}
+
 export interface CreateResellerPayload {
   name: string;
   username: string;
@@ -421,6 +441,22 @@ export const resellerService = {
 
   async assignPackage(payload: AssignPackagePayload): Promise<any> {
     const res = await api.post('/reseller/assign_package', payload);
+    return res.data;
+  },
+
+  async getPermissions(userId: string | number): Promise<UserPermissionsResponse> {
+    const res = await api.get<UserPermissionsResponse>(`/resellers/${userId}/permissions`);
+    return res.data;
+  },
+
+  async updatePermissions(
+    userId: string | number,
+    permissionIds: number[]
+  ): Promise<{ success: boolean; message?: string }> {
+    const res = await api.put<{ success: boolean; message?: string }>(
+      `/resellers/${userId}/permissions`,
+      { permission_ids: permissionIds }
+    );
     return res.data;
   },
 };

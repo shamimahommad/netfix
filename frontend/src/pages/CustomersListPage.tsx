@@ -20,6 +20,7 @@ import { openLeftCustomerModal } from '@/lib/leftCustomerModal';
 import { openDeleteCustomerModal } from '@/lib/deleteCustomerModal';
 import ModernCheckbox from '@/components/common/ModernCheckbox';
 import { useAuthStore } from '@/stores/authStore';
+import { usePermissions } from '@/hooks/usePermissions';
 
 const statusOptions = [
   { value: '', label: 'All Status' },
@@ -86,6 +87,18 @@ export default function CustomersListPage() {
   const [searchParams] = useSearchParams();
   const toast = useToastContext();
   const { user } = useAuthStore();
+  const {
+    canCreateCustomer,
+    canEditCustomer,
+    canDeleteCustomer,
+    canExtendDate,
+    canChangePackage,
+    canChangeZone,
+    canRecharge,
+    canPartialRenew,
+    canExportData,
+    canSendSms,
+  } = usePermissions();
   const isAdmin = user?.role_code === 'admin' || user?.role_code === 'isp_admin';
   const isIspAdminOrManager = ['isp_admin', 'admin', 'manager', 'tenant_admin', 'saas_admin', 'super_admin'].includes(
     (user?.role_code || (user as any)?.role || '').toLowerCase()
@@ -244,14 +257,25 @@ export default function CustomersListPage() {
   };
 
   const handleBulkRenew = () => {
+    if (!canRecharge) {
+      toast.error('Permission denied: You do not have permission to recharge customers');
+      return;
+    }
     if (selectedCustomers.size === 0) {
       toast.error('Please select customers to renew');
       return;
+    }
+    if (!canPartialRenew) {
+      setBulkRenewDuration('full_month');
     }
     setIsBulkRenewModalOpen(true);
   };
 
   const handleBulkSMS = () => {
+    if (!canSendSms) {
+      toast.error('Permission denied: You do not have permission to send SMS');
+      return;
+    }
     if (selectedCustomers.size === 0) {
       toast.error('Please select customers to send SMS');
       return;
@@ -261,6 +285,10 @@ export default function CustomersListPage() {
 
   const handleQuickRenew = (customerId: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!canRecharge) {
+      toast.error('Permission denied: You do not have permission to recharge customers');
+      return;
+    }
     setOpenActionMenu(null);
     navigate(`/dashboard/customers/view/${customerId}`, { state: { openRenew: true } });
   };
@@ -268,21 +296,23 @@ export default function CustomersListPage() {
   const moreMenuItems = [
     'Suspend / Restore',
     ...(isIspAdminOrManager ? ['Transfer to Reseller'] : []),
-    'Change Area',
-    'Change Customer Type',
-    'Change Billing Type',
+    ...(canChangeZone ? ['Change Area'] : []),
+    ...(canEditCustomer ? ['Change Customer Type', 'Change Billing Type'] : []),
     ...(isAdmin ? ['Change Server'] : []),
-    'Change Package',
-    'Advance Renew',
-    'Change Expiry Date',
+    ...(canChangePackage ? ['Change Package'] : []),
+    ...(canRecharge ? ['Advance Renew'] : []),
+    ...(canExtendDate ? ['Change Expiry Date'] : []),
     'BTRC Report',
-    'Export',
-    'Left Customer',
-    'Delete Customer',
+    ...(canExportData ? ['Export'] : []),
+    ...(canDeleteCustomer ? ['Left Customer', 'Delete Customer'] : []),
   ];
 
   const handleMoreMenuAction = async (action: string) => {
     if (action === 'Export') {
+      if (!canExportData) {
+        toast.error('Permission denied: You do not have permission to export data');
+        return;
+      }
       setShowExportSubmenu(true);
       return;
     }
@@ -624,6 +654,10 @@ export default function CustomersListPage() {
   };
 
   const handleExportOption = async (option: 'Copy' | 'Excel' | 'CSV' | 'PDF' | 'Print') => {
+    if (!canExportData) {
+      toast.error('Permission denied: You do not have permission to export data');
+      return;
+    }
     if (selectedCustomers.size === 0) {
       toast.error('Please select customers first');
       return;
@@ -863,7 +897,7 @@ export default function CustomersListPage() {
                 ? 'Try adjusting your search or filter criteria'
                 : 'Get started by adding your first customer'}
             </p>
-            {!search && !statusFilter && (
+            {!search && !statusFilter && canCreateCustomer && (
               <button
                 onClick={() => {
                   if (!selectedTenant) {
@@ -1114,7 +1148,10 @@ export default function CustomersListPage() {
                 onChange={(e) => setBulkRenewDuration(e.target.value)}
                 className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               >
-                {BULK_RENEW_OPTIONS.map((opt) => (
+                {(canPartialRenew
+                  ? BULK_RENEW_OPTIONS
+                  : BULK_RENEW_OPTIONS.filter((opt) => opt.value === 'full_month')
+                ).map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>

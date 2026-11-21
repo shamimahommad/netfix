@@ -1403,6 +1403,8 @@ class NetworkController {
 
     public static function activeSessions(?string $serverIdParam = null): void {
         $user = AuthMiddleware::requireAuth();
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        HierarchySecurityService::requirePermission((int)$user['user_id'], 'pppoe_manage');
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
@@ -1859,6 +1861,8 @@ class NetworkController {
 
     public static function pppoeLogs(): void {
         $user = AuthMiddleware::requireAuth();
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        HierarchySecurityService::requirePermission((int)$user['user_id'], 'pppoe_manage');
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
@@ -2422,6 +2426,8 @@ class NetworkController {
 
     public static function mikrotikImportPreview(): void {
         $user = AuthMiddleware::requireAuth();
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_import_customers');
         self::requireAdminOrCompanyRole($user);
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
@@ -2569,6 +2575,8 @@ class NetworkController {
 
     public static function mikrotikImportConfirm(): void {
         $user = AuthMiddleware::requireAuth();
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_import_customers');
         self::requireAdminOrCompanyRole($user);
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];

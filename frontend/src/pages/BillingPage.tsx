@@ -22,6 +22,7 @@ import { customersService } from '@/services/customers.service';
 import { smsService } from '@/services/sms.service';
 import ModernCheckbox from '@/components/common/ModernCheckbox';
 import { useAuthStore } from '@/stores/authStore';
+import { usePermissions } from '@/hooks/usePermissions';
 // page header and metrics integrated directly
 import { Users, Receipt, CreditCard, AlertCircle } from 'lucide-react';
 
@@ -208,6 +209,19 @@ export default function BillingPage() {
   const toast = useToastContext();
   const { theme, toggleTheme } = useTheme();
   const { user } = useAuthStore();
+  const {
+    canEditCustomer,
+    canDeleteCustomer,
+    canExtendDate,
+    canChangePackage,
+    canChangeZone,
+    canRecharge,
+    canPartialRenew,
+    canExportData,
+    canSendSms,
+    canCollectPayment,
+    hideCustomerPassword,
+  } = usePermissions();
   const isAdmin = user?.role_code === 'admin' || user?.role_code === 'isp_admin';
   const isIspAdminOrManager = ['isp_admin', 'admin', 'manager', 'tenant_admin', 'saas_admin', 'super_admin'].includes(
     (user?.role_code || (user as any)?.role || '').toLowerCase()
@@ -262,13 +276,17 @@ export default function BillingPage() {
 
   const BULK_RENEW_OPTIONS = [
     { value: 'full_month', label: 'Full Month' },
-    { value: '20', label: '20 Days' },
-    { value: '15', label: '15 Days' },
-    { value: '10', label: '10 Days' },
-    { value: '7', label: '7 Days' },
-    { value: '5', label: '5 Days' },
-    { value: '3', label: '3 Days' },
-    { value: '1', label: '1 Day' },
+    ...(canPartialRenew
+      ? [
+          { value: '20', label: '20 Days' },
+          { value: '15', label: '15 Days' },
+          { value: '10', label: '10 Days' },
+          { value: '7', label: '7 Days' },
+          { value: '5', label: '5 Days' },
+          { value: '3', label: '3 Days' },
+          { value: '1', label: '1 Day' },
+        ]
+      : []),
   ];
 
   // Update search from URL params
@@ -295,21 +313,23 @@ export default function BillingPage() {
   const moreMenuItems = [
     'Suspend / Restore',
     ...(isIspAdminOrManager ? ['Transfer to Reseller'] : []),
-    'Change Area',
-    'Change Customer Type',
-    'Change Billing Type',
+    ...(canChangeZone ? ['Change Area'] : []),
+    ...(canEditCustomer ? ['Change Customer Type', 'Change Billing Type'] : []),
     ...(isAdmin ? ['Change Server'] : []),
-    'Change Package',
-    'Advance Renew',
-    'Change Expiry Date',
+    ...(canChangePackage ? ['Change Package'] : []),
+    ...(canRecharge ? ['Advance Renew'] : []),
+    ...(canExtendDate ? ['Change Expiry Date'] : []),
     'BTRC Report',
-    'Export',
-    'Left Customer',
-    'Delete Customer',
+    ...(canExportData ? ['Export'] : []),
+    ...(canDeleteCustomer ? ['Left Customer', 'Delete Customer'] : []),
   ];
 
   const handleMoreMenuAction = async (action: string) => {
     if (action === 'Export') {
+      if (!canExportData) {
+        toast.error('Permission denied: You cannot export data');
+        return;
+      }
       setShowExportSubmenu(true);
       return;
     }
@@ -831,6 +851,10 @@ export default function BillingPage() {
   };
 
   const handleExportOption = async (option: 'Copy' | 'Excel' | 'CSV' | 'PDF' | 'Print') => {
+    if (!canExportData) {
+      toast.error('Permission denied: You cannot export data');
+      return;
+    }
     if (selectedCustomers.size === 0) {
       toast.error('Please select customers first');
       return;
@@ -1195,28 +1219,32 @@ export default function BillingPage() {
 
             {/* Bulk Actions */}
             <div className="flex flex-wrap gap-2 items-center shrink-0">
-              <button
-                type="button"
-                onClick={() => selectedCustomers.size > 0 && setIsBulkRenewModalOpen(true)}
-                disabled={selectedCustomers.size === 0}
-                className="px-3 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-xs flex items-center gap-1.5"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Bulk Renew
-              </button>
-              <button
-                type="button"
-                onClick={() => toast.info('Bulk SMS (not implemented)')}
-                disabled={selectedCustomers.size === 0}
-                className="px-3 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-xs flex items-center gap-1.5"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
-                Bulk SMS
-              </button>
+              {canRecharge && (
+                <button
+                  type="button"
+                  onClick={() => selectedCustomers.size > 0 && setIsBulkRenewModalOpen(true)}
+                  disabled={selectedCustomers.size === 0}
+                  className="px-3 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-xs flex items-center gap-1.5"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  Bulk Renew
+                </button>
+              )}
+              {canSendSms && (
+                <button
+                  type="button"
+                  onClick={() => toast.info('Bulk SMS (not implemented)')}
+                  disabled={selectedCustomers.size === 0}
+                  className="px-3 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-xs flex items-center gap-1.5"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                  Bulk SMS
+                </button>
+              )}
               <button
                 type="button"
                 ref={moreMenuButtonRef}
@@ -1793,101 +1821,111 @@ export default function BillingPage() {
           }}
         >
           {/* 1. Recharge Balance */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              const cust = actionMenuPosition.customer;
-              const id = cust.customerId || cust.customer_id;
-              setOpenActionMenu(null);
-              setActionMenuPosition(null);
-              navigate(`/dashboard/customers/view/${id}`, { state: { openRecharge: true } });
-            }}
-            className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
-          >
-            <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="7" width="20" height="14" rx="2" />
-              <path d="M16 14h.01" />
-              <path d="M6 3v4M4 5h4" />
-            </svg>
-            <span className="font-normal">Recharge Balance</span>
-          </button>
+          {canCollectPayment && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                const cust = actionMenuPosition.customer;
+                const id = cust.customerId || cust.customer_id;
+                setOpenActionMenu(null);
+                setActionMenuPosition(null);
+                navigate(`/dashboard/customers/view/${id}`, { state: { openRecharge: true } });
+              }}
+              className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+            >
+              <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="7" width="20" height="14" rx="2" />
+                <path d="M16 14h.01" />
+                <path d="M6 3v4M4 5h4" />
+              </svg>
+              <span className="font-normal">Recharge Balance</span>
+            </button>
+          )}
 
           {/* 2. Renew */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              const cust = actionMenuPosition.customer;
-              const id = cust.customerId || cust.customer_id;
-              setOpenActionMenu(null);
-              setActionMenuPosition(null);
-              navigate(`/dashboard/customers/view/${id}`, { state: { openRenew: true } });
-            }}
-            className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
-          >
-            <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4m-4 4a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" />
-            </svg>
-            <span className="font-normal">Renew</span>
-          </button>
+          {canRecharge && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                const cust = actionMenuPosition.customer;
+                const id = cust.customerId || cust.customer_id;
+                setOpenActionMenu(null);
+                setActionMenuPosition(null);
+                navigate(`/dashboard/customers/view/${id}`, { state: { openRenew: true } });
+              }}
+              className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+            >
+              <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4m-4 4a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" />
+              </svg>
+              <span className="font-normal">Renew</span>
+            </button>
+          )}
 
           {/* 3. Show Password */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              const cust = actionMenuPosition.customer;
-              setPasswordModalCustomer(cust);
-              setOpenActionMenu(null);
-              setActionMenuPosition(null);
-            }}
-            className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
-          >
-            <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clipRule="evenodd" />
-            </svg>
-            <span className="font-normal">Show Password</span>
-          </button>
+          {!hideCustomerPassword && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                const cust = actionMenuPosition.customer;
+                setPasswordModalCustomer(cust);
+                setOpenActionMenu(null);
+                setActionMenuPosition(null);
+              }}
+              className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+            >
+              <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clipRule="evenodd" />
+              </svg>
+              <span className="font-normal">Show Password</span>
+            </button>
+          )}
 
           {/* 4. Send Info */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              const cust = actionMenuPosition.customer;
-              const user = cust.username || cust.customerCode || cust.customer_code || cust.customerId || '';
-              const pwd = cust.password || cust.network?.password || 'pass123';
-              const pkg = cust.packageName || cust.package_name || cust.package?.name || '';
-              const exp = cust.expiryDate || cust.expiry_date || '';
-              const name = cust.fullName || cust.full_name || cust.name || 'Customer';
-              const msg = `Dear ${name},\nYour Internet Info:\nUser: ${user}\nPassword: ${pwd}${pkg ? `\nPackage: ${pkg}` : ''}${exp ? `\nExpire: ${exp}` : ''}\nThank you!`;
-              setSendInfoCustomer(cust);
-              setSendInfoMessage(msg);
-              setOpenActionMenu(null);
-              setActionMenuPosition(null);
-            }}
-            className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
-          >
-            <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-            </svg>
-            <span className="font-normal">Send Info</span>
-          </button>
+          {canSendSms && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                const cust = actionMenuPosition.customer;
+                const user = cust.username || cust.customerCode || cust.customer_code || cust.customerId || '';
+                const pwd = hideCustomerPassword ? '••••••••' : (cust.password || cust.network?.password || 'pass123');
+                const pkg = cust.packageName || cust.package_name || cust.package?.name || '';
+                const exp = cust.expiryDate || cust.expiry_date || '';
+                const name = cust.fullName || cust.full_name || cust.name || 'Customer';
+                const msg = `Dear ${name},\nYour Internet Info:\nUser: ${user}\nPassword: ${pwd}${pkg ? `\nPackage: ${pkg}` : ''}${exp ? `\nExpire: ${exp}` : ''}\nThank you!`;
+                setSendInfoCustomer(cust);
+                setSendInfoMessage(msg);
+                setOpenActionMenu(null);
+                setActionMenuPosition(null);
+              }}
+              className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+            >
+              <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+              </svg>
+              <span className="font-normal">Send Info</span>
+            </button>
+          )}
 
           {/* 5. Edit */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              const cust = actionMenuPosition.customer;
-              const id = cust.customerId || cust.customer_id;
-              setOpenActionMenu(null);
-              setActionMenuPosition(null);
-              navigate(`/dashboard/customers/edit/${id}`);
-            }}
-            className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
-          >
-            <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-            </svg>
-            <span className="font-normal">Edit</span>
-          </button>
+          {canEditCustomer && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                const cust = actionMenuPosition.customer;
+                const id = cust.customerId || cust.customer_id;
+                setOpenActionMenu(null);
+                setActionMenuPosition(null);
+                navigate(`/dashboard/customers/edit/${id}`);
+              }}
+              className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors flex items-center gap-3.5 group cursor-pointer"
+            >
+              <svg className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+              </svg>
+              <span className="font-normal">Edit</span>
+            </button>
+          )}
 
           {/* 6. Copy Payment Link */}
           <button
@@ -1947,21 +1985,23 @@ export default function BillingPage() {
                 <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Password</label>
                 <div className="flex items-center gap-2">
                   <div className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-lg text-sm font-mono font-semibold text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700">
-                    {passwordModalCustomer.password || passwordModalCustomer.network?.password || 'pass123'}
+                    {hideCustomerPassword ? '••••••••' : (passwordModalCustomer.password || passwordModalCustomer.network?.password || 'pass123')}
                   </div>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(passwordModalCustomer.password || passwordModalCustomer.network?.password || 'pass123');
-                      toast.success('Password copied to clipboard!');
-                    }}
-                    className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                      <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
-                      <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
-                    </svg>
-                    Copy
-                  </button>
+                  {!hideCustomerPassword && (
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(passwordModalCustomer.password || passwordModalCustomer.network?.password || 'pass123');
+                        toast.success('Password copied to clipboard!');
+                      }}
+                      className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
+                        <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
+                      </svg>
+                      Copy
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

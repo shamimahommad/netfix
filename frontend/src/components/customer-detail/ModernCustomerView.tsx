@@ -80,6 +80,15 @@ export default function ModernCustomerView(props: CustomerViewProps) {
     formatTraffic,
     getAccountStatusBadgeClass,
     getBillingStatusBadgeClass,
+    hideCustomerPassword,
+    canCollectPayment,
+    canRecharge,
+    canChangePackage,
+    canDeleteCustomer,
+    canViewInvoice,
+    canSendSms,
+    pppoeDisconnect,
+    pppoeBindMac,
   } = props;
 
   const { customer, billing, network, onu } = customerData;
@@ -360,7 +369,8 @@ export default function ModernCustomerView(props: CustomerViewProps) {
           <button
             type="button"
             onClick={onCash}
-            disabled={billing.billingStatus === 'Left'}
+            disabled={billing.billingStatus === 'Left' || canCollectPayment === false}
+            title={canCollectPayment === false ? 'No permission to collect payments' : undefined}
             className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold bg-teal-500 hover:bg-teal-600 dark:bg-teal-600 dark:hover:bg-teal-500 text-white shadow-md transition-all active:scale-95 disabled:opacity-50"
           >
             <DollarSign className="w-4 h-4 flex-shrink-0" />
@@ -371,7 +381,8 @@ export default function ModernCustomerView(props: CustomerViewProps) {
           <button
             type="button"
             onClick={onRenew}
-            disabled={billing.billingStatus === 'Left'}
+            disabled={billing.billingStatus === 'Left' || canRecharge === false}
+            title={canRecharge === false ? 'No permission to recharge subscriptions' : undefined}
             className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold bg-sky-500 hover:bg-sky-600 dark:bg-teal-600 dark:hover:bg-teal-500 text-white shadow-md transition-all active:scale-95 disabled:opacity-50"
           >
             <RefreshCw className="w-4 h-4 flex-shrink-0" />
@@ -382,8 +393,8 @@ export default function ModernCustomerView(props: CustomerViewProps) {
           <button
             type="button"
             onClick={onMigrate}
-            disabled={billing.billingStatus !== 'Expired'}
-            title={billing.billingStatus !== 'Expired' ? 'Only expired customers can migrate' : 'Change subscriber package plan'}
+            disabled={billing.billingStatus !== 'Expired' || canChangePackage === false}
+            title={canChangePackage === false ? 'No permission to change packages' : (billing.billingStatus !== 'Expired' ? 'Only expired customers can migrate' : 'Change subscriber package plan')}
             className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500 text-white shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Receipt className="w-4 h-4 flex-shrink-0" />
@@ -394,7 +405,9 @@ export default function ModernCustomerView(props: CustomerViewProps) {
           <button
             type="button"
             onClick={onInvoices}
-            className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-700 dark:bg-teal-600 dark:hover:bg-teal-500 text-white shadow-md transition-all active:scale-95"
+            disabled={canViewInvoice === false}
+            title={canViewInvoice === false ? 'No permission to view invoices' : undefined}
+            className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-700 dark:bg-teal-600 dark:hover:bg-teal-500 text-white shadow-md transition-all active:scale-95 disabled:opacity-50"
           >
             <FileText className="w-4 h-4 flex-shrink-0" />
             <span>Invoices</span>
@@ -420,7 +433,8 @@ export default function ModernCustomerView(props: CustomerViewProps) {
           <button
             type="button"
             onClick={onMarkLeftActivate}
-            disabled={isMarkingLeft || isActivating || (isLeft ? network.protocolType !== 'pppoe' : false)}
+            disabled={isMarkingLeft || isActivating || canDeleteCustomer === false || (isLeft ? network.protocolType !== 'pppoe' : false)}
+            title={canDeleteCustomer === false ? 'No permission to cancel or mark customer left' : undefined}
             className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold shadow-md transition-all active:scale-95 disabled:opacity-50 ${
               isLeft
                 ? 'bg-teal-500 hover:bg-teal-600 dark:bg-teal-600 dark:hover:bg-teal-500 text-white'
@@ -737,23 +751,27 @@ export default function ModernCustomerView(props: CustomerViewProps) {
                 <span className="text-slate-500 dark:text-slate-400 font-medium">PPPoE Password</span>
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-slate-900 dark:text-slate-100">
-                    {showPassword ? (network.password || '—') : '••••••••'}
+                    {hideCustomerPassword || (network as any)?.isPasswordHidden ? '••••••••' : (showPassword ? (network.password || '—') : '••••••••')}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="text-slate-400 hover:text-slate-600"
-                  >
-                    {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                  </button>
-                  {network.password && (
-                    <button
-                      type="button"
-                      onClick={() => onCopy(network.password!)}
-                      className="text-slate-400 hover:text-slate-600 p-0.5"
-                    >
-                      {copiedMac === network.password ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
-                    </button>
+                  {!(hideCustomerPassword || (network as any)?.isPasswordHidden) && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="text-slate-400 hover:text-slate-600"
+                      >
+                        {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                      {network.password && (
+                        <button
+                          type="button"
+                          onClick={() => onCopy(network.password!)}
+                          className="text-slate-400 hover:text-slate-600 p-0.5"
+                        >
+                          {copiedMac === network.password ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>

@@ -3,6 +3,7 @@ import AppLayout, { SidebarItem } from './AppLayout';
 import TenantLayoutWrapper from './TenantLayoutWrapper';
 import { useFeatureAvailability } from '@/hooks/useTenantSettings';
 import { useAuthStore } from '@/stores/authStore';
+import { usePermissions } from '@/hooks/usePermissions';
 import {
   DashboardIcon,
   CustomersIcon,
@@ -10,7 +11,6 @@ import {
   NetworkIcon,
   SettingsIcon,
   SMSIcon,
-  AreaIcon,
   ResellerIcon,
   ReportIcon,
   SupportIcon,
@@ -57,6 +57,13 @@ function isIspAdminRole(roleCode: string | undefined, userType?: string): boolea
 export default function TenantLayout() {
   const { isMapEnabled, isMonitoringEnabled, isSmsEnabled } = useFeatureAvailability();
   const { user } = useAuthStore();
+  const {
+    canCreateCustomer,
+    canViewInvoice,
+    canManageSubTier,
+    canSendSms,
+    pppoeManage,
+  } = usePermissions();
   const resellerLabels = getResellerMenuLabels(user?.role_code);
 
   const sidebarItems: SidebarItem[] = useMemo(() => {
@@ -77,7 +84,7 @@ export default function TenantLayout() {
         icon: <DashboardIcon />,
         submenu: [
           { label: 'Overview', path: '/dashboard' },
-          { label: 'PPPoE Logs', path: '/dashboard/pppoe-logs' },
+          ...(pppoeManage ? [{ label: 'PPPoE Logs', path: '/dashboard/pppoe-logs' }] : []),
         ],
       },
       {
@@ -85,7 +92,7 @@ export default function TenantLayout() {
         icon: <CustomersIcon />,
         submenu: [
           { label: 'All Customers', path: '/dashboard/customers/all' },
-          { label: 'Add Customer', path: '/dashboard/customers/add' },
+          ...(canCreateCustomer ? [{ label: 'Add Customer', path: '/dashboard/customers/add' }] : []),
           { label: 'Online Customers', path: '/dashboard/customers/online' },
           { label: 'Offline Customers', path: '/dashboard/customers/offline' },
           { label: 'Suspended Customers', path: '/dashboard/customers/suspended' },
@@ -112,14 +119,6 @@ export default function TenantLayout() {
         path: '/dashboard/my-packages',
       },
       {
-        label: 'Service Area',
-        icon: <AreaIcon />,
-        submenu: [
-          { label: 'Area', path: '/dashboard/service-area/areas' },
-          { label: 'Sub Area', path: '/dashboard/service-area/sub-areas' },
-        ],
-      },
-      {
         label: 'Hotspot',
         icon: <HotspotIcon />,
         submenu: [
@@ -134,8 +133,8 @@ export default function TenantLayout() {
 
     const isAgent = (user?.role_code ?? '').toLowerCase() === 'agent';
 
-    // Reseller menu: not shown for agent
-    if (!isAgent) {
+    // Reseller menu: not shown for agent and only if has permission can_manage_sub_tier
+    if (!isAgent && canManageSubTier) {
       items.push({
         label: resellerLabels.menu,
         icon: <ResellerIcon />,
@@ -166,22 +165,25 @@ export default function TenantLayout() {
           { label: 'Merchant Payments', path: '/dashboard/report/merchant-payments' },
           { label: 'Customer Payments', path: '/dashboard/report/customer-payments' },
           { label: 'Recharge History', path: '/dashboard/report/recharge-history' },
-          { label: 'Invoices', path: '/dashboard/report/invoices' },
+          ...(canViewInvoice ? [{ label: 'Invoices', path: '/dashboard/report/invoices' }] : []),
+          { label: 'Activity Logs', path: '/dashboard/activity-logs' },
         ],
       },
     );
 
-    // Only show Map menu if enabled
-    if (isMapEnabled) {
-      items.push({
-        label: 'Map',
-        icon: <MapIcon />,
-        path: '/dashboard/map',
-      });
-    }
+    // Map menu: includes Customer Map (if enabled) along with Area & Sub Area
+    items.push({
+      label: 'Map',
+      icon: <MapIcon />,
+      submenu: [
+        ...(isMapEnabled ? [{ label: 'Customer Map', path: '/dashboard/map' }] : []),
+        { label: 'Area', path: '/dashboard/service-area/areas' },
+        { label: 'Sub Area', path: '/dashboard/service-area/sub-areas' },
+      ],
+    });
 
-    // SMS Module: Directly above Support
-    if (!isAgent && isSmsEnabled !== false) {
+    // SMS Module: Directly above Support (if enabled and caller has can_send_sms permission)
+    if (!isAgent && isSmsEnabled !== false && canSendSms) {
       items.push({
         label: 'SMS',
         icon: <SMSIcon />,
@@ -200,7 +202,7 @@ export default function TenantLayout() {
         { label: 'Open Support Ticket', path: '/dashboard/support/ticket' },
         { label: 'Support Numbers', path: '/dashboard/support/numbers' },
         { label: 'Package Change', path: '/dashboard/support/package-change' },
-        { label: 'Activity Log', path: '/dashboard/support/activity-log' },
+        { label: 'Activity Logs', path: '/dashboard/activity-logs' },
       ],
     });
 

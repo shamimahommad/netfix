@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { usePermissions } from '@/hooks/usePermissions';
 import {
   LineChart,
   Line,
@@ -55,6 +56,7 @@ type BillingAccountRow = {
 
 export default function TenantDashboard() {
   const { user } = useAuthStore();
+  const { hideDashboardSales } = usePermissions();
   const role = (user?.role_code || (user as any)?.role || '').toLowerCase();
   const isIspAdmin = user?.user_type === 'saas' || ['admin', 'manager', 'isp_admin', 'tenant_admin', 'saas_admin', 'super_admin'].includes(role);
 
@@ -472,7 +474,7 @@ export default function TenantDashboard() {
                 Today's Collection
               </p>
               <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white mt-1 tabular-nums">
-                {isLoading ? '...' : fmtMoney(stats.todayCollection)}
+                {isLoading ? '...' : (hideDashboardSales ? '৳••••••' : fmtMoney(stats.todayCollection))}
               </h3>
             </div>
             <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-lg shadow-emerald-500/30 group-hover:scale-105 transition-transform">
@@ -481,7 +483,7 @@ export default function TenantDashboard() {
           </div>
           <div className="mt-4 flex items-center justify-between text-xs border-t border-slate-100 dark:border-slate-800/80 pt-3">
             <span className="text-slate-500 dark:text-slate-400">
-              This Month: <strong className="text-slate-800 dark:text-slate-200">{fmtMoney(stats.thisMonthCollection)}</strong>
+              This Month: <strong className="text-slate-800 dark:text-slate-200">{hideDashboardSales ? '৳••••••' : fmtMoney(stats.thisMonthCollection)}</strong>
             </span>
             <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold group-hover:underline">
               Payments <ArrowUpRight className="w-3.5 h-3.5" />
@@ -688,7 +690,7 @@ export default function TenantDashboard() {
               >
                 <span className="text-xs text-slate-600 dark:text-slate-400">Today</span>
                 <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
-                  {fmtMoney(stats.todayCollection)}
+                  {hideDashboardSales ? '৳••••••' : fmtMoney(stats.todayCollection)}
                 </span>
               </div>
               <div
@@ -697,7 +699,7 @@ export default function TenantDashboard() {
               >
                 <span className="text-xs text-slate-600 dark:text-slate-400">This Month</span>
                 <span className="text-xs font-bold text-blue-600 dark:text-blue-400 tabular-nums">
-                  {fmtMoney(stats.thisMonthCollection)}
+                  {hideDashboardSales ? '৳••••••' : fmtMoney(stats.thisMonthCollection)}
                 </span>
               </div>
               <div
@@ -706,7 +708,7 @@ export default function TenantDashboard() {
               >
                 <span className="text-xs text-slate-600 dark:text-slate-400">Last Month</span>
                 <span className="text-xs font-bold text-slate-500 dark:text-slate-400 tabular-nums">
-                  {fmtMoney(stats.lastMonthCollection)}
+                  {hideDashboardSales ? '৳••••••' : fmtMoney(stats.lastMonthCollection)}
                 </span>
               </div>
             </div>
@@ -857,11 +859,11 @@ export default function TenantDashboard() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => navigate('/dashboard/pppoe-logs')}
+                onClick={() => navigate('/dashboard/activity-logs')}
                 className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold"
-                title="View Live MikroTik PPPoE Logs"
+                title="View All Audit & System Activity Logs"
               >
-                PPPoE Logs →
+                All Logs →
               </button>
               <span className="text-slate-300 dark:text-slate-700">|</span>
               <button
