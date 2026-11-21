@@ -55,11 +55,13 @@ class CustomerLogsController {
                 c.status, c.billing_status, c.credit_limit,
                 na.username as pppoe_username, na.mac_address as current_mac,
                 na.current_ip, na.device_vendor, na.is_online, na.uptime_seconds,
-                cs.profile_name as package_name, cs.price as package_price
+                ap.profile_name as package_name, ap.price as package_price
             FROM customers c
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
             LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id
+            LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
             WHERE c.customer_id = :cid AND c.tenant_id = :tid
+            ORDER BY cs.customer_service_id DESC
             LIMIT 1
         ");
         $stmtC->execute(['cid' => $customerId, 'tid' => $tenantId]);
