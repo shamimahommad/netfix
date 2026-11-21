@@ -57,6 +57,7 @@ import InvoicesReportPage from './pages/InvoicesReportPage';
 import FinancialLedgerPage from './pages/FinancialLedgerPage';
 import ReconciliationReportPage from './pages/ReconciliationReportPage';
 import OnlineTransactionsPage from './pages/OnlineTransactionsPage';
+import BtrcReportPage from './pages/BtrcReportPage';
 import MapPage from './pages/MapPage';
 import FtthMapPage from './pages/FtthMapPage';
 import ActivityLogsPage from './pages/ActivityLogsPage';
@@ -248,6 +249,7 @@ function AppContent() {
               <Route path="report/reseller-wise-customers" element={<ResellerWiseCustomersPage />} />
               <Route path="report/area-wise-customers" element={<AreaWiseCustomersPage />} />
               <Route path="report/server-wise-customers" element={<AdminOnlyGuard><ServerWiseCustomersPage /></AdminOnlyGuard>} />
+              <Route path="report/btrc" element={<AdminOnlyGuard><BtrcReportPage /></AdminOnlyGuard>} />
               <Route path="report/ledger" element={<FinancialLedgerPage />} />
               <Route path="report/financial-ledger" element={<FinancialLedgerPage />} />
               <Route path="report/reconciliation" element={<ReconciliationReportPage />} />

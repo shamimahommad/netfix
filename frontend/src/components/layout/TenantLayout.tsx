@@ -157,7 +157,10 @@ export default function TenantLayout() {
           { label: getResellerWiseReportLabel(user?.role_code), path: '/dashboard/report/reseller-wise-customers' },
           { label: 'Area Wise Customers', path: '/dashboard/report/area-wise-customers' },
           ...(canSeeAdminTabs
-            ? [{ label: 'Server Wise Customers', path: '/dashboard/report/server-wise-customers' }]
+            ? [
+                { label: 'Server Wise Customers', path: '/dashboard/report/server-wise-customers' },
+                { label: 'BTRC Monthly Return', path: '/dashboard/report/btrc' },
+              ]
             : []),
           { label: 'Financial Statement / Ledger', path: '/dashboard/report/ledger' },
           { label: 'Reconciliation Audit', path: '/dashboard/report/reconciliation' },

@@ -251,6 +251,10 @@ CREATE TABLE `customers` (
   `login_user_id` bigint(20) unsigned DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `btrc_category` enum('home','corporate','sme','cyber_cafe','institutional') NOT NULL DEFAULT 'home',
+  `connectivity_type` enum('fiber','wireless','copper') NOT NULL DEFAULT 'fiber',
+  `thana` varchar(100) DEFAULT NULL,
+  `district` varchar(100) DEFAULT NULL,
   PRIMARY KEY (`customer_id`),
   UNIQUE KEY `uq_customer_code` (`customer_code`),
   KEY `idx_customer_tenant` (`tenant_id`),
@@ -259,7 +263,8 @@ CREATE TABLE `customers` (
   KEY `idx_customer_phone` (`phone`),
   KEY `idx_customers_owner_path` (`owner_path`),
   KEY `idx_cust_tenant_owner_path` (`tenant_id`,`owner_path`),
-  KEY `idx_cust_tenant_owner` (`tenant_id`,`owner_id`)
+  KEY `idx_cust_tenant_owner` (`tenant_id`,`owner_id`),
+  KEY `idx_cust_btrc_cat` (`tenant_id`,`btrc_category`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `ftth_box_ports`;

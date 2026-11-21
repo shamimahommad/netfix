@@ -45,6 +45,7 @@ require_once __DIR__ . '/controllers/SaaSPlatformBillingController.php';
 require_once __DIR__ . '/controllers/HealthController.php';
 require_once __DIR__ . '/controllers/BillingCronController.php';
 require_once __DIR__ . '/controllers/FtthController.php';
+require_once __DIR__ . '/controllers/BtrcReportController.php';
 
 // Parse Request Path and Method
 $rawUri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
@@ -358,6 +359,22 @@ if ($method === 'GET' && ($uri === '/reports/ledger_statement' || $uri === '/rep
 }
 if ($method === 'GET' && ($uri === '/reports/reconciliation' || $uri === '/api/reports/reconciliation.php' || $uri === '/reports/reconciliation.php')) {
     require __DIR__ . '/api/reports/reconciliation.php';
+    exit;
+}
+
+// ---------------------------------------------------------------------
+// BTRC MONTHLY RETURN REPORTS (HOME, CORPORATE, SME & BANDWIDTH)
+// ---------------------------------------------------------------------
+if ($method === 'GET' && ($uri === '/reports/btrc' || $uri === '/report/btrc')) {
+    BtrcReportController::getReportData();
+    exit;
+}
+if ($method === 'POST' && ($uri === '/reports/btrc/settings' || $uri === '/report/btrc/settings')) {
+    BtrcReportController::updateBtrcSettings();
+    exit;
+}
+if ($method === 'POST' && ($uri === '/reports/btrc/categorize' || $uri === '/report/btrc/categorize')) {
+    BtrcReportController::bulkUpdateCustomerCategory();
     exit;
 }
 if (($method === 'POST' || $method === 'GET') && (

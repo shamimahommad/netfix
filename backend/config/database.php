@@ -368,6 +368,13 @@ class Database {
             self::ensureColumn($pdo, 'network_devices', 'address', 'VARCHAR(255) DEFAULT NULL');
             self::ensureColumn($pdo, 'ftth_cables', 'from_noc_id', 'BIGINT UNSIGNED DEFAULT NULL');
 
+            // Ensure BTRC reporting columns on customers
+            self::ensureColumn($pdo, 'customers', 'btrc_category', "ENUM('home', 'corporate', 'sme', 'cyber_cafe', 'institutional') NOT NULL DEFAULT 'home'");
+            self::ensureColumn($pdo, 'customers', 'connectivity_type', "ENUM('fiber', 'wireless', 'copper') NOT NULL DEFAULT 'fiber'");
+            self::ensureColumn($pdo, 'customers', 'thana', 'VARCHAR(100) DEFAULT NULL');
+            self::ensureColumn($pdo, 'customers', 'district', 'VARCHAR(100) DEFAULT NULL');
+            self::ensureIndex($pdo, 'customers', 'idx_cust_btrc_cat', 'tenant_id, btrc_category');
+
             // Check if users table exists in the current database
             $stmt = $pdo->query("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'users' LIMIT 1");
             if ($stmt && $stmt->fetchColumn()) {
