@@ -474,6 +474,31 @@ CREATE TABLE `network_devices` (
   KEY `idx_devices_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `olt_cron_runs`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `olt_cron_runs` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) unsigned DEFAULT NULL,
+  `trigger_type` enum('scheduled','manual','api') NOT NULL DEFAULT 'scheduled',
+  `status` enum('running','completed','failed') NOT NULL DEFAULT 'running',
+  `total_olts` int(11) NOT NULL DEFAULT 0,
+  `synced_olts` int(11) NOT NULL DEFAULT 0,
+  `failed_olts` int(11) NOT NULL DEFAULT 0,
+  `skipped_olts` int(11) NOT NULL DEFAULT 0,
+  `total_onus` int(11) NOT NULL DEFAULT 0,
+  `online_onus` int(11) NOT NULL DEFAULT 0,
+  `offline_onus` int(11) NOT NULL DEFAULT 0,
+  `duration_ms` int(11) NOT NULL DEFAULT 0,
+  `error_summary` text DEFAULT NULL,
+  `started_at` datetime NOT NULL,
+  `completed_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_olt_cron_tenant` (`tenant_id`),
+  KEY `idx_olt_cron_status` (`status`),
+  KEY `idx_olt_cron_started` (`started_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `olt_onus`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
