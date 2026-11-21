@@ -438,10 +438,11 @@ class WalletLedgerService {
 
                 if ($availableFunds < $actorCost) {
                     $limitText = $creditLimit > 0 ? " (Credit Limit: ৳" . number_format($creditLimit, 2) . ")" : "";
+                    $userLabel = !empty($actorUser['username']) ? $actorUser['username'] : "User #{$actorUserId}";
                     throw new DomainException(
-                        "Insufficient balance. Your current balance is ৳" . number_format($actorBalBefore, 2) . 
+                        "Insufficient balance for '{$userLabel}'. Current balance: ৳" . number_format($actorBalBefore, 2) . 
                         $limitText . ", Required: ৳" . number_format($actorCost, 2) . 
-                        ". Please recharge your balance from top-up option or request a credit limit from your upstream."
+                        ". Please top up the reseller wallet or assign a credit limit."
                     );
                 }
 

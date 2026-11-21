@@ -2197,21 +2197,34 @@ export default function CustomerDetailPage() {
               {/* Options */}
               <div className="bg-gradient-to-br from-slate-50 to-indigo-50/30 dark:from-slate-900/50 dark:to-indigo-900/10 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-3 sm:p-4">
                 <div className="space-y-2.5">
-                  {user?.user_id !== customerData.customer?.ownerId && (
-                    <label className="flex items-center gap-2.5 cursor-pointer group p-2 rounded-lg hover:bg-white/50 dark:hover:bg-slate-800/50 transition-all">
-                      <div className="relative">
-                        <input
-                          type="checkbox"
-                          checked={renewForm.renew_as_reseller}
-                          onChange={(e) => setRenewForm((prev) => ({ ...prev, renew_as_reseller: e.target.checked }))}
-                          className="w-4 h-4 text-indigo-600 bg-white border-2 border-slate-300 dark:border-slate-600 rounded focus:ring-2 focus:ring-indigo-500 focus:ring-offset-0 checked:bg-indigo-600 checked:border-indigo-600 dark:bg-slate-800 dark:checked:bg-indigo-500 dark:checked:border-indigo-500 transition-all duration-200 cursor-pointer"
-                        />
-                      </div>
-                      <div className="flex items-center gap-2 flex-1">
-                        <UserIcon className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">Renew As Reseller ?</span>
-                      </div>
-                    </label>
+                  {Boolean(
+                    (customerData.billing as any)?.connectedByRole !== 'admin' ||
+                    (customerData.customer as any)?.ownerRole !== 'admin' ||
+                    (customerData.customer?.ownerId && String(user?.user_id) !== String(customerData.customer?.ownerId))
+                  ) && (
+                    <div className="space-y-1">
+                      <label className="flex items-center gap-2.5 cursor-pointer group p-2 rounded-lg hover:bg-white/50 dark:hover:bg-slate-800/50 transition-all">
+                        <div className="relative">
+                          <input
+                            type="checkbox"
+                            checked={renewForm.renew_as_reseller}
+                            onChange={(e) => setRenewForm((prev) => ({ ...prev, renew_as_reseller: e.target.checked }))}
+                            className="w-4 h-4 text-indigo-600 bg-white border-2 border-slate-300 dark:border-slate-600 rounded focus:ring-2 focus:ring-indigo-500 focus:ring-offset-0 checked:bg-indigo-600 checked:border-indigo-600 dark:bg-slate-800 dark:checked:bg-indigo-500 dark:checked:border-indigo-500 transition-all duration-200 cursor-pointer"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2 flex-1">
+                          <UserIcon className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                          <span className="text-sm font-medium text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                            Renew As Reseller {(customerData.billing as any)?.connectedBy || (customerData.billing as any)?.connectedByUsername || customerData.customer?.ownerName ? `(${(customerData.billing as any)?.connectedBy || (customerData.billing as any)?.connectedByUsername || customerData.customer?.ownerName})` : ''} ?
+                          </span>
+                        </div>
+                      </label>
+                      {renewForm.renew_as_reseller && (
+                        <p className="text-xs text-indigo-600 dark:text-indigo-400 pl-8 font-medium">
+                          Bill amount will be deducted directly from {(customerData.billing as any)?.connectedBy || (customerData.billing as any)?.connectedByUsername || customerData.customer?.ownerName || 'the assigned reseller'}&apos;s account balance.
+                        </p>
+                      )}
+                    </div>
                   )}
                   {(customerData.billing.balance ?? 0) !== 0 && (
                     <label className="flex items-center gap-2.5 cursor-pointer group p-2 rounded-lg hover:bg-white/50 dark:hover:bg-slate-800/50 transition-all" title="Use customer balance first; shortfall will be deducted from your (logged-in) balance.">

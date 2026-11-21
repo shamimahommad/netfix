@@ -346,13 +346,70 @@ class BillingController {
 
             $callerRole = strtolower($user['role'] ?? '');
             $callerLevel = HierarchySecurityService::getHierarchyLevel($callerRole);
+            $renewAsReseller = !empty($data['renew_as_reseller']);
+
+            $targetChargedUserId = (int)$user['user_id'];
+            $targetResellerUser = null;
+
+            if ($callerLevel > 0) {
+                // Initiator is directly a reseller/agent/dealer: charge their own wallet
+                $targetChargedUserId = (int)$user['user_id'];
+                $targetResellerUser = $user;
+            } elseif ($renewAsReseller) {
+                // Admin checked "Renew as Reseller": identify the customer's owner/reseller
+                $stmtCustOwner = $db->prepare("SELECT customer_id, owner_id, owner_role, owner_path, created_by FROM customers WHERE customer_id = :cid LIMIT 1");
+                $stmtCustOwner->execute(['cid' => $customerId]);
+                $cOwner = $stmtCustOwner->fetch(PDO::FETCH_ASSOC);
+
+                $resellerId = null;
+
+                // 1. Direct owner_id
+                $cOwnerId = !empty($cOwner['owner_id']) ? (int)$cOwner['owner_id'] : null;
+                if ($cOwnerId) {
+                    $uCheck = HierarchySecurityService::getUser($cOwnerId);
+                    if ($uCheck && in_array(strtolower($uCheck['role'] ?? ''), ['agent', 'dealer', 'sub_reseller', 'reseller'], true)) {
+                        $resellerId = $cOwnerId;
+                        $targetResellerUser = $uCheck;
+                    }
+                }
+
+                // 2. Leaf/deepest reseller in owner_path
+                if (!$resellerId && !empty($cOwner['owner_path'])) {
+                    $pathIds = array_filter(array_map('intval', explode('/', trim($cOwner['owner_path'], '/'))));
+                    foreach (array_reverse($pathIds) as $pUid) {
+                        $uCheck = HierarchySecurityService::getUser($pUid);
+                        if ($uCheck && in_array(strtolower($uCheck['role'] ?? ''), ['agent', 'dealer', 'sub_reseller', 'reseller'], true)) {
+                            $resellerId = $pUid;
+                            $targetResellerUser = $uCheck;
+                            break;
+                        }
+                    }
+                }
+
+                // 3. Fallback to created_by
+                if (!$resellerId && !empty($cOwner['created_by'])) {
+                    $uCheck = HierarchySecurityService::getUser((int)$cOwner['created_by']);
+                    if ($uCheck && in_array(strtolower($uCheck['role'] ?? ''), ['agent', 'dealer', 'sub_reseller', 'reseller'], true)) {
+                        $resellerId = (int)$cOwner['created_by'];
+                        $targetResellerUser = $uCheck;
+                    }
+                }
+
+                if (!$resellerId || !$targetResellerUser) {
+                    $db->rollBack();
+                    Response::error('This customer does not belong to any reseller panel. Cannot renew as reseller.', 400);
+                    return;
+                }
+
+                $targetChargedUserId = $resellerId;
+            }
 
             $rechargeRef = null;
             $actorDeduction = $totalAmount;
-            if ($callerLevel > 0) {
-                // Deduct cost from caller's wallet and cascade margin to upstream
+            if ($targetResellerUser && HierarchySecurityService::getHierarchyLevel($targetResellerUser['role'] ?? '') > 0) {
+                // Deduct cost from the reseller's wallet and cascade margin to upstream
                 $rechargeResult = WalletLedgerService::rechargeWithMarginCascade(
-                    (int)$user['user_id'],
+                    (int)$targetChargedUserId,
                     (int)$customerId,
                     (int)$planId,
                     $invNumber,
@@ -362,9 +419,14 @@ class BillingController {
                 );
                 $rechargeRef = $rechargeResult['recharge_ref'] ?? null;
                 $actorDeduction = (float)($rechargeResult['actor_deduction'] ?? $totalAmount);
+                $renewMode = 'RESELLER';
             }
 
             $finalNotes = $rechargeRef ? "{$renewNotes} • Ref: {$rechargeRef}" : $renewNotes;
+            if ($renewAsReseller && $targetResellerUser && $callerLevel === 0) {
+                $resellerLabel = !empty($targetResellerUser['username']) ? $targetResellerUser['username'] : "Reseller #{$targetChargedUserId}";
+                $finalNotes .= " (Renewed as Reseller: {$resellerLabel})";
+            }
 
             $stmtInv = $db->prepare("INSERT INTO invoices 
                 (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, collected_by, charged_user_id, renew_mode, notes, previous_expire_date, created_by)
@@ -380,7 +442,7 @@ class BillingController {
                 'base' => $actorDeduction,
                 'sell' => $totalAmount,
                 'coll' => $user['user_id'],
-                'chg' => $user['user_id'],
+                'chg' => $targetChargedUserId,
                 'renew_mode' => $renewMode,
                 'notes' => $finalNotes,
                 'prev_exp' => $currentService['expires_at'] ?? null,
@@ -389,6 +451,10 @@ class BillingController {
 
             // Record transaction matching actual initiator wallet deduction
             $trxRef = 'TRX-RENEW-' . strtoupper(bin2hex(random_bytes(4)));
+            $trxDescr = ($renewAsReseller && $targetResellerUser && $callerLevel === 0)
+                ? "Customer renewal debited from reseller {$targetResellerUser['username']} (#{$targetChargedUserId})"
+                : ($isDayBased ? "Customer subscription renewal ({$days} Days)" : "Customer subscription renewal ({$months} Months)");
+
             $stmtTrx = $db->prepare("INSERT INTO transactions 
                 (tenant_id, customer_id, transaction_ref, transaction_type, amount, method, initiator_user_id, initiator_role, collector_user_id, description)
                 VALUES (:tid, :cid, :ref, 'RENEW_DEBIT', :amt, 'system', :uid, :role, :coll, :descr)");
@@ -396,11 +462,11 @@ class BillingController {
                 'tid' => $tenantId,
                 'cid' => $customerId,
                 'ref' => $trxRef,
-                'amt' => $totalAmount,
-                'uid' => $user['user_id'],
-                'role' => $user['role'],
+                'amt' => $actorDeduction,
+                'uid' => $targetChargedUserId,
+                'role' => $targetResellerUser ? ($targetResellerUser['role'] ?? 'reseller') : $user['role'],
                 'coll' => $user['user_id'],
-                'descr' => $isDayBased ? "Customer subscription renewal ({$days} Days)" : "Customer subscription renewal ({$months} Months)",
+                'descr' => $trxDescr,
             ]);
 
             $db->commit();
@@ -419,6 +485,10 @@ class BillingController {
 
             try {
                 require_once __DIR__ . '/../lib/ActivityLogger.php';
+                $logDescr = "Renewed customer subscription #{$customerId}: {$renewNotes} (৳{$totalAmount})";
+                if ($renewAsReseller && $targetResellerUser && $callerLevel === 0) {
+                    $logDescr .= " [Debited from Reseller #{$targetChargedUserId} ({$targetResellerUser['username']})]";
+                }
                 ActivityLogger::log([
                     'tenant_id' => $tenantId,
                     'user_id' => $user['user_id'] ?? null,
@@ -427,24 +497,35 @@ class BillingController {
                     'module' => 'billing',
                     'target_id' => (string)$customerId,
                     'target_type' => 'customer',
-                    'description' => "Renewed customer subscription #{$customerId}: {$renewNotes} (৳{$totalAmount})",
+                    'description' => $logDescr,
                     'metadata' => [
                         'customer_id' => $customerId,
                         'new_expire_date' => $newExpireDate,
                         'amount' => $totalAmount,
+                        'charged_user_id' => $targetChargedUserId,
+                        'deducted_amount' => $actorDeduction,
                         'mode' => $renewMode,
                     ],
                 ]);
             } catch (\Throwable $actErr) {}
 
+            $successMsg = 'Service renewed and secret synchronized';
+            if ($renewAsReseller && $targetResellerUser && $callerLevel === 0) {
+                $successMsg = "Service renewed successfully. Debited ৳" . number_format($actorDeduction, 2) . " from Reseller '{$targetResellerUser['username']}' account.";
+            }
+            $successMsg .= $mtMsg;
+
             Response::json([
                 'success' => true,
-                'message' => 'Service renewed and secret synchronized' . $mtMsg,
+                'message' => $successMsg,
                 'expire_at' => $newExpireDate,
                 'data' => [
                     'new_expire_date' => $newExpireDate,
                     'expire_at' => $newExpireDate,
                     'bill_amount' => $totalAmount,
+                    'charged_user_id' => $targetChargedUserId,
+                    'charged_username' => $targetResellerUser['username'] ?? null,
+                    'deducted_amount' => $actorDeduction,
                 ],
             ]);
         } catch (DomainException $de) {
