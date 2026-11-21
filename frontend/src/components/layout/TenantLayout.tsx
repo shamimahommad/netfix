@@ -111,7 +111,6 @@ export default function TenantLayout() {
           { label: 'Expired Accounts', path: '/dashboard/billing/expired' },
           { label: 'Suspend Accounts', path: '/dashboard/billing/suspended' },
           { label: 'Left Customers', path: '/dashboard/billing/left' },
-          { label: 'Auto-Cutoff & Cron', path: '/dashboard/billing/auto-cutoff' },
         ],
       },
       {
@@ -234,6 +233,7 @@ export default function TenantLayout() {
         icon: <SettingsIcon />,
         submenu: [
           { label: 'Company Profile', path: '/dashboard/settings/company-profile' },
+          { label: 'Auto-Cutoff & Cron', path: '/dashboard/settings/auto-cutoff' },
           { label: 'Import', path: '/dashboard/settings/import' },
         ],
       });

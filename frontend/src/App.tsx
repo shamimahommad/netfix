@@ -224,7 +224,7 @@ function AppContent() {
               <Route path="customers/view/:id" element={<CustomerDetailPage />} />
               <Route path="customers/view/:id/invoices" element={<CustomerInvoicesPage />} />
               <Route path="customers/edit/:id" element={<EditCustomerPage />} />
-              <Route path="billing/auto-cutoff" element={<AutoCutoffEnginePage />} />
+              <Route path="billing/auto-cutoff" element={<Navigate to="/dashboard/settings/auto-cutoff" replace />} />
               <Route path="billing/bulk-renew" element={<BulkCustomerRenewPage />} />
               <Route path="billing/:type" element={<BillingPage />} />
               <Route path="billing" element={<Navigate to="/dashboard/billing/all" replace />} />
@@ -281,6 +281,7 @@ function AppContent() {
               <Route path="service-area/sub-areas" element={<SubAreasPage />} />
               <Route path="settings" element={<Navigate to="/dashboard/settings/company-profile" replace />} />
               <Route path="settings/company-profile" element={<AdminOnlyGuard><CompanyProfilePage /></AdminOnlyGuard>} />
+              <Route path="settings/auto-cutoff" element={<AdminOnlyGuard><AutoCutoffEnginePage /></AdminOnlyGuard>} />
               <Route path="settings/company-setup" element={<Navigate to="/dashboard/settings/company-profile" replace />} />
               <Route path="settings/company" element={<Navigate to="/dashboard/settings/company-profile" replace />} />
               <Route path="settings/import" element={<AdminOnlyGuard><ImportPage /></AdminOnlyGuard>} />

@@ -71,6 +71,7 @@ const getPageTitle = (pathname: string): string => {
     'dashboard/report/server-wise-customers': 'Server Wise Customers',
     'dashboard/report': 'Reports & Analytics',
     'dashboard/settings/company-profile': 'Company Profile & Settings',
+    'dashboard/settings/auto-cutoff': 'Auto-Cutoff & Billing Cron Engine',
     'dashboard/settings/company-setup': 'Company Setup',
     'dashboard/settings/import': 'Data Import & Migration',
     'dashboard/settings': 'System Settings',
