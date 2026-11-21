@@ -438,8 +438,8 @@ export default function BtrcReportPage() {
     <div className="space-y-6 animate-fadeIn pb-12">
       {/* Page Header */}
       <PageHeader
-        title="BTRC Monthly Return Report (বিটিআরসি মাসিক রিটার্ন)"
-        subtitle="বিটিআরসি নির্ধারিত ফরম্যাট অনুযায়ী Home, Corporate ও SME গ্রাহক সংখ্যা এবং ব্যান্ডউইথ রিপোর্ট"
+        title="BTRC Monthly Return Report"
+        subtitle="Official regulatory monthly compliance statement with Home, Corporate & SME subscriber analytics and bandwidth return"
         breadcrumbs={[
           { label: 'Dashboard', path: '/dashboard' },
           { label: 'Reports', path: '/dashboard/report/reseller-wise-customers' },
@@ -722,7 +722,7 @@ export default function BtrcReportPage() {
             }`}
           >
             <ShieldCheck className="w-4 h-4" />
-            <span>বিটিআরসি নির্ধারিত ছক (Official Summary)</span>
+            <span>BTRC Official Return Summary</span>
           </button>
           <button
             onClick={() => setActiveTab('subscribers')}
@@ -733,7 +733,7 @@ export default function BtrcReportPage() {
             }`}
           >
             <Users className="w-4 h-4" />
-            <span>গ্রাহক বিস্তারিত তালিকা (Subscriber KYC & Roster)</span>
+            <span>Subscriber KYC & Regulatory Roster</span>
             <span className="ml-1 px-2 py-0.5 text-[10px] rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
               {pagination?.total ?? 0}
             </span>
@@ -797,10 +797,10 @@ export default function BtrcReportPage() {
               <div>
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                  <span>১. গ্রাহক ক্যাটাগরি ও ব্যান্ডউইথ রিপোর্ট (BTRC Monthly Return Matrix)</span>
+                  <span>1. Client Category & Bandwidth Return (BTRC Monthly Return Matrix)</span>
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  বিটিআরসি নির্ধারিত ফরম্যাট: পূর্বের মাসের সক্রিয় গ্রাহক, নতুন সংযোগ, বিচ্ছিন্ন ও বর্তমান সক্রিয় গ্রাহক সংখ্যা
+                  BTRC Prescribed Return: Previous Month Active, New Connected, Disconnected & Current Active Subscribers
                 </p>
               </div>
             </div>
@@ -809,20 +809,20 @@ export default function BtrcReportPage() {
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider text-[11px]">
-                    <th className="py-3.5 px-4">Client Category (গ্রাহক শ্রেণি)</th>
-                    <th className="py-3.5 px-4 text-center">পূর্বের মাসের সক্রিয়</th>
+                    <th className="py-3.5 px-4">Client Category</th>
+                    <th className="py-3.5 px-4 text-center">Prev Month Active</th>
                     <th className="py-3.5 px-4 text-center text-emerald-600 dark:text-emerald-400">
-                      নতুন সংযোগ (এই মাসে)
+                      New Connections
                     </th>
                     <th className="py-3.5 px-4 text-center text-rose-600 dark:text-rose-400">
-                      বিচ্ছিন্ন / বাতিল
+                      Disconnected / Left
                     </th>
                     <th className="py-3.5 px-4 text-center font-black text-slate-900 dark:text-white bg-blue-50/50 dark:bg-blue-950/20">
-                      বর্তমান সক্রিয় গ্রাহক
+                      Current Active Subscribers
                     </th>
-                    <th className="py-3.5 px-4 text-right">বরাদ্দকৃত ব্যান্ডউইথ</th>
-                    <th className="py-3.5 px-4 text-right">গড় ব্যান্ডউইথ (Mbps)</th>
-                    <th className="py-3.5 px-4 text-right">মোট বিক্রয়মূল্য / বিল (৳)</th>
+                    <th className="py-3.5 px-4 text-right">Allocated Bandwidth</th>
+                    <th className="py-3.5 px-4 text-right">Avg Bandwidth (Mbps)</th>
+                    <th className="py-3.5 px-4 text-right">Total Billed / Revenue (BDT)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
@@ -833,7 +833,7 @@ export default function BtrcReportPage() {
                         <Home className="w-3.5 h-3.5" />
                       </div>
                       <div>
-                        <span>Home (বাসাবাড়ি/আবাসিক)</span>
+                        <span>Home (Residential)</span>
                         <div className="text-[10px] text-slate-400 font-normal">Residential Broadband</div>
                       </div>
                     </td>
@@ -865,7 +865,7 @@ export default function BtrcReportPage() {
                         <Building2 className="w-3.5 h-3.5" />
                       </div>
                       <div>
-                        <span>Corporate (কর্পোরেট/প্রতিষ্ঠান)</span>
+                        <span>Corporate (Enterprise)</span>
                         <div className="text-[10px] text-slate-400 font-normal">Dedicated / Enterprise</div>
                       </div>
                     </td>
@@ -897,7 +897,7 @@ export default function BtrcReportPage() {
                         <Briefcase className="w-3.5 h-3.5" />
                       </div>
                       <div>
-                        <span>SME (ক্ষুদ্র ও মাঝারি ব্যবসা)</span>
+                        <span>SME (Small & Medium Enterprise)</span>
                         <div className="text-[10px] text-slate-400 font-normal">Small & Medium Enterprise</div>
                       </div>
                     </td>
@@ -926,7 +926,7 @@ export default function BtrcReportPage() {
                 {/* Grand Total Row */}
                 <tfoot>
                   <tr className="border-t-2 border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-800 text-slate-900 dark:text-white font-black text-xs">
-                    <td className="py-4 px-4 uppercase tracking-wider">সর্বমোট (Grand Total)</td>
+                    <td className="py-4 px-4 uppercase tracking-wider">Grand Total</td>
                     <td className="py-4 px-4 text-center">{totals?.prev_month_active ?? 0}</td>
                     <td className="py-4 px-4 text-center text-emerald-600 dark:text-emerald-400 font-black">
                       +{totals?.new_connections ?? 0}
@@ -958,10 +958,10 @@ export default function BtrcReportPage() {
               <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700/80 bg-slate-50/50 dark:bg-slate-800/50">
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <Layers className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                  <span>২. ব্যান্ডউইথ স্তরভিত্তিক গ্রাহক বণ্টন (Bandwidth Slab Distribution)</span>
+                  <span>2. Bandwidth Slab Distribution (Subscriber Tier Matrix)</span>
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  বিটিআরসি নির্ধারিত স্পিড স্ল্যাব অনুযায়ী গ্রাহক বণ্টন
+                  Subscriber distribution categorized by BTRC speed tier brackets
                 </p>
               </div>
 
@@ -969,7 +969,7 @@ export default function BtrcReportPage() {
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="border-b border-slate-200 dark:border-slate-700/80 bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold uppercase text-[11px]">
-                      <th className="py-3 px-4">Speed Slab (গতি স্তর)</th>
+                      <th className="py-3 px-4">Speed Slab</th>
                       <th className="py-3 px-3 text-center">Home</th>
                       <th className="py-3 px-3 text-center">Corporate</th>
                       <th className="py-3 px-3 text-center">SME</th>
@@ -999,10 +999,10 @@ export default function BtrcReportPage() {
             <div className="bg-white dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-5 shadow-sm space-y-4">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <Wifi className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                <span>৩. কানেক্টিভিটি মাধ্যম (Media Type)</span>
+                <span>3. Connectivity Media Distribution</span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                গ্রাহকদের সংযোগের মাধ্যম (FTTH / UTP / Wireless)
+                Breakdown by physical delivery medium (FTTH / UTP / Wireless)
               </p>
 
               <div className="space-y-3 pt-2">
@@ -1029,7 +1029,7 @@ export default function BtrcReportPage() {
               </div>
 
               <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl text-xs text-amber-800 dark:text-amber-300">
-                💡 <strong>টিপস:</strong> কোনো গ্রাহকের ক্যাটাগরি (Home, Corporate, SME) ভুল থাকলে পাশের &quot;গ্রাহক বিস্তারিত তালিকা&quot; ট্যাব থেকে ব্যাচ বা সরাসরি পরিবর্তন করতে পারবেন।
+                💡 <strong>Tip:</strong> You can quickly adjust any subscriber&#39;s classification (Home, Corporate, SME) inline or in bulk from the &quot;Subscriber KYC &amp; Roster&quot; tab.
               </div>
             </div>
           </div>

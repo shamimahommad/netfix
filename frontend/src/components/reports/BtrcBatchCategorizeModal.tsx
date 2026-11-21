@@ -65,7 +65,7 @@ export default function BtrcBatchCategorizeModal({
                 Batch Categorize ({selectedIds.length} Clients)
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                গ্রাহকদের বিটিআরসি ক্যাটাগরি ও কানেক্টিভিটি নির্ধারণ
+                Assign BTRC client category and connectivity medium
               </p>
             </div>
           </div>

@@ -84,7 +84,7 @@ export default function BtrcSettingsModal({
                 BTRC License & Upstream Profile
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                বিটিআরসি নির্ধারিত লাইসেন্স ও মাসিক রিটার্নের প্রয়োজনীয় তথ্যাবলি
+                Regulatory ISP license parameters and monthly return configuration
               </p>
             </div>
           </div>
@@ -101,7 +101,7 @@ export default function BtrcSettingsModal({
           <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/50 rounded-xl flex items-start gap-3">
             <Info className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
             <p className="text-xs text-blue-800 dark:text-blue-300 leading-relaxed">
-              এই তথ্যগুলো বিটিআরসি নির্ধারিত এক্সেল শিটের কভার পেজ ও হেডার ইনফরমেশনে অন্তর্ভুক্ত থাকবে। বিশেষ করে আপস্ট্রিম কেনা ব্যান্ডউইথ (IIG / NTTN) ও লাইসেন্স নম্বর সঠিকভাবে পূরণ করুন।
+              These parameters populate the official BTRC Monthly Return Excel cover page and summary headers. Please ensure the BTRC License Number and purchased upstream bandwidth (IIG / NTTN) are entered accurately.
             </p>
           </div>
 
@@ -129,10 +129,10 @@ export default function BtrcSettingsModal({
                 onChange={(e) => setLicenseCategory(e.target.value)}
                 className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="Nationwide">Nationwide ISP (সারাদেশ)</option>
-                <option value="Divisional">Divisional ISP (বিভাগীয়)</option>
-                <option value="District">District ISP (জেলা)</option>
-                <option value="Upazila">Upazila / Thana ISP (উপজেলা)</option>
+                <option value="Nationwide">Nationwide ISP</option>
+                <option value="Divisional">Divisional ISP</option>
+                <option value="District">District ISP</option>
+                <option value="Upazila">Upazila / Thana ISP</option>
               </select>
             </div>
           </div>
@@ -152,7 +152,7 @@ export default function BtrcSettingsModal({
                 className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                IIG / NTTN / আপস্ট্রিম প্রোভাইডার থেকে কেনা মোট ব্যান্ডউইথ
+                Total purchased bandwidth from upstream IIG / NTTN providers
               </span>
             </div>
 
