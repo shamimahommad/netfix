@@ -1151,10 +1151,10 @@ class NetworkController {
         }
 
         if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
-            $stmt = $db->prepare("SELECT network_device_id, device_name, device_type, management_ip, management_port, winbox_port, web_port, status FROM network_devices WHERE tenant_id = :tid");
+            $stmt = $db->prepare("SELECT network_device_id, device_name, device_type, vendor, management_ip, management_port, winbox_port, web_port, status FROM network_devices WHERE tenant_id = :tid");
             $stmt->execute(['tid' => $tenantId]);
         } else {
-            $stmt = $db->query("SELECT network_device_id, device_name, device_type, management_ip, management_port, winbox_port, web_port, status FROM network_devices");
+            $stmt = $db->query("SELECT network_device_id, device_name, device_type, vendor, management_ip, management_port, winbox_port, web_port, status FROM network_devices");
         }
         $devices = $stmt->fetchAll();
 
@@ -1180,8 +1180,8 @@ class NetworkController {
             $port = (int)($ports[0] ?? 80);
             $startTimes[$did] = microtime(true);
 
-            $ctx = stream_context_create(['socket' => ['connect_timeout' => 1.2]]);
-            $s = @stream_socket_client('tcp://' . $ip . ':' . $port, $errno, $errstr, 1.2, STREAM_CLIENT_ASYNC_CONNECT, $ctx);
+            $ctx = stream_context_create(['socket' => ['connect_timeout' => 2.0]]);
+            $s = @stream_socket_client('tcp://' . $ip . ':' . $port, $errno, $errstr, 2.0, STREAM_CLIENT_ASYNC_CONNECT, $ctx);
             if ($s) {
                 stream_set_blocking($s, false);
                 $sockets[$did] = ['socket' => $s, 'port' => $port, 'device' => $d];
@@ -1196,50 +1196,78 @@ class NetworkController {
             }
         }
 
-        // Parallel non-blocking socket wait (max 1.2s for ALL devices combined)
+        // Multi-socket non-blocking poll loop (resolves all devices asynchronously up to 2.0s deadline)
         if (!empty($sockets)) {
-            $write = [];
-            foreach ($sockets as $info) {
-                $write[] = $info['socket'];
-            }
-            $read = null;
-            $except = null;
-            @stream_select($read, $write, $except, 1, 200000);
+            $deadline = microtime(true) + 2.0;
+            $pending = $sockets;
 
-            foreach ($sockets as $did => $info) {
-                $s = $info['socket'];
-                $d = $info['device'];
-                $port = $info['port'];
+            while (!empty($pending) && microtime(true) < $deadline) {
+                $write = [];
+                $except = [];
+                foreach ($pending as $did => $info) {
+                    $write[] = $info['socket'];
+                    $except[] = $info['socket'];
+                }
+                $read = null;
+                $timeLeft = max(0.02, $deadline - microtime(true));
+                $sec = (int)floor($timeLeft);
+                $usec = (int)(($timeLeft - $sec) * 1000000);
 
-                $isOnline = false;
-                $lat = null;
-                if (in_array($s, $write, true)) {
-                    $sockName = @stream_socket_get_name($s, true);
-                    if ($sockName !== false) {
-                        $isOnline = true;
-                        $lat = round((microtime(true) - $startTimes[$did]) * 1000, 1);
+                $num = @stream_select($read, $write, $except, $sec, $usec);
+                if ($num === false || $num === 0) {
+                    break;
+                }
+
+                foreach ($pending as $did => $info) {
+                    $s = $info['socket'];
+                    if (in_array($s, $write, true) || in_array($s, $except, true)) {
+                        $isOnline = false;
+                        $lat = null;
+                        if (in_array($s, $write, true)) {
+                            $sockName = @stream_socket_get_name($s, true);
+                            if ($sockName !== false) {
+                                $isOnline = true;
+                                $lat = round((microtime(true) - $startTimes[$did]) * 1000, 1);
+                            }
+                        }
+                        @fclose($s);
+
+                        $d = $info['device'];
+                        $port = $info['port'];
+                        $status = $isOnline ? 'online' : 'offline';
+                        if ($isOnline && $d['status'] === 'auth_failed') {
+                            $status = 'auth_failed';
+                        }
+
+                        // If device responded online, ensure DB status is active
+                        if ($isOnline && $d['status'] !== 'active') {
+                            try {
+                                $u = $db->prepare("UPDATE network_devices SET status = 'active', last_sync_at = NOW() WHERE network_device_id = :did");
+                                $u->execute(['did' => $d['network_device_id']]);
+                            } catch (\Throwable $e) {}
+                        }
+
+                        $items[$did] = [
+                            'deviceId' => $did,
+                            'pingStatus' => $status,
+                            'latencyMs' => $lat,
+                            'portTested' => $port,
+                            'lastCheckedAt' => date('c'),
+                        ];
+                        unset($pending[$did]);
                     }
                 }
-                @fclose($s);
+            }
 
-                $status = $isOnline ? 'online' : 'offline';
-                if ($isOnline && $d['status'] === 'auth_failed') {
-                    $status = 'auth_failed';
-                }
-
-                // If device responded online, ensure DB status is active
-                if ($isOnline && $d['status'] !== 'active') {
-                    try {
-                        $u = $db->prepare("UPDATE network_devices SET status = 'active' WHERE network_device_id = :did");
-                        $u->execute(['did' => $d['network_device_id']]);
-                    } catch (\Throwable $e) {}
-                }
-
+            // Any remaining sockets in $pending timed out
+            foreach ($pending as $did => $info) {
+                @fclose($info['socket']);
+                $d = $info['device'];
                 $items[$did] = [
                     'deviceId' => $did,
-                    'pingStatus' => $status,
-                    'latencyMs' => $lat,
-                    'portTested' => $port,
+                    'pingStatus' => 'offline',
+                    'latencyMs' => null,
+                    'portTested' => $info['port'],
                     'lastCheckedAt' => date('c'),
                 ];
             }
