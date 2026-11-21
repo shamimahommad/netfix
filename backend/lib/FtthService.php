@@ -519,11 +519,11 @@ class FtthService {
                 END AS from_name,
                 CASE 
                     WHEN c.from_type = 'box' THEN b_from.latitude 
-                    ELSE nd.latitude 
+                    ELSE NULL 
                 END AS from_lat,
                 CASE 
                     WHEN c.from_type = 'box' THEN b_from.longitude 
-                    ELSE nd.longitude 
+                    ELSE NULL 
                 END AS from_lng
             FROM ftth_cables c
             LEFT JOIN ftth_boxes b_to ON b_to.id = c.to_box_id

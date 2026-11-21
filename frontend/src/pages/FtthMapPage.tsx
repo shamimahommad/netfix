@@ -130,16 +130,29 @@ export default function FtthMapPage() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [boxData, cableData, statData] = await Promise.all([
+      const [boxRes, cableRes, statRes] = await Promise.allSettled([
         ftthService.getBoxes(),
         ftthService.getCables(),
         ftthService.getStats(),
       ]);
-      setBoxes(boxData);
-      setCables(cableData);
-      setStats(statData);
+
+      if (boxRes.status === 'fulfilled') {
+        setBoxes(boxRes.value || []);
+      } else {
+        const msg = boxRes.reason?.response?.data?.message || boxRes.reason?.message || 'Failed to load boxes';
+        toast.error(`Boxes: ${msg}`);
+      }
+
+      if (cableRes.status === 'fulfilled') {
+        setCables(cableRes.value || []);
+      }
+
+      if (statRes.status === 'fulfilled') {
+        setStats(statRes.value);
+      }
     } catch (err: any) {
-      toast.error('Failed to load FTTH map data');
+      const msg = err?.response?.data?.message || err?.message || 'Failed to load FTTH map data';
+      toast.error(msg);
     } finally {
       setIsLoading(false);
     }
