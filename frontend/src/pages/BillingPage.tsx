@@ -1247,6 +1247,15 @@ export default function BillingPage() {
               )}
               <button
                 type="button"
+                onClick={() => navigate('/dashboard/billing/auto-cutoff')}
+                className="px-3 py-1.5 sm:py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:hover:bg-rose-900/50 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-medium rounded-lg transition-all shadow-2xs whitespace-nowrap text-xs flex items-center gap-1.5 cursor-pointer"
+                title="Open Auto-Cutoff & Billing Cron Engine"
+              >
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
+                Auto-Cutoff Engine
+              </button>
+              <button
+                type="button"
                 ref={moreMenuButtonRef}
                 onClick={(e) => {
                   const button = e.currentTarget;

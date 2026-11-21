@@ -139,15 +139,30 @@ class RouterosAPI {
         $CURRENT = [];
 
         while (true) {
+            if (!$this->socket || feof($this->socket)) {
+                break;
+            }
+            $meta = stream_get_meta_data($this->socket);
+            if (!empty($meta['timed_out'])) {
+                break;
+            }
+
             $word = $this->readWord();
+            if ($word === false || $word === null) {
+                break;
+            }
+
             if ($word === '') {
                 if (!empty($CURRENT)) {
                     $RESPONSE[] = $CURRENT;
-                    $isDone = (isset($CURRENT[0]) && $CURRENT[0] === '!done');
+                    $isDone = (isset($CURRENT[0]) && in_array($CURRENT[0], ['!done', '!trap', '!fatal']));
                     $CURRENT = [];
                     if ($isDone) {
                         break;
                     }
+                } else {
+                    // Empty word with empty current sentence indicates stream boundary/end
+                    break;
                 }
             } else {
                 $CURRENT[] = $word;
@@ -194,12 +209,20 @@ class RouterosAPI {
     }
 
     private function readWord() {
-        $byte = ord(fgetc($this->socket));
+        if (!$this->socket || feof($this->socket)) {
+            return false;
+        }
+        $c = fgetc($this->socket);
+        if ($c === false) {
+            return false;
+        }
+        $byte = ord($c);
         $length = $this->decodeLength($byte);
         if ($length > 0) {
             $value = '';
             $left = $length;
             while ($left > 0) {
+                if (feof($this->socket)) break;
                 $chunk = fread($this->socket, $left);
                 if ($chunk === false || strlen($chunk) === 0) break;
                 $value .= $chunk;
@@ -230,26 +253,30 @@ class RouterosAPI {
     private function decodeLength($byte) {
         if (($byte & 0x80) === 0x00) return $byte;
         if (($byte & 0xC0) === 0x80) {
-            $byte2 = ord(fgetc($this->socket));
-            return (($byte & 0x3F) << 8) | $byte2;
+            $c = fgetc($this->socket);
+            if ($c === false) return 0;
+            return (($byte & 0x3F) << 8) | ord($c);
         }
         if (($byte & 0xE0) === 0xC0) {
-            $byte2 = ord(fgetc($this->socket));
-            $byte3 = ord(fgetc($this->socket));
-            return (($byte & 0x1F) << 16) | ($byte2 << 8) | $byte3;
+            $c2 = fgetc($this->socket);
+            $c3 = fgetc($this->socket);
+            if ($c2 === false || $c3 === false) return 0;
+            return (($byte & 0x1F) << 16) | (ord($c2) << 8) | ord($c3);
         }
         if (($byte & 0xF0) === 0xE0) {
-            $byte2 = ord(fgetc($this->socket));
-            $byte3 = ord(fgetc($this->socket));
-            $byte4 = ord(fgetc($this->socket));
-            return (($byte & 0x0F) << 24) | ($byte2 << 16) | ($byte3 << 8) | $byte4;
+            $c2 = fgetc($this->socket);
+            $c3 = fgetc($this->socket);
+            $c4 = fgetc($this->socket);
+            if ($c2 === false || $c3 === false || $c4 === false) return 0;
+            return (($byte & 0x0F) << 24) | (ord($c2) << 16) | (ord($c3) << 8) | ord($c4);
         }
         if ($byte === 0xF0) {
-            $byte1 = ord(fgetc($this->socket));
-            $byte2 = ord(fgetc($this->socket));
-            $byte3 = ord(fgetc($this->socket));
-            $byte4 = ord(fgetc($this->socket));
-            return ($byte1 << 24) | ($byte2 << 16) | ($byte3 << 8) | $byte4;
+            $c1 = fgetc($this->socket);
+            $c2 = fgetc($this->socket);
+            $c3 = fgetc($this->socket);
+            $c4 = fgetc($this->socket);
+            if ($c1 === false || $c2 === false || $c3 === false || $c4 === false) return 0;
+            return (ord($c1) << 24) | (ord($c2) << 16) | (ord($c3) << 8) | ord($c4);
         }
         return 0;
     }

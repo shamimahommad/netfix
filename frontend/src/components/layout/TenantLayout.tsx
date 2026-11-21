@@ -111,6 +111,7 @@ export default function TenantLayout() {
           { label: 'Expired Accounts', path: '/dashboard/billing/expired' },
           { label: 'Suspend Accounts', path: '/dashboard/billing/suspended' },
           { label: 'Left Customers', path: '/dashboard/billing/left' },
+          { label: 'Auto-Cutoff & Cron', path: '/dashboard/billing/auto-cutoff' },
         ],
       },
       {

@@ -32,6 +32,7 @@ const getPageTitle = (pathname: string): string => {
     'dashboard/customers/suspended': 'Suspended Customers',
     'dashboard/customers/expiring-soon': 'Expiring Soon Customers',
     'dashboard/customers': 'Customers',
+    'dashboard/billing/auto-cutoff': 'Auto-Cutoff & Billing Cron Engine',
     'dashboard/billing/all': 'Billing - All Accounts',
     'dashboard/billing/active': 'Active Accounts',
     'dashboard/billing/suspended': 'Suspended Accounts',

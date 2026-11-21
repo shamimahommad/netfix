@@ -26,6 +26,8 @@ class MikrotikService {
         $port = (int)($router['management_port'] ?? $router['api_port'] ?? 8728);
         $this->api->port = $port;
         $this->api->ssl = ($port === 8729 || !empty($router['use_ssl']));
+        $this->api->timeout = 2;
+        $this->api->attempts = 1;
 
         if (empty($ip)) {
             return false;
@@ -153,6 +155,50 @@ class MikrotikService {
         }
     }
 
+    public function disableSecretOnOpenSocket(string $username): bool {
+        if (!$this->api->connected) return false;
+        try {
+            $this->api->write('/ppp/secret/print', false);
+            $this->api->write('?name=' . $username);
+            $secrets = $this->api->read();
+
+            if (!empty($secrets)) {
+                $secretId = $secrets[0]['.id'];
+                $this->api->write('/ppp/secret/set', false);
+                $this->api->write('=.id=' . $secretId, false);
+                $this->api->write('=disabled=yes');
+                $this->api->read();
+            }
+
+            $this->disconnectActiveSession($username);
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    public function setSecretProfileOnOpenSocket(string $username, string $profile): bool {
+        if (!$this->api->connected) return false;
+        try {
+            $this->api->write('/ppp/secret/print', false);
+            $this->api->write('?name=' . $username);
+            $secrets = $this->api->read();
+
+            if (!empty($secrets)) {
+                $secretId = $secrets[0]['.id'];
+                $this->api->write('/ppp/secret/set', false);
+                $this->api->write('=.id=' . $secretId, false);
+                $this->api->write('=profile=' . $profile);
+                $this->api->read();
+                $this->disconnectActiveSession($username);
+                return true;
+            }
+            return false;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
     /**
      * Disconnect live PPPoE session by username
      */
@@ -173,6 +219,40 @@ class MikrotikService {
             }
         }
         return $dropped;
+    }
+
+    public function dropActiveSession(array $router, string $username): bool {
+        if (!$this->connect($router)) {
+            return false;
+        }
+        try {
+            return $this->disconnectActiveSession($username);
+        } finally {
+            $this->disconnect();
+        }
+    }
+
+    public function setSecretProfile(array $router, string $username, string $profile): bool {
+        if (!$this->connect($router)) {
+            return false;
+        }
+        try {
+            $this->api->write('/ppp/secret/print', false);
+            $this->api->write('?name=' . $username);
+            $secrets = $this->api->read();
+
+            if (!empty($secrets)) {
+                $secretId = $secrets[0]['.id'];
+                $this->api->write('/ppp/secret/set', false);
+                $this->api->write('=.id=' . $secretId, false);
+                $this->api->write('=profile=' . $profile);
+                $this->api->read();
+                return true;
+            }
+            return false;
+        } finally {
+            $this->disconnect();
+        }
     }
 
     /**

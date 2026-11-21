@@ -18,6 +18,7 @@ import EditCustomerPage from './pages/EditCustomerPage';
 import ISPsListPage from './pages/ISPsListPage';
 import ISPProfilePage from './pages/ISPProfilePage';
 import BillingPage from './pages/BillingPage';
+import AutoCutoffEnginePage from './pages/AutoCutoffEnginePage';
 import SMSPage from './pages/SMSPage';
 import SupportPage from './pages/SupportPage';
 import NetworkPage from './pages/NetworkPage';
@@ -223,6 +224,7 @@ function AppContent() {
               <Route path="customers/view/:id" element={<CustomerDetailPage />} />
               <Route path="customers/view/:id/invoices" element={<CustomerInvoicesPage />} />
               <Route path="customers/edit/:id" element={<EditCustomerPage />} />
+              <Route path="billing/auto-cutoff" element={<AutoCutoffEnginePage />} />
               <Route path="billing/bulk-renew" element={<BulkCustomerRenewPage />} />
               <Route path="billing/:type" element={<BillingPage />} />
               <Route path="billing" element={<Navigate to="/dashboard/billing/all" replace />} />

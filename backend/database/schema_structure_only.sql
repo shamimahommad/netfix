@@ -67,6 +67,28 @@ CREATE TABLE `activity_logs` (
   KEY `idx_act_target` (`tenant_id`,`target_type`,`target_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `billing_cron_runs`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8mb4 */;
+CREATE TABLE `billing_cron_runs` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint(20) unsigned DEFAULT NULL,
+  `trigger_type` enum('scheduled','manual','api') NOT NULL DEFAULT 'scheduled',
+  `status` enum('running','completed','failed') NOT NULL DEFAULT 'running',
+  `expired_processed` int(10) unsigned NOT NULL DEFAULT 0,
+  `mikrotik_disabled` int(10) unsigned NOT NULL DEFAULT 0,
+  `mikrotik_restored` int(10) unsigned NOT NULL DEFAULT 0,
+  `invoices_generated` int(10) unsigned NOT NULL DEFAULT 0,
+  `sms_sent` int(10) unsigned NOT NULL DEFAULT 0,
+  `error_count` int(10) unsigned NOT NULL DEFAULT 0,
+  `details` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`details`)),
+  `duration_ms` int(10) unsigned NOT NULL DEFAULT 0,
+  `started_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `completed_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_tenant_started` (`tenant_id`,`started_at` DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `client_task_logs`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;

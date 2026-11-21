@@ -43,8 +43,9 @@ COPY docker/nginx.conf /etc/nginx/http.d/default.conf
 # Configure Supervisor to run Nginx, PHP-FPM, and Crond
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Setup cron job for OLT background sync every 2 hours
-RUN echo "0 */2 * * * php /var/www/html/backend/cron/sync_olt.php >> /var/log/cron.log 2>&1" > /etc/crontabs/root
+# Setup cron jobs for Auto-Cutoff every 10 minutes and OLT sync every 2 hours
+RUN echo "*/10 * * * * php /var/www/html/backend/cron/expire_worker.php >> /var/log/cron.log 2>&1" > /etc/crontabs/root \
+    && echo "0 */2 * * * php /var/www/html/backend/cron/sync_olt.php >> /var/log/cron.log 2>&1" >> /etc/crontabs/root
 
 # Set permissions
 RUN chown -R www-data:www-data /var/www/html \

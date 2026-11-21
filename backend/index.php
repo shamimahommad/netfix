@@ -43,6 +43,7 @@ require_once __DIR__ . '/controllers/CompanyProfileController.php';
 require_once __DIR__ . '/controllers/SaaSPackagesController.php';
 require_once __DIR__ . '/controllers/SaaSPlatformBillingController.php';
 require_once __DIR__ . '/controllers/HealthController.php';
+require_once __DIR__ . '/controllers/BillingCronController.php';
 
 // Parse Request Path and Method
 $rawUri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
@@ -278,6 +279,15 @@ if ($method === 'POST' && preg_match('#^/billing/invoices/([^/]+)/transfer$#', $
 }
 if ($method === 'GET' && preg_match('#^/billing/invoices/([^/]+)$#', $uri, $m)) {
     BillingController::invoiceDetail($m[1]);
+}
+if ($method === 'GET' && $uri === '/billing/cutoff/status') {
+    BillingCronController::status();
+}
+if ($method === 'POST' && $uri === '/billing/cutoff/run') {
+    BillingCronController::run();
+}
+if ($method === 'POST' && $uri === '/billing/cutoff/settings') {
+    BillingCronController::saveSettings();
 }
 
 // ---------------------------------------------------------------------
