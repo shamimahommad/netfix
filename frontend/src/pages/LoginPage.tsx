@@ -416,7 +416,7 @@ export default function LoginPage() {
                           required
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
-                          placeholder="admin@netfix.com or username"
+                          placeholder="Enter your email or username"
                           disabled={isLoading}
                           className="w-full h-12 pl-10 pr-10 rounded-2xl bg-slate-950/80 border border-slate-800 text-slate-100 placeholder-slate-500 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500 transition-all"
                         />
@@ -716,20 +716,6 @@ export default function LoginPage() {
               </div>
 
               <div className="py-4 space-y-4 text-xs text-slate-300">
-                <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
-                  <h4 className="font-bold text-emerald-400 mb-1">Standard Admin Accounts:</h4>
-                  <div className="space-y-1.5 font-mono text-[11px]">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">SaaS SuperAdmin:</span>
-                      <span className="text-slate-200">admin@ispsaas.com / password123</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">ISP Tenant Admin:</span>
-                      <span className="text-slate-200">admin@netfix.com / password123</span>
-                    </div>
-                  </div>
-                </div>
-
                 <div className="space-y-2">
                   <h4 className="font-semibold text-white">Forgot Password or Blocked?</h4>
                   <p className="text-slate-400 leading-relaxed">

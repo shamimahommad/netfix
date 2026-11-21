@@ -1,28 +1,9 @@
 <?php
 /**
- * Seed initial sample FTTH Boxes and Fiber Cables if empty
+ * Sample FTTH seeder (Disabled: Demo data removed)
  */
-require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../lib/FtthService.php';
-
-$db = Database::getConnection();
-$count = (int)$db->query("SELECT COUNT(*) FROM ftth_boxes")->fetchColumn();
-if ($count > 0) {
-    echo "FTTH boxes already populated ({$count} boxes).\n";
-    exit(0);
-}
-
-echo "Seeding initial FTTH boxes and fiber cables...\n";
-
-// Sample boxes around Dhaka area (Dhanmondi / Mirpur / Banani)
-$sampleBoxes = [
-    [
-        'tenant_id' => 1,
-        'box_name' => 'FDB-Dhanmondi-R4-Pole12',
-        'box_code' => 'BOX-101',
-        'box_type' => 'splitter_box',
-        'latitude' => 23.746100,
-        'longitude' => 90.374200,
+echo "Sample FTTH seeding disabled.\n";
+exit(0);
         'address' => 'Road #4, House #12, Dhanmondi, Dhaka',
         'pole_number' => 'DP-12',
         'total_ports' => 8,
