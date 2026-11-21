@@ -595,9 +595,9 @@ export default function ISPProfilePage() {
 
       {/* 5 Top Telemetry Stats Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-        {/* Subscribers */}
+        {/* Customers */}
         <div className="p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Subscribers</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Customers</p>
           <div className="flex items-baseline justify-between mt-1">
             <h4 className="text-xl font-bold text-slate-900 dark:text-slate-100">
               {stats.totalCustomers.toLocaleString()}
@@ -776,7 +776,7 @@ export default function ISPProfilePage() {
                       <th className="py-3 px-4">Management Host / IP</th>
                       <th className="py-3 px-4">API Port</th>
                       <th className="py-3 px-4">Winbox Port</th>
-                      <th className="py-3 px-4">Subscribers</th>
+                      <th className="py-3 px-4">Customers</th>
                       <th className="py-3 px-4">Status</th>
                     </tr>
                   </thead>
@@ -910,14 +910,14 @@ export default function ISPProfilePage() {
               Tenant Resource Limits & Quotas
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Enforce maximum subscribers, network devices, and reseller user accounts allowed on this ISP plan
+              Enforce maximum customers, network devices, and reseller user accounts allowed on this ISP plan
             </p>
           </div>
 
           <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-5">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                Max Allowed Customers / Subscribers
+                Max Allowed Customers
               </label>
               <input
                 type="number"
@@ -1051,7 +1051,7 @@ export default function ISPProfilePage() {
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">Customer View Page Design Layout</h4>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Configure which subscriber profile layout template is assigned to this ISP tenant</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Configure which customer profile layout template is assigned to this ISP tenant</p>
                   </div>
                 </div>
                 <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800">

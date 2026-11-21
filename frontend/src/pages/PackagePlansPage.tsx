@@ -302,7 +302,7 @@ export default function PackagePlansPage() {
   const handleDelete = async (pkg: NetworkPackage) => {
     const subscriberCount = pkg.count ?? (pkg as any).activeSubscribers ?? 0;
     if (subscriberCount > 0) {
-      await showError('Blocked', `This package has ${subscriberCount} assigned active subscriber(s) and cannot be deleted.`);
+      await showError('Blocked', `This package has ${subscriberCount} assigned active customer(s) and cannot be deleted.`);
       return;
     }
 
@@ -1253,7 +1253,7 @@ export default function PackagePlansPage() {
             <Users className="w-5 h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Subscribed Users</p>
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Customers</p>
             <p className="text-xl font-bold text-slate-900 dark:text-slate-100">{stats.totalSubscribers}</p>
           </div>
         </div>
@@ -1328,7 +1328,7 @@ export default function PackagePlansPage() {
                 <th className="py-3 px-4">Speed (DL / UL)</th>
                 <th className="py-3 px-4">Price</th>
                 <th className="py-3 px-4">Validity</th>
-                <th className="py-3 px-4">Subscribers</th>
+                <th className="py-3 px-4">Customers</th>
                 <th className="py-3 px-4">Status</th>
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>

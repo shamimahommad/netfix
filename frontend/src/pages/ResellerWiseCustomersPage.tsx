@@ -146,7 +146,7 @@ export default function ResellerWiseCustomersPage() {
           variant="blue"
         />
         <MetricCard
-          title="Active Subscribers"
+          title="Active Customers"
           value={totalActive.toLocaleString()}
           subtext="Currently active & paid"
           variant="emerald"

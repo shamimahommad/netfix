@@ -162,7 +162,7 @@ export default function SaaSDashboard() {
       <PageHeader
         icon={<ShieldCheck className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
         title="SaaS Platform Command Center"
-        subtitle="Unified multi-tenant orchestration, live subscriber quotas, and global infrastructure telemetry"
+        subtitle="Unified multi-tenant orchestration, live customer quotas, and global infrastructure telemetry"
         badge="SaaS Super Admin"
         actions={
           <div className="flex items-center gap-2.5">
@@ -248,7 +248,7 @@ export default function SaaSDashboard() {
           </p>
         </div>
 
-        {/* Global Subscribers */}
+        {/* Global Customers */}
         <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
@@ -256,7 +256,7 @@ export default function SaaSDashboard() {
                 <span className="p-1 rounded-lg bg-emerald-50 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400">
                   <Users className="w-3.5 h-3.5" />
                 </span>
-                Total Subscribers
+                Total Customers
               </span>
               <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-400">
                 Network Wide
@@ -445,7 +445,7 @@ export default function SaaSDashboard() {
               Registered ISP Tenant Networks
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Live quotas, subscribers, routers, and one-click workspace impersonation
+              Live quotas, customers, routers, and one-click workspace impersonation
             </p>
           </div>
 
@@ -498,7 +498,7 @@ export default function SaaSDashboard() {
                 <tr>
                   <th className="px-4 py-3 font-bold" style={{ width: '25%' }}>ISP / Tenant Name</th>
                   <th className="px-4 py-3 font-bold" style={{ width: '12%' }}>Status</th>
-                  <th className="px-4 py-3 font-bold" style={{ width: '22%' }}>Subscribers & Quota</th>
+                  <th className="px-4 py-3 font-bold" style={{ width: '22%' }}>Customers & Quota</th>
                   <th className="px-4 py-3 font-bold text-center" style={{ width: '10%' }}>Routers</th>
                   <th className="px-4 py-3 font-bold text-center" style={{ width: '8%' }}>OLTs</th>
                   <th className="px-4 py-3 font-bold" style={{ width: '11%' }}>Created</th>
@@ -551,7 +551,7 @@ export default function SaaSDashboard() {
                         </span>
                       </td>
 
-                      {/* Subscriber Quota Bar */}
+                      {/* Customer Quota Bar */}
                       <td className="px-4 py-3 font-mono">
                         <div className="flex items-center justify-between text-[11px] mb-1 font-semibold text-slate-700 dark:text-slate-300">
                           <span>{currentSubs.toLocaleString()}</span>

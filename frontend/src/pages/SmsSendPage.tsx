@@ -226,7 +226,7 @@ export default function SmsSendPage() {
       <PageHeader
         icon={<MessageSquare className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
         title="Send SMS"
-        subtitle="Compose and broadcast SMS notifications to clients and subscribers. Supports automatic Bangla & English encoding."
+        subtitle="Compose and broadcast SMS notifications to customers. Supports automatic Bangla & English encoding."
         badge={
           balance !== null ? (
             <span className="flex items-center gap-1.5 font-medium">

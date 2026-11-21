@@ -163,7 +163,7 @@ export default function CustomerLoginPage() {
               className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-semibold uppercase tracking-wider self-start"
             >
               <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-              Broadband Subscriber Self-Service
+              Broadband Customer Self-Service
             </motion.div>
 
             {/* Headline */}
@@ -269,7 +269,7 @@ export default function CustomerLoginPage() {
                 <div className="flex items-center justify-between">
                   <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-xs font-semibold">
                     <Globe className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Subscriber Portal</span>
+                    <span>Customer Portal</span>
                   </div>
                   <button
                     type="button"
@@ -510,7 +510,7 @@ export default function CustomerLoginPage() {
                   <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
                     <HelpCircle className="w-4 h-4" />
                   </div>
-                  <h3 className="font-bold text-white text-base">Subscriber Access Guide</h3>
+                  <h3 className="font-bold text-white text-base">Customer Access Guide</h3>
                 </div>
                 <button
                   type="button"

@@ -125,7 +125,7 @@ export const AutoCutoffEnginePage: React.FC = () => {
                 )}
               </div>
               <p className="mt-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-                Automated subscriber expiry management, MikroTik session cutoff & grace period control
+                Automated customer expiry management, MikroTik session cutoff & grace period control
               </p>
             </div>
           </div>
@@ -180,7 +180,7 @@ export const AutoCutoffEnginePage: React.FC = () => {
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-sm transition-all hover:border-blue-300 dark:hover:border-blue-700">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              Active Subscribers
+              Active Customers
             </span>
             <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/40 flex items-center justify-center">
               <Users className="w-4 h-4" />
@@ -270,7 +270,7 @@ export const AutoCutoffEnginePage: React.FC = () => {
                   Manual Cutoff Completed in {lastManualResult.durationMs}ms
                 </h3>
                 <p className="text-xs text-emerald-700 dark:text-emerald-300">
-                  Processed {lastManualResult.expiredProcessed} expired subscriber(s) — {lastManualResult.mikrotikDisabled} MikroTik secrets disabled / dropped.
+                  Processed {lastManualResult.expiredProcessed} expired customer(s) — {lastManualResult.mikrotikDisabled} MikroTik secrets disabled / dropped.
                 </p>
               </div>
             </div>

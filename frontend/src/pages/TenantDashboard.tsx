@@ -445,7 +445,7 @@ export default function TenantDashboard() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400">
-                Total Subscribers
+                Total Customers
               </p>
               <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white mt-1 tabular-nums">
                 {isLoading ? '...' : stats.totalCustomers.toLocaleString()}
@@ -1390,7 +1390,7 @@ export default function TenantDashboard() {
                     strokeWidth={2.5}
                     dot={{ r: 3, fill: '#2563eb' }}
                     activeDot={{ r: 5 }}
-                    name="Active Users"
+                    name="Active Customers"
                   />
                   <Line
                     type="monotone"

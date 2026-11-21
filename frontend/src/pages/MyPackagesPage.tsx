@@ -29,8 +29,8 @@ const COLUMNS: { key: keyof PackageRow; label: string; align?: 'left' | 'right';
   { key: 'mikrotik_profile', label: 'MikroTik Profile', align: 'left' },
   { key: 'price', label: 'Retail Price', align: 'right', colorClass: 'text-slate-900 dark:text-slate-100 font-semibold' },
   { key: 'my_price', label: 'My Cost', align: 'right', colorClass: 'text-blue-600 dark:text-blue-400 font-semibold' },
-  { key: 'my_profit', label: 'Profit / User', align: 'right', colorClass: 'text-emerald-600 dark:text-emerald-400 font-semibold' },
-  { key: 'count', label: 'Subscribers', align: 'right', colorClass: 'text-slate-700 dark:text-slate-300' },
+  { key: 'my_profit', label: 'Profit / Customer', align: 'right', colorClass: 'text-emerald-600 dark:text-emerald-400 font-semibold' },
+  { key: 'count', label: 'Customers', align: 'right', colorClass: 'text-slate-700 dark:text-slate-300' },
   { key: 'validity', label: 'Validity', align: 'left' },
   { key: 'volume', label: 'Volume', align: 'left' },
   { key: 'status', label: 'Status', align: 'left' },
@@ -91,7 +91,7 @@ export default function MyPackagesPage() {
   };
 
   const totalPackages = meta.total;
-  const totalSubscribers = data.reduce((acc, r) => acc + (Number(r.count) || 0), 0);
+  const totalCustomers = data.reduce((acc, r) => acc + (Number(r.count) || 0), 0);
 
   return (
     <div className="w-full min-w-0 space-y-6">
@@ -143,10 +143,10 @@ export default function MyPackagesPage() {
             <div className="bg-slate-50/70 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 rounded-xl p-2.5 sm:p-3 flex items-center justify-between gap-2 min-w-0 transition-all hover:border-slate-300 dark:hover:border-slate-600">
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] xl:text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-tight truncate">
-                  Subscribers (This Page)
+                  Customers (This Page)
                 </p>
                 <p className="text-base sm:text-lg xl:text-xl font-bold tracking-tight text-slate-900 dark:text-white mt-0.5 truncate">
-                  {totalSubscribers.toLocaleString()}
+                  {totalCustomers.toLocaleString()}
                 </p>
                 <p className="text-[10px] xl:text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 truncate" title="Total active customers across listed plans">
                   Total active customers across listed plans
@@ -268,7 +268,7 @@ export default function MyPackagesPage() {
                             type="button"
                             onClick={() => navigate(`/dashboard/customers/all?search=${encodeURIComponent(row.name)}`)}
                             className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all cursor-pointer"
-                            title={`View ${row.count} active subscribers on ${row.name}`}
+                            title={`View ${row.count} active customers on ${row.name}`}
                           >
                             <Users className="w-3 h-3" />
                             <span>{row.count.toLocaleString()}</span>

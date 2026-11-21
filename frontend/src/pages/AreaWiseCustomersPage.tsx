@@ -134,7 +134,7 @@ export default function AreaWiseCustomersPage() {
           variant="blue"
         />
         <MetricCard
-          title="Active Subscribers"
+          title="Active Customers"
           value={totalActive.toLocaleString()}
           subtext="Currently connected & active"
           variant="emerald"

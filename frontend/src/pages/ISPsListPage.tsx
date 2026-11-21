@@ -445,7 +445,7 @@ export default function ISPsListPage() {
   const handleDelete = async (tenant: Tenant) => {
     const result = await showDeleteConfirm(
       tenant.tenantName,
-      `All associated subscriber accounts, MikroTik and OLT mappings for ${tenant.tenantName} will be affected.`
+      `All associated customer accounts, MikroTik and OLT mappings for ${tenant.tenantName} will be affected.`
     );
     if (!result.isConfirmed) return;
 
@@ -526,7 +526,7 @@ export default function ISPsListPage() {
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Enterprise multi-tenant directory, subscriber quotas, and hardware allocations
+              Enterprise multi-tenant directory, customer quotas, and hardware allocations
             </p>
           </div>
         </div>
@@ -581,7 +581,7 @@ export default function ISPsListPage() {
               <span className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400">
                 <Users className="w-4 h-4" />
               </span>
-              Total Subscribers
+              Total Customers
             </span>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-400">
               Network Wide
@@ -749,7 +749,7 @@ export default function ISPsListPage() {
         <div className="p-16 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 flex flex-col items-center justify-center text-slate-400">
           <RefreshCw className="w-8 h-8 animate-spin text-blue-500 mb-3" />
           <p className="font-semibold text-sm text-slate-700 dark:text-slate-300">Loading tenant networks...</p>
-          <p className="text-xs text-slate-400 mt-1">Retrieving live subscriber and device telemetry</p>
+          <p className="text-xs text-slate-400 mt-1">Retrieving live customer and device telemetry</p>
         </div>
       ) : filteredTenants.length === 0 ? (
         <div className="p-16 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 text-center">
@@ -775,7 +775,7 @@ export default function ISPsListPage() {
                 <tr>
                   <th className="px-4 py-3.5 font-bold" style={{ width: '22%' }}>ISP / Tenant Name</th>
                   <th className="px-4 py-3.5 font-bold" style={{ width: '11%' }}>Status</th>
-                  <th className="px-4 py-3.5 font-bold" style={{ width: '18%' }}>Subscribers & Quota</th>
+                  <th className="px-4 py-3.5 font-bold" style={{ width: '18%' }}>Customers & Quota</th>
                   <th className="px-4 py-3.5 font-bold text-center" style={{ width: '9%' }}>Routers</th>
                   <th className="px-4 py-3.5 font-bold text-center" style={{ width: '8%' }}>OLTs</th>
                   <th className="px-4 py-3.5 font-bold text-center" style={{ width: '8%' }}>Staff</th>
@@ -831,7 +831,7 @@ export default function ISPsListPage() {
                         </span>
                       </td>
 
-                      {/* Subscribers */}
+                      {/* Customers */}
                       <td className="px-4 py-3 font-mono">
                         <div className="flex items-center justify-between text-[11px] mb-1 font-semibold text-slate-700 dark:text-slate-300">
                           <span>{currentSubs.toLocaleString()}</span>

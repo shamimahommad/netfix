@@ -98,7 +98,7 @@ export default function PublicTopupPage() {
         setAmount('');
       }
     } catch (err: any) {
-      const msg = err?.response?.data?.message || err?.message || 'Subscriber account not found';
+      const msg = err?.response?.data?.message || err?.message || 'Customer account not found';
       setError(typeof msg === 'string' ? msg : 'Account not found. Please verify the ID or phone number.');
     } finally {
       setLoading(false);

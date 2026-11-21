@@ -235,10 +235,10 @@ export default function CustomerInvoicesPage() {
       html: `
         <div style="text-align: left; font-size: 13px; line-height: 1.5; color: #475569;">
           Transfer invoice <b>#${formatInvoiceIdDisplay(inv.invoiceNumber || inv.invoiceId)}</b> 
-          (৳${Number(inv.totalAmount || (inv as any).total_amount || 0).toFixed(2)}) to another subscriber.
+          (৳${Number(inv.totalAmount || (inv as any).total_amount || 0).toFixed(2)}) to another customer.
           <br/><br/>
           <div style="background: #f1f5f9; padding: 8px 12px; border-radius: 6px; font-size: 12px; border-left: 3px solid #6366f1;">
-            ℹ️ <b>Note:</b> Service validity will be reversed from this subscriber and applied to the target subscriber.
+            ℹ️ <b>Note:</b> Service validity will be reversed from this customer and applied to the target customer.
           </div>
         </div>
       `,
@@ -681,7 +681,7 @@ export default function CustomerInvoicesPage() {
                                   type="button"
                                   onClick={() => handleTransfer(inv)}
                                   disabled={isLoadingAction}
-                                  title="Transfer invoice to another subscriber"
+                                  title="Transfer invoice to another customer"
                                   className="p-1.5 rounded-lg border border-indigo-200 dark:border-indigo-900 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors disabled:opacity-50"
                                 >
                                   <ArrowRightLeft className="w-3.5 h-3.5" />

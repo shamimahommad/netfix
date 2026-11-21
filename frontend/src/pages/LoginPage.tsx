@@ -231,7 +231,7 @@ export default function LoginPage() {
               className="space-y-4"
             >
               <h1 className="text-4xl xl:text-5xl font-black tracking-tight text-white leading-[1.15]">
-                Manage subscribers, routers & auto-billing in{' '}
+                Manage customers, routers & auto-billing in{' '}
                 <span className="bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400">
                   one unified cloud.
                 </span>

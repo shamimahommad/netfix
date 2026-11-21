@@ -436,7 +436,7 @@ export default function EditCustomerPage() {
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Modify subscriber credentials, billing policy, and network routing configurations
+              Modify customer credentials, billing policy, and network routing configurations
             </p>
           </div>
         </div>
@@ -518,7 +518,7 @@ export default function EditCustomerPage() {
                 Personal Profile & Contact Information
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Primary subscriber name, telephone contacts, identification, and installation location
+                Primary customer name, telephone contacts, identification, and installation location
               </p>
             </div>
 
@@ -805,7 +805,7 @@ export default function EditCustomerPage() {
                 Package Plan & Billing Setup
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Service bandwidth tier, subscription billing cycle, and subscriber status
+                Service bandwidth tier, subscription billing cycle, and customer status
               </p>
             </div>
 

@@ -97,7 +97,7 @@ export default function ModernCustomerView(props: CustomerViewProps) {
 
   // Copy Bill Summary for customer communication (WhatsApp/SMS)
   const handleCopyBillSummary = () => {
-    const summary = `NetFix ISP Subscriber Notice\n` +
+    const summary = `NetFix ISP Customer Notice\n` +
       `--------------------------------\n` +
       `Customer: ${customer.fullName} (${displayId})\n` +
       `Phone: ${customer.phone || 'N/A'}\n` +
@@ -124,7 +124,7 @@ export default function ModernCustomerView(props: CustomerViewProps) {
       {/* 1. Standard Unified PageHeader */}
       <PageHeader
         icon={<Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
-        title={`Customer 360° Profile — ${customer.fullName || 'Subscriber'}`}
+        title={`Customer 360° Profile — ${customer.fullName || 'Customer'}`}
         subtitle={
           <span className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-slate-800 dark:text-slate-200">ID: {displayId}</span>
@@ -228,7 +228,7 @@ export default function ModernCustomerView(props: CustomerViewProps) {
             <div className="space-y-1.5 min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 truncate">
-                  {customer.fullName || 'Unnamed Subscriber'}
+                  {customer.fullName || 'Unnamed Customer'}
                 </h1>
                 <span className={`px-2.5 py-0.5 rounded-lg text-xs font-bold border ${getBillingStatusBadgeClass(billing.billingStatus)}`}>
                   {billing.billingStatus || 'Active'}
@@ -394,7 +394,7 @@ export default function ModernCustomerView(props: CustomerViewProps) {
             type="button"
             onClick={onMigrate}
             disabled={billing.billingStatus !== 'Expired' || canChangePackage === false}
-            title={canChangePackage === false ? 'No permission to change packages' : (billing.billingStatus !== 'Expired' ? 'Only expired customers can migrate' : 'Change subscriber package plan')}
+            title={canChangePackage === false ? 'No permission to change packages' : (billing.billingStatus !== 'Expired' ? 'Only expired customers can migrate' : 'Change customer package plan')}
             className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500 text-white shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Receipt className="w-4 h-4 flex-shrink-0" />
@@ -418,7 +418,7 @@ export default function ModernCustomerView(props: CustomerViewProps) {
             type="button"
             onClick={onSuspendRestore}
             disabled={isSuspending || network.protocolType !== 'pppoe'}
-            title={network.protocolType !== 'pppoe' ? 'PPPoE subscribers only' : (isSuspended ? 'Restore subscriber' : 'Suspend subscriber')}
+            title={network.protocolType !== 'pppoe' ? 'PPPoE customers only' : (isSuspended ? 'Restore customer' : 'Suspend customer')}
             className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold shadow-md transition-all active:scale-95 disabled:opacity-50 ${
               isSuspended
                 ? 'bg-teal-500 hover:bg-teal-600 dark:bg-teal-600 dark:hover:bg-teal-500 text-white'
@@ -450,7 +450,7 @@ export default function ModernCustomerView(props: CustomerViewProps) {
             type="button"
             onClick={onLiveTraffic}
             disabled={!network.username || !network.serverName || !network.onlineStatus}
-            title={!network.onlineStatus ? 'Available when online' : 'Monitor live subscriber bandwidth'}
+            title={!network.onlineStatus ? 'Available when online' : 'Monitor live customer bandwidth'}
             className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Activity className="w-4 h-4 flex-shrink-0" />
@@ -524,14 +524,14 @@ export default function ModernCustomerView(props: CustomerViewProps) {
 
       {/* 4. Bento Grid: Detailed Operational Information Cards */}
       <div className="grid grid-cols-12 gap-6">
-        {/* CARD 1: Subscriber Profile & Demographics */}
+        {/* CARD 1: Customer Profile & Demographics */}
         <div className="col-span-12 lg:col-span-4 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4 flex flex-col justify-between">
           <div className="space-y-4">
             <div className="border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                   <User className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                  Subscriber Profile
+                  Customer Profile
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   Demographic data, contact info & geo-tagging
@@ -666,7 +666,7 @@ export default function ModernCustomerView(props: CustomerViewProps) {
               </div>
 
               <div className="flex justify-between py-1.5 items-center">
-                <span className="text-slate-500 dark:text-slate-400 font-medium">Subscriber Type</span>
+                <span className="text-slate-500 dark:text-slate-400 font-medium">Customer Type</span>
                 <span className="font-semibold text-slate-800 dark:text-slate-200">{serviceCustomerType(customerData)}</span>
               </div>
 

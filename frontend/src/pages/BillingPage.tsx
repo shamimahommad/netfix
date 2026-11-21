@@ -947,7 +947,7 @@ export default function BillingPage() {
     }
   };
 
-  const totalSubscribers = customers.length;
+  const totalCustomers = customers.length;
   const totalBilled = customers.reduce((sum, c: any) => sum + (parseFloat(String(c.bill_amount || c.package_price || 0)) || 0), 0);
   const totalAdvance = customers.filter((c: any) => (c.balance ?? 0) > 0).reduce((sum, c: any) => sum + (c.balance ?? 0), 0);
   const totalDue = customers.filter((c: any) => (c.balance ?? 0) < 0).reduce((sum, c: any) => sum + Math.abs(c.balance ?? 0), 0);
@@ -1030,10 +1030,10 @@ export default function BillingPage() {
               <div className="bg-slate-50/70 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 rounded-xl p-2 sm:p-2.5 xl:p-3 flex items-center justify-between gap-1.5 xl:gap-2 min-w-0 transition-all hover:border-slate-300 dark:hover:border-slate-600">
                 <div className="min-w-0 flex-1">
                   <p className="text-[10px] xl:text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-tight truncate">
-                    Subscribers
+                    Customers
                   </p>
                   <p className="text-base sm:text-lg xl:text-xl font-bold tracking-tight text-slate-900 dark:text-white mt-0.5 truncate">
-                    {totalSubscribers}
+                    {totalCustomers}
                   </p>
                   <p className="text-[10px] xl:text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 truncate" title="In this category">
                     In this category
@@ -1650,7 +1650,7 @@ export default function BillingPage() {
             <div className="bg-slate-50/80 dark:bg-slate-800/60 px-6 py-4 border-t border-slate-200 dark:border-slate-800">
               <div className="flex items-center justify-between flex-wrap gap-4">
                 <div className="text-base font-medium text-slate-600 dark:text-slate-400">
-                  Total Users: <span className="text-blue-600 dark:text-blue-400 font-semibold">{customers.length}</span>
+                  Total Customers: <span className="text-blue-600 dark:text-blue-400 font-semibold">{customers.length}</span>
                   {selectedCustomers.size > 0 && (
                     <span className="text-slate-500 dark:text-slate-400 font-normal"> ({selectedCustomers.size} selected)</span>
                   )}

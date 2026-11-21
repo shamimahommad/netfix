@@ -347,7 +347,7 @@ export default function OltDetailPage() {
       doneAt: 6,
     },
     {
-      title: 'Scanning Active Subscribers & Link Status',
+      title: 'Scanning Active Customers & Link Status',
       description: `Reading live ONU register table, distance measurements, and alive times...`,
       doneAt: totalPonPorts > 4 ? 18 : 9,
     },
@@ -1109,7 +1109,7 @@ export default function OltDetailPage() {
                     </span>
                     <span className="text-[11px] text-slate-400">
                       {statusFilter === 'offline'
-                        ? `All ${currentScopeCounts.total} connected subscribers in this scope are online and healthy.`
+                        ? `All ${currentScopeCounts.total} connected customers in this scope are online and healthy.`
                         : 'Try adjusting your port selection, status filter, or search term'}
                     </span>
                   </td>

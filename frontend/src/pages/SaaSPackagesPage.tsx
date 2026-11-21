@@ -383,7 +383,7 @@ export default function SaaSPackagesPage() {
                       <p className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Resource Quotas</p>
                       <div className="grid grid-cols-2 gap-2 text-xs">
                         <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/60 dark:border-slate-800">
-                          <span className="text-[10px] text-slate-400 block font-medium">Subscribers</span>
+                          <span className="text-[10px] text-slate-400 block font-medium">Customers</span>
                           <span className="font-bold text-slate-900 dark:text-slate-100">
                             {pkg.limits.maxCustomers.toLocaleString()} Max
                           </span>
@@ -527,7 +527,7 @@ export default function SaaSPackagesPage() {
                 <th className="px-4 py-3">ISP Tenant</th>
                 <th className="px-4 py-3">Assigned Package</th>
                 <th className="px-4 py-3">Monthly Price</th>
-                <th className="px-4 py-3">Subscriber Quota</th>
+                <th className="px-4 py-3">Customer Quota</th>
                 <th className="px-4 py-3 text-center">Routers</th>
                 <th className="px-4 py-3 text-center">OLTs</th>
                 <th className="px-4 py-3">Status</th>
@@ -634,7 +634,7 @@ export default function SaaSPackagesPage() {
                 Assign Subscription Plan to ISP
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Updates subscriber quotas, MikroTik router caps, and feature permissions automatically
+                Updates customer quotas, MikroTik router caps, and feature permissions automatically
               </p>
             </div>
 
@@ -829,7 +829,7 @@ export default function SaaSPackagesPage() {
                     { key: 'mapEnabled', label: 'GIS Network Map', icon: MapPin },
                     { key: 'monitoringEnabled', label: 'Live Bandwidth & Telemetry Monitoring', icon: Activity },
                     { key: 'smsEnabled', label: 'Automated SMS Billing Alerts', icon: MessageSquare },
-                    { key: 'customerPortalEnabled', label: 'Self-Care Subscriber Portal', icon: Globe },
+                    { key: 'customerPortalEnabled', label: 'Self-Care Customer Portal', icon: Globe },
                     { key: 'resellerEnabled', label: 'Multi-Tier Reseller System', icon: Share2 },
                   ].map((perm) => (
                     <label key={perm.key} className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">

@@ -262,7 +262,7 @@ export default function FinancialLedgerPage() {
               {formatBDT(statement?.summary.total_debit || 0)}
             </div>
             <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              <span>Subscriber recharges and wallet balance transfers</span>
+              <span>Customer recharges and wallet balance transfers</span>
             </div>
           </div>
           <div className="absolute -bottom-6 -right-6 w-24 h-24 bg-rose-500/5 rounded-full blur-xl pointer-events-none" />

@@ -219,7 +219,7 @@ export default function BtrcReportPage() {
       const fileName = `SmartISP_BTRC_Report ${dateStr} (1).xlsx`;
 
       XLSX.writeFile(wb, fileName);
-      toast.success(`Exported ${exportRows.length} rows to ${fileName}`);
+      toast.success(`Exported ${exportRows.length} customers to ${fileName}`);
     } catch (err: any) {
       toast.error('Failed to export BTRC Excel report.');
     } finally {
@@ -339,11 +339,11 @@ export default function BtrcReportPage() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Active Subscribers */}
+        {/* Total Active Customers */}
         <div className="bg-white dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-5 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Active Subscribers
+              Active Customers
             </span>
             <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
               <Users className="w-5 h-5" />
@@ -363,11 +363,11 @@ export default function BtrcReportPage() {
           </div>
         </div>
 
-        {/* Home Subscribers */}
+        {/* Home Customers */}
         <div className="bg-white dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-5 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Home Clients
+              Home Customers
             </span>
             <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
               <Home className="w-5 h-5" />
@@ -566,13 +566,13 @@ export default function BtrcReportPage() {
                 <tr>
                   <td colSpan={16} className="py-12 text-center text-slate-500">
                     <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-600" />
-                    Loading BTRC subscriber records...
+                    Loading BTRC customer records...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={16} className="py-12 text-center text-slate-500">
-                    No subscriber records found matching current criteria.
+                    No customer records found matching current criteria.
                   </td>
                 </tr>
               ) : (

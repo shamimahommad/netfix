@@ -251,9 +251,9 @@ export default function ServiceAreasPage() {
           variant="blue"
         />
         <MetricCard
-          title="Total Users"
+          title="Total Customers"
           value={totals.total.toLocaleString()}
-          subtext="All subscribers"
+          subtext="All customers"
           icon={<Users className="w-4 h-4" />}
           variant="indigo"
           onClick={() => navigate('/dashboard/customers/all')}
@@ -356,7 +356,7 @@ export default function ServiceAreasPage() {
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/75 dark:bg-slate-800/50 text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                   <th className="py-3 px-4">Area / Zone</th>
-                  <th className="py-3 px-3 text-center">Total Users</th>
+                  <th className="py-3 px-3 text-center">Total Customers</th>
                   <th className="py-3 px-3 text-center">Active</th>
                   <th className="py-3 px-3 text-center">Expired</th>
                   <th className="py-3 px-3 text-center">Left</th>

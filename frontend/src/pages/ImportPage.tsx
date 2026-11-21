@@ -551,11 +551,11 @@ export default function ImportPage() {
     }
 
     const result = await Swal.fire({
-      title: 'Confirm Client Import',
-      text: `Ready to import ${toImport.length} subscriber(s) into NetFix?`,
+      title: 'Confirm Customer Import',
+      text: `Ready to import ${toImport.length} customer(s) into NetFix?`,
       icon: 'question',
       showCancelButton: true,
-      confirmButtonText: `Yes, Import ${toImport.length} Clients`,
+      confirmButtonText: `Yes, Import ${toImport.length} Customers`,
       cancelButtonText: 'Cancel',
       confirmButtonColor: '#0ea5e9',
     });
@@ -1669,7 +1669,7 @@ export default function ImportPage() {
                     {csvIsImporting ? (
                       <>
                         <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        Importing Subscribers...
+                        Importing Customers...
                       </>
                     ) : (
                       <>

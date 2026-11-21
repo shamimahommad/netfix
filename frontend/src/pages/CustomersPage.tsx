@@ -2320,7 +2320,7 @@ export default function CustomersPage() {
                 <tfoot className="bg-gradient-to-r from-slate-50 to-blue-50/50 dark:from-slate-700/50 dark:to-blue-900/20 border-t-2 border-blue-200 dark:border-slate-700 sticky bottom-0 z-10">
                   <tr>
                     <td colSpan={type === 'online' || type === 'offline' ? 2 : 2} className="px-3 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-300">
-                      {type === 'online' ? 'Online Users' : type === 'offline' ? 'Offline Users' : 'Total Users'}: <span className="text-blue-600 dark:text-blue-400">{totalEntries}</span>
+                      {type === 'online' ? 'Online Customers' : type === 'offline' ? 'Offline Customers' : 'Total Customers'}: <span className="text-blue-600 dark:text-blue-400">{totalEntries}</span>
                       {type !== 'online' && type !== 'offline' && selectedCustomers.size > 0 && (
                         <span className="text-slate-500 dark:text-slate-400 font-normal"> ({selectedCustomers.size} selected)</span>
                       )}
@@ -2868,7 +2868,7 @@ export default function CustomersPage() {
                     <tfoot className="bg-gradient-to-r from-slate-50 to-blue-50/50 dark:from-slate-700/50 dark:to-blue-900/20 border-t-2 border-blue-200 dark:border-slate-700 sticky bottom-0 z-10">
                       <tr>
                         <td colSpan={type === 'online' || type === 'offline' ? 2 : 2} className="px-3 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-300">
-                          {type === 'online' ? 'Online Users' : type === 'offline' ? 'Offline Users' : 'Total Users'}: <span className="text-blue-600 dark:text-blue-400">{totalEntries}</span>
+                          {type === 'online' ? 'Online Customers' : type === 'offline' ? 'Offline Customers' : 'Total Customers'}: <span className="text-blue-600 dark:text-blue-400">{totalEntries}</span>
                           {type !== 'online' && type !== 'offline' && selectedCustomers.size > 0 && (
                             <span className="text-slate-500 dark:text-slate-400 font-normal"> ({selectedCustomers.size} selected)</span>
                           )}

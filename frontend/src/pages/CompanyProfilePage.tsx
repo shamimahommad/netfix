@@ -46,7 +46,7 @@ const getUserTypeLabel = (userType: string | undefined): string => {
   const t = userType.toLowerCase();
   if (t === 'saas') return 'SaaS Administrator';
   if (t === 'isp') return 'ISP / Tenant';
-  if (t === 'customer') return 'Customer Subscriber';
+  if (t === 'customer') return 'Customer';
   return userType;
 };
 

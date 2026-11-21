@@ -95,7 +95,7 @@ export const BoxDetailModal: React.FC<BoxDetailModalProps> = ({
 
   const handleUnassign = async (portNum: number) => {
     if (!box) return;
-    if (!window.confirm(`Are you sure you want to disconnect the subscriber from Port #${portNum}? This will free the port.`)) {
+    if (!window.confirm(`Are you sure you want to disconnect the customer from Port #${portNum}? This will free the port.`)) {
       return;
     }
     try {
@@ -122,7 +122,7 @@ export const BoxDetailModal: React.FC<BoxDetailModalProps> = ({
         onuMac: onuMac.trim() || undefined,
         notes: portNotes.trim() || undefined,
       });
-      toast.success(`Subscriber connected to Port #${selectedPort.portNumber}`);
+      toast.success(`Customer connected to Port #${selectedPort.portNumber}`);
       setIsAssigning(false);
       setSelectedCustomerId(null);
       setOnuMac('');
@@ -379,10 +379,10 @@ export const BoxDetailModal: React.FC<BoxDetailModalProps> = ({
                   {/* If Port is Occupied */}
                   {selectedPort.status === 'occupied' && selectedPort.customer && (
                     <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                      {/* Left: Subscriber info */}
+                      {/* Left: Customer info */}
                       <div className="space-y-2 p-3.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
                         <div className="flex items-center justify-between">
-                          <span className="text-slate-400 uppercase font-semibold">Subscriber</span>
+                          <span className="text-slate-400 uppercase font-semibold">Customer</span>
                           <span className="font-mono font-bold text-blue-600 dark:text-blue-400">
                             {selectedPort.customer.customerCode}
                           </span>
@@ -434,7 +434,7 @@ export const BoxDetailModal: React.FC<BoxDetailModalProps> = ({
                           Port #{selectedPort.portNumber} is Free for Connection
                         </h4>
                         <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                          Connect a new or existing subscriber to this splitter port
+                          Connect a new or existing customer to this splitter port
                         </p>
                       </div>
                       <button
@@ -467,7 +467,7 @@ export const BoxDetailModal: React.FC<BoxDetailModalProps> = ({
                       {/* Customer Selector */}
                       <div className="space-y-1.5">
                         <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                          Select Subscriber:
+                          Select Customer:
                         </label>
                         <input
                           type="text"
@@ -482,7 +482,7 @@ export const BoxDetailModal: React.FC<BoxDetailModalProps> = ({
                           className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs outline-none focus:border-blue-500 mt-1"
                           required
                         >
-                          <option value="">-- Choose Subscriber ({customersList.length} found) --</option>
+                          <option value="">-- Choose Customer ({customersList.length} found) --</option>
                           {customersList.map((c: any) => (
                             <option key={c.customerId || c.customer_id} value={c.customerId || c.customer_id}>
                               {c.customerCode || c.customer_code} - {c.fullName || c.full_name} ({c.username || c.phone || 'No phone'})

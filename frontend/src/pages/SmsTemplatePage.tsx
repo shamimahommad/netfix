@@ -288,7 +288,7 @@ export default function SmsTemplatePage() {
       <PageHeader
         icon={<FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
         title="SMS Templates"
-        subtitle="Manage dynamic message templates for automated payment confirmations, subscriber credentials, and alerts."
+        subtitle="Manage dynamic message templates for automated payment confirmations, customer credentials, and alerts."
         actions={
           <div className="flex items-center gap-2.5 flex-wrap">
             <button

@@ -45,11 +45,11 @@ export default function BtrcBatchCategorizeModal({
         thana: thana.trim() || undefined,
         district: district.trim() || undefined,
       });
-      toast.success(res.message || 'Subscribers updated successfully.');
+      toast.success(res.message || 'Customers updated successfully.');
       onSuccess();
       onClose();
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to update subscriber categories.');
+      toast.error(err?.response?.data?.message || 'Failed to update customer categories.');
     } finally {
       setSaving(false);
     }

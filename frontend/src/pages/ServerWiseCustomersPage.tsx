@@ -290,7 +290,7 @@ export default function ServerWiseCustomersPage() {
         <PageHeader
           icon={<Server className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
           title="Server Wise Online Client (v2)"
-          subtitle="Customer distribution and live subscriber metrics per MikroTik router / NAS"
+          subtitle="Customer distribution and live customer metrics per MikroTik router / NAS"
           onBack={() => navigate('/dashboard/report')}
         />
         <div className="p-12 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex flex-col items-center justify-center text-center">
@@ -312,7 +312,7 @@ export default function ServerWiseCustomersPage() {
       <PageHeader
         icon={<Server className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
         title="Server Wise Online Client (v2)"
-        subtitle="Customer distribution and live subscriber metrics per MikroTik router / NAS"
+        subtitle="Customer distribution and live customer metrics per MikroTik router / NAS"
         badge={`${rows.length} Server${rows.length === 1 ? '' : 's'}`}
         onBack={() => navigate('/dashboard/report')}
         actions={
@@ -363,14 +363,14 @@ export default function ServerWiseCustomersPage() {
           icon={<Server className="w-4 h-4 text-purple-600" />}
         />
         <MetricCard
-          title="Total Clients"
+          title="Total Customers"
           value={totals.total.toLocaleString()}
-          subtext="Assigned Subscribers"
+          subtext="Assigned Customers"
           variant="blue"
           icon={<Users className="w-4 h-4 text-blue-600" />}
         />
         <MetricCard
-          title="Active Clients"
+          title="Active Customers"
           value={totals.active.toLocaleString()}
           subtext="Valid Subscriptions"
           variant="emerald"
@@ -646,7 +646,7 @@ export default function ServerWiseCustomersPage() {
                               type="button"
                               onClick={() => navigate(getCustomerDrillUrl(row.serverId, 'online'))}
                               className="font-bold text-cyan-600 dark:text-cyan-400 hover:underline hover:opacity-85 text-sm"
-                              title="View live online subscribers"
+                              title="View live online customers"
                             >
                               {row.online}
                             </button>
@@ -662,7 +662,7 @@ export default function ServerWiseCustomersPage() {
                               type="button"
                               onClick={() => navigate(getCustomerDrillUrl(row.serverId, 'offline'))}
                               className="font-bold text-slate-700 dark:text-slate-300 hover:underline hover:opacity-85 text-sm"
-                              title="View offline subscribers"
+                              title="View offline customers"
                             >
                               {row.offline}
                             </button>
@@ -678,7 +678,7 @@ export default function ServerWiseCustomersPage() {
                               type="button"
                               onClick={() => navigate(getCustomerDrillUrl(row.serverId, 'expired'))}
                               className="font-bold text-rose-600 dark:text-rose-400 hover:underline hover:opacity-85 text-sm"
-                              title="View expired subscribers"
+                              title="View expired customers"
                             >
                               {row.expired}
                             </button>

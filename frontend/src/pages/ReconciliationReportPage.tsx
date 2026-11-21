@@ -90,7 +90,7 @@ export default function ReconciliationReportPage() {
         d.current_wallet_balance,
       ]);
     } else if (activeTab === 'packages') {
-      headers = ['Package ID', 'Package Name', 'Retail Price', 'Invoices Paid', 'Total Retail Volume', 'Active Subscribers'];
+      headers = ['Package ID', 'Package Name', 'Retail Price', 'Invoices Paid', 'Total Retail Volume', 'Active Customers'];
       rows = data.package_reconciliation.map((p) => [
         p.access_profile_id,
         p.package_name,
@@ -364,7 +364,7 @@ export default function ReconciliationReportPage() {
                   <th className="py-3 px-4 text-right">Retail Price</th>
                   <th className="py-3 px-4 text-center">Invoices Paid</th>
                   <th className="py-3 px-4 text-right">Gross Retail Volume</th>
-                  <th className="py-3 px-4 text-center">Active Subscribers</th>
+                  <th className="py-3 px-4 text-center">Active Customers</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-slate-700 dark:text-slate-200">

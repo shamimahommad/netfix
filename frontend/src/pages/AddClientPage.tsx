@@ -564,7 +564,7 @@ export default function AddClientPage() {
                 Customer Identity & Contact Information
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Primary subscriber credentials and contact details
+                Primary customer credentials and contact details
               </p>
             </div>
 
@@ -892,7 +892,7 @@ export default function AddClientPage() {
                       GPS Coordinates (Latitude, Longitude)
                     </h3>
                     <p className="text-[11px] text-slate-400">
-                      Pin subscriber on coverage map for technicians and maintenance
+                      Pin customer on coverage map for technicians and maintenance
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1285,7 +1285,7 @@ export default function AddClientPage() {
                 Reseller Ownership, Category & Billing Adjustments
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Configure owner assignment, billing cycle, subscriber privileges, and OTC installation fees
+                Configure owner assignment, billing cycle, customer privileges, and OTC installation fees
               </p>
             </div>
 
@@ -1293,7 +1293,7 @@ export default function AddClientPage() {
               {/* Owner Assignment */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
-                  {isAgent ? 'Reseller (Agent Parent)' : 'Assign Subscriber To'}
+                  {isAgent ? 'Reseller (Agent Parent)' : 'Assign Customer To'}
                 </label>
                 {isAgent ? (
                   <input
@@ -1340,7 +1340,7 @@ export default function AddClientPage() {
               {/* Customer Category */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
-                  Subscriber Category
+                  Customer Category
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {[
@@ -1422,7 +1422,7 @@ export default function AddClientPage() {
                 Review & Confirm Customer Registration
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Verify all information before creating the subscriber and activating network access
+                Verify all information before creating the customer and activating network access
               </p>
             </div>
 

@@ -72,7 +72,7 @@ export const AutoCutoffSettingsModal: React.FC<AutoCutoffSettingsModalProps> = (
                 Auto-Cutoff Settings
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Configure subscriber expiry cutoff schedule, MikroTik policy, and grace buffer
+                Configure customer expiry cutoff schedule, MikroTik policy, and grace buffer
               </p>
             </div>
           </div>
@@ -94,7 +94,7 @@ export const AutoCutoffSettingsModal: React.FC<AutoCutoffSettingsModalProps> = (
                 Enable Auto-Cutoff System
               </label>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Automatically disconnect expired subscribers on their expiry date at the scheduled cutoff time
+                Automatically disconnect expired customers on their expiry date at the scheduled cutoff time
               </p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
@@ -172,7 +172,7 @@ export const AutoCutoffSettingsModal: React.FC<AutoCutoffSettingsModalProps> = (
               <option value={7}>7 Days</option>
             </select>
             <p className="text-xs text-slate-400 dark:text-slate-500">
-              Subscribers will remain connected until their expiration date + grace period at the scheduled cutoff time.
+              Customers will remain connected until their expiration date + grace period at the scheduled cutoff time.
             </p>
           </div>
 

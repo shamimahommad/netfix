@@ -184,8 +184,8 @@ export default function AddISPModal({ isOpen, onClose, onSuccess }: AddISPModalP
                   <span className="font-semibold uppercase text-emerald-600">{formData.status}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Subscribers Quota:</span>
-                  <span className="font-bold text-blue-600">{formData.limits.maxCustomers} Subscribers</span>
+                  <span className="text-slate-500">Customers Quota:</span>
+                  <span className="font-bold text-blue-600">{formData.limits.maxCustomers} Customers</span>
                 </div>
               </div>
 

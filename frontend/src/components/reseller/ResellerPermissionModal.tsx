@@ -36,7 +36,7 @@ const CATEGORY_META: Record<
     color: 'from-blue-500/10 to-indigo-500/10 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800',
   },
   customers: {
-    label: 'Customers & Subscribers',
+    label: 'Customers',
     icon: <Users className="w-4 h-4" />,
     color: 'from-emerald-500/10 to-teal-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800',
   },

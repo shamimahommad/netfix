@@ -370,7 +370,7 @@ export default function ActivityLogsPage() {
                 </span>
               </div>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-                Comprehensive security stream tracking authentication, billing operations, subscriber lifecycle, and configuration events.
+                Comprehensive security stream tracking authentication, billing operations, customer lifecycle, and configuration events.
               </p>
             </div>
           </div>
