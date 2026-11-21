@@ -3,6 +3,7 @@ import api from '@/lib/api';
 export interface AutoCutoffSettings {
   autoCutoffEnabled: boolean;
   gracePeriodDays: number;
+  cutoffTime: string; // e.g. '10:00'
   cutoffAction: 'disable_secret' | 'suspended_profile';
   suspendedProfileName?: string;
   sendCutoffSms: boolean;

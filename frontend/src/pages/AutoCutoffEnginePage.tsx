@@ -87,6 +87,17 @@ export const AutoCutoffEnginePage: React.FC = () => {
     });
   };
 
+  const formatCutoffTime = (timeStr?: string) => {
+    if (!timeStr) return '10:00 AM';
+    const parts = timeStr.split(':');
+    let h = parseInt(parts[0], 10);
+    const m = parts[1] || '00';
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12;
+    if (h === 0) h = 12;
+    return `${h.toString().padStart(2, '0')}:${m} ${ampm}`;
+  };
+
   return (
     <div className="w-full min-w-0 space-y-6">
       {/* Page Header */}
@@ -99,12 +110,12 @@ export const AutoCutoffEnginePage: React.FC = () => {
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                  Auto-Cutoff & Billing Cron Engine
+                  Auto-Cutoff Management
                 </h1>
                 {data?.settings?.autoCutoffEnabled ? (
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                    Cron Active (Every 10 min)
+                    Active (Daily at {formatCutoffTime(data.settings.cutoffTime)})
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60">
@@ -114,7 +125,7 @@ export const AutoCutoffEnginePage: React.FC = () => {
                 )}
               </div>
               <p className="mt-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-                Automated multi-tenant subscriber expiry detection, MikroTik PPPoE disable & active session drop
+                Automated subscriber expiry management, MikroTik session cutoff & grace period control
               </p>
             </div>
           </div>
@@ -322,7 +333,17 @@ export const AutoCutoffEnginePage: React.FC = () => {
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+            <div className="p-3 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/50">
+              <p className="text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5" />
+                Daily Cutoff Time
+              </p>
+              <p className="text-sm font-extrabold text-blue-950 dark:text-blue-100 mt-1">
+                {formatCutoffTime(data?.settings?.cutoffTime)}
+              </p>
+            </div>
+
             <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-700/60">
               <p className="text-slate-400 dark:text-slate-500 font-medium">Cutoff Mode</p>
               <p className="text-sm font-bold text-slate-800 dark:text-slate-200 mt-1 capitalize">
@@ -346,18 +367,11 @@ export const AutoCutoffEnginePage: React.FC = () => {
               </p>
             </div>
 
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-700/60">
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-700/60 col-span-2 sm:col-span-1">
               <p className="text-slate-400 dark:text-slate-500 font-medium">Cutoff SMS Alert</p>
               <p className="text-sm font-bold text-slate-800 dark:text-slate-200 mt-1">
                 {data?.settings?.sendCutoffSms ? 'Enabled' : 'Disabled'}
               </p>
-            </div>
-          </div>
-
-          <div className="p-3 rounded-xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/30 flex items-center gap-3">
-            <Radio className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-            <div className="text-xs text-blue-950 dark:text-blue-200">
-              <span className="font-semibold">Cron Schedule:</span> Worker runs every 10 minutes (<code className="bg-white/80 dark:bg-slate-900 px-1 py-0.5 rounded font-mono text-[11px]">*/10 * * * *</code>) via background supervisor.
             </div>
           </div>
         </div>
@@ -368,7 +382,7 @@ export const AutoCutoffEnginePage: React.FC = () => {
             <div className="flex items-center gap-2.5">
               <History className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
               <h2 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                Last Cron Execution
+                Last Cutoff Execution
               </h2>
             </div>
             {data?.lastRun && (
@@ -444,7 +458,7 @@ export const AutoCutoffEnginePage: React.FC = () => {
               <tr>
                 <th className="py-3 px-4">Run ID</th>
                 <th className="py-3 px-4">Started At</th>
-                <th className="py-3 px-4">Trigger</th>
+                <th className="py-3 px-4">Type</th>
                 <th className="py-3 px-4">Status</th>
                 <th className="py-3 px-4">Processed</th>
                 <th className="py-3 px-4">MikroTik Disabled</th>
@@ -458,13 +472,13 @@ export const AutoCutoffEnginePage: React.FC = () => {
                   <tr key={row.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors">
                     <td className="py-3 px-4 font-mono font-medium text-slate-900 dark:text-white">#{row.id}</td>
                     <td className="py-3 px-4">{formatDate(row.started_at)}</td>
-                    <td className="py-3 px-4 capitalize">
+                    <td className="py-3 px-4">
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                         row.trigger_type === 'scheduled'
                           ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
                           : 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300'
                       }`}>
-                        {row.trigger_type}
+                        {row.trigger_type === 'scheduled' ? 'Automated' : 'Manual'}
                       </span>
                     </td>
                     <td className="py-3 px-4">

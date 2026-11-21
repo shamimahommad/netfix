@@ -23,6 +23,7 @@ class BillingCronService {
         return [
             'autoCutoffEnabled'  => ($rows['auto_cutoff_enabled'] ?? '1') === '1',
             'gracePeriodDays'    => (int)($rows['grace_period_days'] ?? 0),
+            'cutoffTime'         => $rows['cutoff_time'] ?? '10:00',
             'cutoffAction'       => $rows['cutoff_action'] ?? 'disable_secret', // 'disable_secret' or 'suspended_profile'
             'suspendedProfileName' => $rows['suspended_profile_name'] ?? 'SUSPENDED',
             'sendCutoffSms'      => ($rows['send_cutoff_sms'] ?? '0') === '1',
@@ -40,6 +41,7 @@ class BillingCronService {
         $map = [
             'auto_cutoff_enabled'    => isset($settings['autoCutoffEnabled']) ? ($settings['autoCutoffEnabled'] ? '1' : '0') : null,
             'grace_period_days'      => isset($settings['gracePeriodDays']) ? (string)max(0, (int)$settings['gracePeriodDays']) : null,
+            'cutoff_time'            => !empty($settings['cutoffTime']) ? trim($settings['cutoffTime']) : null,
             'cutoff_action'          => !empty($settings['cutoffAction']) ? trim($settings['cutoffAction']) : null,
             'suspended_profile_name' => !empty($settings['suspendedProfileName']) ? trim($settings['suspendedProfileName']) : null,
             'send_cutoff_sms'        => isset($settings['sendCutoffSms']) ? ($settings['sendCutoffSms'] ? '1' : '0') : null,
@@ -103,8 +105,12 @@ class BillingCronService {
                 $graceDays = (int)$settings['gracePeriodDays'];
                 $cutoffAction = $settings['cutoffAction'];
                 $suspProfile = $settings['suspendedProfileName'];
+                $cutoffTime = $settings['cutoffTime'] ?? '10:00';
+                if (strlen($cutoffTime) === 5) {
+                    $cutoffTime .= ':00';
+                }
 
-                // 3. Find expired customers for this tenant
+                // 3. Find expired customers for this tenant based on daily cutoff time & grace period
                 $query = "
                     SELECT 
                         c.customer_id,
@@ -129,12 +135,12 @@ class BillingCronService {
                     WHERE c.tenant_id = :tid
                       AND (cs.status = 'active' OR c.status = 'active')
                       AND cs.expires_at IS NOT NULL
-                      AND DATE_ADD(cs.expires_at, INTERVAL :grace DAY) <= NOW()
+                      AND TIMESTAMP(DATE_ADD(DATE(cs.expires_at), INTERVAL :grace DAY), :cutoff_time) <= NOW()
                     ORDER BY nd.network_device_id ASC
                 ";
 
                 $stmtCust = $db->prepare($query);
-                $stmtCust->execute(['tid' => $tid, 'grace' => $graceDays]);
+                $stmtCust->execute(['tid' => $tid, 'grace' => $graceDays, 'cutoff_time' => $cutoffTime]);
                 $expiredSubscribers = $stmtCust->fetchAll(PDO::FETCH_ASSOC);
 
                 if (empty($expiredSubscribers)) {
@@ -328,19 +334,25 @@ class BillingCronService {
             $lastRun['details'] = json_decode($lastRun['details'], true);
         }
 
-        // 2. Metrics & Subscribers at risk
+        // 2. Settings & Cutoff Timing
+        $settings = $tenantId ? self::getSettings($tenantId) : self::getSettings(1);
+        $graceDays = (int)($settings['gracePeriodDays'] ?? 0);
+        $cutoffTime = $settings['cutoffTime'] ?? '10:00';
+        if (strlen($cutoffTime) === 5) {
+            $cutoffTime .= ':00';
+        }
+        $cutoffExpr = "TIMESTAMP(DATE_ADD(DATE(cs.expires_at), INTERVAL {$graceDays} DAY), '{$cutoffTime}')";
+
+        // 3. Metrics & Subscribers at risk
         $whereTid = $tenantId !== null && $tenantId > 0 ? "AND c.tenant_id = {$tenantId}" : "";
 
         $activeCount = (int)$db->query("SELECT COUNT(*) FROM customer_services cs JOIN customers c ON c.customer_id = cs.customer_id WHERE (cs.status = 'active' OR c.status = 'active') {$whereTid}")->fetchColumn();
 
-        $expiringIn3Days = (int)$db->query("SELECT COUNT(*) FROM customer_services cs JOIN customers c ON c.customer_id = cs.customer_id WHERE (cs.status = 'active' OR c.status = 'active') AND cs.expires_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 3 DAY) {$whereTid}")->fetchColumn();
+        $expiringIn3Days = (int)$db->query("SELECT COUNT(*) FROM customer_services cs JOIN customers c ON c.customer_id = cs.customer_id WHERE (cs.status = 'active' OR c.status = 'active') AND cs.expires_at IS NOT NULL AND {$cutoffExpr} > NOW() AND {$cutoffExpr} <= DATE_ADD(NOW(), INTERVAL 3 DAY) {$whereTid}")->fetchColumn();
 
-        $expiredReadyForCutoff = (int)$db->query("SELECT COUNT(*) FROM customer_services cs JOIN customers c ON c.customer_id = cs.customer_id WHERE (cs.status = 'active' OR c.status = 'active') AND cs.expires_at <= NOW() {$whereTid}")->fetchColumn();
+        $expiredReadyForCutoff = (int)$db->query("SELECT COUNT(*) FROM customer_services cs JOIN customers c ON c.customer_id = cs.customer_id WHERE (cs.status = 'active' OR c.status = 'active') AND cs.expires_at IS NOT NULL AND {$cutoffExpr} <= NOW() {$whereTid}")->fetchColumn();
 
         $suspendedCount = (int)$db->query("SELECT COUNT(*) FROM customer_services cs JOIN customers c ON c.customer_id = cs.customer_id WHERE (cs.status = 'suspended' OR c.status = 'inactive') {$whereTid}")->fetchColumn();
-
-        // 3. Settings
-        $settings = $tenantId ? self::getSettings($tenantId) : self::getSettings(1);
 
         // 4. Recent Runs History (last 10)
         $historyStmt = $db->prepare("SELECT id, tenant_id, trigger_type, status, expired_processed, mikrotik_disabled, error_count, duration_ms, started_at, completed_at 

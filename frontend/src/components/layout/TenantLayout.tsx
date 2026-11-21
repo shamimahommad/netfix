@@ -233,7 +233,7 @@ export default function TenantLayout() {
         icon: <SettingsIcon />,
         submenu: [
           { label: 'Company Profile', path: '/dashboard/settings/company-profile' },
-          { label: 'Auto-Cutoff & Cron', path: '/dashboard/settings/auto-cutoff' },
+          { label: 'Auto-Cutoff', path: '/dashboard/settings/auto-cutoff' },
           { label: 'Import', path: '/dashboard/settings/import' },
         ],
       });
