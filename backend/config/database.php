@@ -371,8 +371,11 @@ class Database {
             // Ensure BTRC reporting columns on customers
             self::ensureColumn($pdo, 'customers', 'btrc_category', "ENUM('home', 'corporate', 'sme', 'cyber_cafe', 'institutional') NOT NULL DEFAULT 'home'");
             self::ensureColumn($pdo, 'customers', 'connectivity_type', "ENUM('fiber', 'wireless', 'copper') NOT NULL DEFAULT 'fiber'");
-            self::ensureColumn($pdo, 'customers', 'thana', 'VARCHAR(100) DEFAULT NULL');
+            self::ensureColumn($pdo, 'customers', 'division', 'VARCHAR(100) DEFAULT NULL');
             self::ensureColumn($pdo, 'customers', 'district', 'VARCHAR(100) DEFAULT NULL');
+            self::ensureColumn($pdo, 'customers', 'thana', 'VARCHAR(100) DEFAULT NULL');
+            self::ensureColumn($pdo, 'customers', 'distribution_point', "VARCHAR(100) DEFAULT 'NOC'");
+            self::ensureColumn($pdo, 'customers', 'connectivity_sharing', "ENUM('Shared', 'Dedicated') NOT NULL DEFAULT 'Shared'");
             self::ensureIndex($pdo, 'customers', 'idx_cust_btrc_cat', 'tenant_id, btrc_category');
 
             // Check if users table exists in the current database

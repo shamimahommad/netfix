@@ -18,8 +18,10 @@ export default function BtrcBatchCategorizeModal({
 }: BtrcBatchCategorizeModalProps) {
   const toast = useToastContext();
   const [saving, setSaving] = useState(false);
-  const [category, setCategory] = useState<'home' | 'corporate' | 'sme'>('corporate');
-  const [connectivity, setConnectivity] = useState<'fiber' | 'copper' | 'wireless'>('fiber');
+  const [clientType, setClientType] = useState<'Home' | 'Corporate' | 'SME'>('Home');
+  const [connectivityType, setConnectivityType] = useState<'Shared' | 'Dedicated'>('Shared');
+  const [connectionType, setConnectionType] = useState<'Wired' | 'Wireless'>('Wired');
+  const [distributionPoint, setDistributionPoint] = useState('');
   const [thana, setThana] = useState('');
   const [district, setDistrict] = useState('');
 
@@ -36,16 +38,18 @@ export default function BtrcBatchCategorizeModal({
     try {
       const res = await btrcService.bulkCategorize({
         customer_ids: selectedIds,
-        btrc_category: category,
-        connectivity_type: connectivity,
+        client_type: clientType,
+        connectivity_type: connectivityType,
+        connection_type: connectionType,
+        distribution_point: distributionPoint.trim() || undefined,
         thana: thana.trim() || undefined,
         district: district.trim() || undefined,
       });
-      toast.success(res.message || 'Customers categorized successfully.');
+      toast.success(res.message || 'Subscribers updated successfully.');
       onSuccess();
       onClose();
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Failed to update customer categories.');
+      toast.error(err?.response?.data?.message || 'Failed to update subscriber categories.');
     } finally {
       setSaving(false);
     }
@@ -65,7 +69,7 @@ export default function BtrcBatchCategorizeModal({
                 Batch Categorize ({selectedIds.length} Clients)
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Assign BTRC client category and connectivity medium
+                Assign BTRC client type and connectivity parameters
               </p>
             </div>
           </div>
@@ -81,14 +85,14 @@ export default function BtrcBatchCategorizeModal({
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-              Target BTRC Category *
+              Client Type (client_type) *
             </label>
             <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
-                onClick={() => setCategory('home')}
+                onClick={() => setClientType('Home')}
                 className={`py-2 px-3 text-xs font-medium rounded-xl border text-center transition-all ${
-                  category === 'home'
+                  clientType === 'Home'
                     ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500/20 font-bold'
                     : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
                 }`}
@@ -97,9 +101,9 @@ export default function BtrcBatchCategorizeModal({
               </button>
               <button
                 type="button"
-                onClick={() => setCategory('corporate')}
+                onClick={() => setClientType('Corporate')}
                 className={`py-2 px-3 text-xs font-medium rounded-xl border text-center transition-all ${
-                  category === 'corporate'
+                  clientType === 'Corporate'
                     ? 'border-purple-500 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 ring-2 ring-purple-500/20 font-bold'
                     : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
                 }`}
@@ -108,9 +112,9 @@ export default function BtrcBatchCategorizeModal({
               </button>
               <button
                 type="button"
-                onClick={() => setCategory('sme')}
+                onClick={() => setClientType('SME')}
                 className={`py-2 px-3 text-xs font-medium rounded-xl border text-center transition-all ${
-                  category === 'sme'
+                  clientType === 'SME'
                     ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 ring-2 ring-emerald-500/20 font-bold'
                     : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
                 }`}
@@ -120,31 +124,46 @@ export default function BtrcBatchCategorizeModal({
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Connectivity Media
-            </label>
-            <select
-              value={connectivity}
-              onChange={(e) => setConnectivity(e.target.value as any)}
-              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="fiber">Wired - FTTH / Optical Fiber</option>
-              <option value="copper">Wired - UTP / Cat6 Copper</option>
-              <option value="wireless">Wireless - Radio Link</option>
-            </select>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Connectivity Type
+              </label>
+              <select
+                value={connectivityType}
+                onChange={(e) => setConnectivityType(e.target.value as any)}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="Shared">Shared</option>
+                <option value="Dedicated">Dedicated</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Connection Type
+              </label>
+              <select
+                value={connectionType}
+                onChange={(e) => setConnectionType(e.target.value as any)}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="Wired">Wired</option>
+                <option value="Wireless">Wireless</option>
+              </select>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Thana / Upazila (Optional)
+                Thana (Optional)
               </label>
               <input
                 type="text"
                 value={thana}
                 onChange={(e) => setThana(e.target.value)}
-                placeholder="Leave blank to keep current"
+                placeholder="Leave blank to keep"
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -156,7 +175,7 @@ export default function BtrcBatchCategorizeModal({
                 type="text"
                 value={district}
                 onChange={(e) => setDistrict(e.target.value)}
-                placeholder="Leave blank to keep current"
+                placeholder="Leave blank to keep"
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
