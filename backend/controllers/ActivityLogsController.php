@@ -14,7 +14,7 @@ class ActivityLogsController {
     /**
      * Seed or sync initial logs from existing login_logs & sample audit trail if empty
      */
-    private static function syncInitialLogsIfEmpty(PDO $db, int $tenantId): void {
+    public static function syncInitialLogsIfEmpty(PDO $db, int $tenantId): void {
         ActivityLogger::ensureTable($db);
 
         $count = (int)$db->query("SELECT COUNT(*) FROM activity_logs WHERE tenant_id = {$tenantId}")->fetchColumn();

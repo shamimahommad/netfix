@@ -183,74 +183,92 @@ class DashboardController {
         $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 15;
         $db = Database::getConnection();
 
-        // Ensure table exists & seed initial baseline logs if empty
-        require_once __DIR__ . '/ActivityLogsController.php';
-        ActivityLogsController::syncInitialLogsIfEmpty($db, (int)$tenantId);
+        try {
+            // Ensure table exists & seed initial baseline logs if empty
+            require_once __DIR__ . '/ActivityLogsController.php';
+            if (!empty($tenantId)) {
+                ActivityLogsController::syncInitialLogsIfEmpty($db, (int)$tenantId);
+            }
 
-        $callerId = (int)$user['user_id'];
-        $role = strtolower($user['role'] ?? '');
-        $isLevel0 = (HierarchySecurityService::getHierarchyLevel($role) === 0 || $role === 'saas_admin');
+            $callerId = (int)$user['user_id'];
+            $role = strtolower($user['role'] ?? '');
+            $isLevel0 = (HierarchySecurityService::getHierarchyLevel($role) === 0 || $role === 'saas_admin');
 
-        $where = ["l.tenant_id = :tid"];
-        $params = ['tid' => $tenantId];
+            $where = [];
+            $params = [];
 
-        // Downward Hierarchy Access Control:
-        // Level 0 (ISP Admin / Manager): Can see all activities within the tenant.
-        // Level > 0 (Reseller, Sub-Reseller, Dealer, Agent):
-        // Can ONLY see actions performed by themselves OR by their strictly subordinate downline users.
-        // Under no circumstances can a lower tier user see an upper tier's (Admin / parent) activity,
-        // nor any sibling/peer reseller's activities.
-        if (!$isLevel0) {
-            $rawPath = $user['hierarchy_path'] ?? "/{$callerId}/";
-            $userPath = '/' . trim($rawPath, '/') . '/';
-            $params['scope_uid'] = $callerId;
-            $params['scope_path_wildcard'] = $userPath . '%';
-            $where[] = "(l.user_id = :scope_uid OR (u.hierarchy_path LIKE :scope_path_wildcard AND u.user_id != :scope_uid))";
+            if (!empty($tenantId)) {
+                $where[] = "l.tenant_id = :tid";
+                $params['tid'] = (int)$tenantId;
+            } elseif (!$isLevel0) {
+                $where[] = "l.tenant_id = :tid";
+                $params['tid'] = (int)($user['tenant_id'] ?? 1);
+            }
+
+            // Downward Hierarchy Access Control:
+            // Level 0 (ISP Admin / Manager): Can see all activities within the tenant.
+            // Level > 0 (Reseller, Sub-Reseller, Dealer, Agent):
+            // Can ONLY see actions performed by themselves OR by their strictly subordinate downline users.
+            // Under no circumstances can a lower tier user see an upper tier's (Admin / parent) activity,
+            // nor any sibling/peer reseller's activities.
+            if (!$isLevel0) {
+                $rawPath = $user['hierarchy_path'] ?? "/{$callerId}/";
+                $userPath = '/' . trim($rawPath, '/') . '/';
+                $params['scope_uid'] = $callerId;
+                $params['scope_path_wildcard'] = $userPath . '%';
+                $where[] = "(l.user_id = :scope_uid OR (u.hierarchy_path LIKE :scope_path_wildcard AND u.user_id != :scope_uid))";
+            }
+
+            $whereSql = !empty($where) ? implode(' AND ', $where) : '1=1';
+
+            $stmt = $db->prepare("SELECT 
+                l.id as logId,
+                COALESCE(CAST(l.target_id AS UNSIGNED), 0) as customerId,
+                l.log_type as actionType,
+                CASE 
+                    WHEN l.action = 'client_renew' THEN 'Subscription Renewed'
+                    WHEN l.action = 'customer_onboard' THEN 'Customer Created'
+                    WHEN l.action = 'user_login' THEN 'User Login'
+                    WHEN l.action = 'extend_expiry_date' THEN 'Expiry Extended'
+                    WHEN l.action = 'change_package' THEN 'Package Changed'
+                    WHEN l.action = 'balance_transfer' THEN 'Balance Transferred'
+                    WHEN l.action = 'bind_mac_address' THEN 'MAC Address Bound'
+                    WHEN l.action = 'customer_delete' THEN 'Customer Deleted'
+                    WHEN l.action = 'customer_left' THEN 'Marked as Left'
+                    WHEN l.action = 'customer_reactivated' THEN 'Customer Reactivated'
+                    WHEN l.action = 'pppoe_disconnect' THEN 'PPPoE Disconnected'
+                    WHEN l.action = 'suspend_toggle' THEN 'Status Toggled'
+                    WHEN l.action = 'payment_collected' THEN 'Payment Received'
+                    ELSE REPLACE(CONCAT(UCASE(LEFT(l.action, 1)), SUBSTRING(l.action, 2)), '_', ' ')
+                END as actionTitle,
+                l.description as actionDetails,
+                COALESCE(NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), ''), u.username, 'System') as performedByName,
+                COALESCE(u.role, 'system') as performedByRole,
+                DATE_FORMAT(l.created_at, '%Y-%m-%dT%H:%i:%sZ') as createdAt
+                FROM activity_logs l
+                LEFT JOIN users u ON u.user_id = l.user_id
+                WHERE {$whereSql}
+                ORDER BY l.id DESC
+                LIMIT :lim");
+
+            foreach ($params as $k => $v) {
+                $stmt->bindValue(':' . $k, $v);
+            }
+            $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
+            $stmt->execute();
+            $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            Response::json([
+                'success' => true,
+                'data' => $items ?: [],
+            ]);
+        } catch (\Throwable $e) {
+            error_log('RecentActivity error: ' . $e->getMessage());
+            Response::json([
+                'success' => true,
+                'data' => [],
+            ]);
         }
-
-        $whereSql = implode(' AND ', $where);
-
-        $stmt = $db->prepare("SELECT 
-            l.id as logId,
-            COALESCE(CAST(l.target_id AS UNSIGNED), 0) as customerId,
-            l.log_type as actionType,
-            CASE 
-                WHEN l.action = 'client_renew' THEN 'Subscription Renewed'
-                WHEN l.action = 'customer_onboard' THEN 'Customer Created'
-                WHEN l.action = 'user_login' THEN 'User Login'
-                WHEN l.action = 'extend_expiry_date' THEN 'Expiry Extended'
-                WHEN l.action = 'change_package' THEN 'Package Changed'
-                WHEN l.action = 'balance_transfer' THEN 'Balance Transferred'
-                WHEN l.action = 'bind_mac_address' THEN 'MAC Address Bound'
-                WHEN l.action = 'customer_delete' THEN 'Customer Deleted'
-                WHEN l.action = 'customer_left' THEN 'Marked as Left'
-                WHEN l.action = 'customer_reactivated' THEN 'Customer Reactivated'
-                WHEN l.action = 'pppoe_disconnect' THEN 'PPPoE Disconnected'
-                WHEN l.action = 'suspend_toggle' THEN 'Status Toggled'
-                WHEN l.action = 'payment_collected' THEN 'Payment Received'
-                ELSE REPLACE(CONCAT(UCASE(LEFT(l.action, 1)), SUBSTRING(l.action, 2)), '_', ' ')
-            END as actionTitle,
-            l.description as actionDetails,
-            COALESCE(NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), ''), u.username, 'System') as performedByName,
-            COALESCE(u.role, 'system') as performedByRole,
-            DATE_FORMAT(l.created_at, '%Y-%m-%dT%H:%i:%sZ') as createdAt
-            FROM activity_logs l
-            LEFT JOIN users u ON u.user_id = l.user_id
-            WHERE {$whereSql}
-            ORDER BY l.id DESC
-            LIMIT :lim");
-
-        foreach ($params as $k => $v) {
-            $stmt->bindValue(':' . $k, $v);
-        }
-        $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
-        $stmt->execute();
-        $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        Response::json([
-            'success' => true,
-            'data' => $items ?: [],
-        ]);
     }
 
     public static function saasStats(): void {
