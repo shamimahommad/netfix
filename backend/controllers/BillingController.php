@@ -41,7 +41,7 @@ class BillingController {
                 $where[] = "cs.expires_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 7 DAY)";
                 break;
             case 'expired':
-                $where[] = "(cs.expires_at < NOW() OR c.billing_status = 'Expired')";
+                $where[] = "(cs.expires_at < NOW() OR c.billing_status = 'Expired') AND c.status != 'suspended' AND c.status != 'cancelled'";
                 break;
             case 'suspended':
                 $where[] = "c.status = 'suspended'";
@@ -1119,7 +1119,7 @@ class BillingController {
 
                 // Update MikroTik Router if expired
                 if ($isPastExpiry) {
-                    $db->prepare("UPDATE customers SET status = 'suspended', billing_status = 'Expired', updated_at = NOW() WHERE customer_id = :cid")
+                    $db->prepare("UPDATE customers SET billing_status = 'Expired', updated_at = NOW() WHERE customer_id = :cid AND status != 'suspended'")
                        ->execute(['cid' => $customerId]);
                     try {
                         require_once __DIR__ . '/../lib/MikrotikSyncService.php';
@@ -1259,7 +1259,7 @@ class BillingController {
                    ->execute(['exp' => $newSourceExp, 'st' => $newSourceStatus, 'sid' => $sourceCs['customer_service_id']]);
 
                 if ($isSourceExpired) {
-                    $db->prepare("UPDATE customers SET status = 'suspended', billing_status = 'Expired', updated_at = NOW() WHERE customer_id = :cid")
+                    $db->prepare("UPDATE customers SET billing_status = 'Expired', updated_at = NOW() WHERE customer_id = :cid AND status != 'suspended'")
                        ->execute(['cid' => $sourceCustomerId]);
                     try {
                         require_once __DIR__ . '/../lib/MikrotikSyncService.php';

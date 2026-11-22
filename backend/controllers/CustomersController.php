@@ -22,7 +22,7 @@ class CustomersController {
         $where = ["c.tenant_id = :tid"];
         $params = ['tid' => $tenantId];
 
-        // Filter: type (online, offline, suspended, expiring-soon)
+        // Filter: type (online, offline, suspended, expired, expiring-soon)
         if (!empty($_GET['type'])) {
             $type = strtolower(trim($_GET['type']));
             if ($type === 'online') {
@@ -31,6 +31,8 @@ class CustomersController {
                 $where[] = "(na.is_online = 0 OR na.is_online IS NULL)";
             } elseif ($type === 'suspended') {
                 $where[] = "c.status = 'suspended'";
+            } elseif ($type === 'expired') {
+                $where[] = "(c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW())) AND c.status != 'suspended' AND c.status != 'cancelled' AND c.status != 'terminated'";
             } elseif ($type === 'expiring-soon') {
                 $where[] = "c.status = 'active' AND cs.expires_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 7 DAY)";
             }
@@ -39,7 +41,13 @@ class CustomersController {
         // Filter: status
         if (!empty($_GET['status']) && $_GET['status'] !== 'all') {
             $status = trim($_GET['status']);
-            if (in_array($status, ['Paid', 'Due', 'Expired', 'Left', 'Suspended', 'Pending'])) {
+            if (strcasecmp($status, 'expired') === 0) {
+                $where[] = "(c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW())) AND c.status != 'suspended' AND c.status != 'cancelled' AND c.status != 'terminated'";
+            } elseif ($status === 'suspended') {
+                $where[] = "c.status = 'suspended'";
+            } elseif ($status === 'active') {
+                $where[] = "c.status = 'active' AND c.billing_status != 'Expired' AND (cs.expires_at IS NULL OR cs.expires_at >= NOW())";
+            } elseif (in_array($status, ['Paid', 'Due', 'Left', 'Suspended', 'Pending'])) {
                 $where[] = "c.billing_status = :bstatus";
                 $params['bstatus'] = $status;
             } else {
@@ -228,12 +236,12 @@ class CustomersController {
             $expiresAtTs = !empty($row['expiry_date']) ? strtotime($row['expiry_date']) : null;
             $dueAmount = (float)($row['balance_due'] ?? 0);
 
-            if ($row['status'] === 'cancelled') {
+            if ($row['status'] === 'cancelled' || $row['status'] === 'terminated') {
                 $billingStatus = 'Left';
-            } elseif (strcasecmp($row['raw_billing_status'] ?? '', 'expired') === 0 || ($expiresAtTs !== null && $expiresAtTs < $now)) {
-                $billingStatus = 'Expired';
             } elseif ($row['status'] === 'suspended') {
                 $billingStatus = 'Suspended';
+            } elseif (strcasecmp($row['raw_billing_status'] ?? '', 'expired') === 0 || ($expiresAtTs !== null && $expiresAtTs < $now)) {
+                $billingStatus = 'Expired';
             } elseif ($dueAmount > 0) {
                 $billingStatus = 'Pending';
             } else {
@@ -2153,19 +2161,19 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             // Prepared statements
             $stmtCustomer = $db->prepare("INSERT INTO customers 
                 (tenant_id, customer_code, customer_type, full_name, email, phone, installation_address, status, billing_status, connection_date, owner_id, owner_role, owner_role_level, owner_path, metadata, created_by)
-                VALUES (:tid, :code, :type, :name, :email, :phone, :addr, :status, 'Paid', :conn_date, :oid, :orole, :olevel, :opath, :meta, :created_by)");
+                VALUES (:tid, :code, :type, :name, :email, :phone, :addr, :status, :bstatus, :conn_date, :oid, :orole, :olevel, :opath, :meta, :created_by)");
 
             $stmtService = $db->prepare("INSERT INTO customer_services 
                 (tenant_id, customer_id, access_profile_id, network_device_id, protocol, billing_cycle, status, starts_at, expires_at, created_by)
-                VALUES (:tid, :cid, :pid, :did, 'pppoe', 'monthly', 'active', :starts, :expires, :uid)");
+                VALUES (:tid, :cid, :pid, :did, 'pppoe', 'monthly', :cstatus, :starts, :expires, :uid)");
 
             $stmtNet = $db->prepare("INSERT INTO customer_network_accounts 
                 (tenant_id, customer_id, network_device_id, protocol, username, password, status, is_online)
-                VALUES (:tid, :cid, :did, 'pppoe', :uname, :pwd, 'active', 0)");
+                VALUES (:tid, :cid, :did, 'pppoe', :uname, :pwd, :nstatus, 0)");
 
             $stmtInvoice = $db->prepare("INSERT INTO invoices 
                 (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, created_by)
-                VALUES (:tid, :cid, :sid, :inv_num, :inv_date, DATE_ADD(:inv_date_calc, INTERVAL 10 DAY), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :uid)");
+                VALUES (:tid, :cid, :sid, :inv_num, :inv_date, DATE_ADD(:inv_date_calc, INTERVAL 10 DAY), :inv_status, :sub, :tot, :paid, :bal, :base, :sell, :uid)");
 
             foreach ($clients as $idx => $row) {
                 $name = trim($row['name'] ?? $row['full_name'] ?? $row['client_name'] ?? '');
@@ -2238,10 +2246,21 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                 }
                 $existingCodes[$customerCode] = true;
 
-                // Dates
+                // Dates & Expiry
                 $joinDate = !empty($row['join_date']) ? date('Y-m-d', strtotime($row['join_date'])) : date('Y-m-d');
+                $hasExplicitExpiry = !empty($row['expiry_date']) || !empty($globalExpiryDate);
                 $rowExpiry = !empty($row['expiry_date']) ? date('Y-m-d', strtotime($row['expiry_date'])) : null;
-                $effectiveExpiry = $globalExpiryDate ?: ($rowExpiry ?: date('Y-m-d', strtotime('+30 days')));
+
+                if ($hasExplicitExpiry) {
+                    $effectiveExpiry = $globalExpiryDate ?: $rowExpiry;
+                    $isExpired = (strtotime($effectiveExpiry . ' 23:59:59') < time());
+                    $billingStatus = $isExpired ? 'Expired' : 'Paid';
+                } else {
+                    // Rule: If no expiry date is given during import, customer is EXPIRED
+                    $effectiveExpiry = date('Y-m-d', strtotime('-1 day'));
+                    $isExpired = true;
+                    $billingStatus = 'Expired';
+                }
 
                 // Insert customer
                 $stmtCustomer->execute([
@@ -2253,6 +2272,7 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                     'phone' => $phone ?: '01700000000',
                     'addr' => $address,
                     'status' => $status,
+                    'bstatus' => $billingStatus,
                     'conn_date' => $joinDate,
                     'oid' => $ownerId,
                     'orole' => $ownerRole,
@@ -2275,6 +2295,7 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                     'cid' => $customerId,
                     'pid' => $pkgId,
                     'did' => $deviceId,
+                    'cstatus' => $isExpired ? 'inactive' : 'active',
                     'starts' => $joinDate . ' 00:00:00',
                     'expires' => $effectiveExpiry . ' 23:59:59',
                     'uid' => $user['user_id'],
@@ -2288,6 +2309,7 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                     'did' => $deviceId,
                     'uname' => $pppoeId,
                     'pwd' => $password,
+                    'nstatus' => $isExpired ? 'disabled' : 'active',
                 ]);
                 $existingUsernames[$lowerPppoe] = true;
 
@@ -2303,9 +2325,11 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                         'inv_num' => $invNumber,
                         'inv_date' => $invDate,
                         'inv_date_calc' => $invDate,
+                        'inv_status' => $isExpired ? 'pending' : 'paid',
                         'sub' => $pkgPrice,
                         'tot' => $pkgPrice,
-                        'paid' => $pkgPrice,
+                        'paid' => $isExpired ? 0.00 : $pkgPrice,
+                        'bal' => $isExpired ? $pkgPrice : 0.00,
                         'base' => $pkgPrice,
                         'sell' => $pkgPrice,
                         'uid' => $user['user_id'],

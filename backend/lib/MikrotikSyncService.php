@@ -627,11 +627,19 @@ class MikrotikSyncService {
     /**
      * Toggle Suspend / Restore for a customer on MikroTik and Database
      */
+    /**
+     * Toggle Suspend / Restore for a customer on MikroTik and Database
+     * Respects tenant's cutoff action: 'disable_secret' vs 'suspended_profile' (pool)
+     */
     public static function toggleSuspend(PDO $db, $customerId, ?int $tenantId = null): array {
-        $stmt = $db->prepare("SELECT c.status, na.username, c.tenant_id 
+        $stmt = $db->prepare("SELECT c.status, c.billing_status, na.username, c.tenant_id, cs.expires_at,
+                COALESCE(ap.mikrotik_profile_name, ap.profile_name) as original_profile_name
             FROM customers c 
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id 
-            WHERE c.customer_id = :cid LIMIT 1");
+            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id
+            LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
+            WHERE c.customer_id = :cid 
+            ORDER BY cs.customer_service_id DESC LIMIT 1");
         $stmt->execute(['cid' => $customerId]);
         $cust = $stmt->fetch();
 
@@ -639,11 +647,18 @@ class MikrotikSyncService {
             return ['success' => false, 'message' => 'Customer not found'];
         }
 
+        $actualTenantId = (int)($tenantId ?: $cust['tenant_id']);
+        require_once __DIR__ . '/BillingCronService.php';
+        $tenantSettings = BillingCronService::getSettings($actualTenantId);
+        $cutoffAction = $tenantSettings['cutoffAction'] ?? 'disable_secret';
+        $suspendedProfile = !empty($tenantSettings['suspendedProfileName']) ? trim($tenantSettings['suspendedProfileName']) : 'SUSPENDED';
+        $originalProfile = !empty($cust['original_profile_name']) ? trim($cust['original_profile_name']) : 'default';
+
         $newStatus = ($cust['status'] === 'suspended') ? 'active' : 'suspended';
         $username = trim($cust['username'] ?? '');
 
         // Update MikroTik Secret if router is accessible
-        $router = self::getRouter($db, $customerId, $tenantId ?: (int)$cust['tenant_id']);
+        $router = self::getRouter($db, $customerId, $actualTenantId);
         if ($router && !empty($username)) {
             $api = self::connect($router, 4);
             if ($api) {
@@ -651,19 +666,33 @@ class MikrotikSyncService {
                     $secList = $api->comm('/ppp/secret/print', ['?name' => $username]);
                     if (!empty($secList)) {
                         $secId = $secList[0]['.id'];
-                        $api->comm('/ppp/secret/set', [
-                            '=.id=' . $secId,
-                            '=disabled=' . ($newStatus === 'suspended' ? 'yes' : 'no'),
-                        ]);
+                        $setParams = ['=.id=' . $secId];
+
+                        if ($newStatus === 'suspended') {
+                            if ($cutoffAction === 'suspended_profile') {
+                                // Transfer to suspended profile / pool
+                                $setParams[] = '=profile=' . $suspendedProfile;
+                                $setParams[] = '=disabled=no';
+                            } else {
+                                // Default: disable secret
+                                $setParams[] = '=disabled=yes';
+                            }
+                        } else {
+                            // Unsuspending / Restoring original package profile & enabling secret
+                            $setParams[] = '=disabled=no';
+                            if (!empty($originalProfile)) {
+                                $setParams[] = '=profile=' . $originalProfile;
+                            }
+                        }
+
+                        $api->comm('/ppp/secret/set', $setParams);
                     }
 
-                    // If suspending, kick active session immediately
-                    if ($newStatus === 'suspended') {
-                        $activeList = $api->comm('/ppp/active/print', ['?name' => $username]);
-                        foreach ($activeList as $s) {
-                            if (isset($s['.id'])) {
-                                $api->comm('/ppp/active/remove', ['=.id=' . $s['.id']]);
-                            }
+                    // Kick active session so suspension or restoration takes effect immediately
+                    $activeList = $api->comm('/ppp/active/print', ['?name' => $username]);
+                    foreach ($activeList as $s) {
+                        if (isset($s['.id'])) {
+                            $api->comm('/ppp/active/remove', ['=.id=' . $s['.id']]);
                         }
                     }
                 } finally {
@@ -672,17 +701,31 @@ class MikrotikSyncService {
             }
         }
 
+        // Determine billing status on unsuspend:
+        if ($newStatus === 'suspended') {
+            $newBillingStatus = 'Suspended';
+        } else {
+            $isExp = (!empty($cust['expires_at']) && strtotime($cust['expires_at']) < time());
+            $newBillingStatus = $isExp ? 'Expired' : 'Paid';
+        }
+
         // Update database
-        $db->prepare("UPDATE customers SET status = :st, billing_status = :bs WHERE customer_id = :cid")
+        $db->prepare("UPDATE customers SET status = :st, billing_status = :bs, updated_at = NOW() WHERE customer_id = :cid")
            ->execute([
                'st' => $newStatus,
-               'bs' => ($newStatus === 'suspended' ? 'Suspended' : 'Paid'),
+               'bs' => $newBillingStatus,
                'cid' => $customerId,
            ]);
 
-        $db->prepare("UPDATE customer_network_accounts SET status = :nst, is_online = CASE WHEN :st1 = 'suspended' THEN 0 ELSE is_online END WHERE customer_id = :cid")
+        $db->prepare("UPDATE customer_services SET status = :st, updated_at = NOW() WHERE customer_id = :cid")
            ->execute([
-               'nst' => ($newStatus === 'suspended' ? 'disabled' : 'active'),
+               'st' => ($newStatus === 'suspended' ? 'suspended' : 'active'),
+               'cid' => $customerId,
+           ]);
+
+        $db->prepare("UPDATE customer_network_accounts SET status = :nst, is_online = CASE WHEN :st1 = 'suspended' THEN 0 ELSE is_online END, updated_at = NOW() WHERE customer_id = :cid")
+           ->execute([
+               'nst' => ($newStatus === 'suspended' ? ($cutoffAction === 'suspended_profile' ? 'active' : 'disabled') : 'active'),
                'st1' => $newStatus,
                'cid' => $customerId,
            ]);
@@ -692,6 +735,7 @@ class MikrotikSyncService {
             'message' => "Customer successfully " . ($newStatus === 'suspended' ? 'suspended' : 'restored') . " on MikroTik and database.",
             'action' => $newStatus,
             'isSuspended' => ($newStatus === 'suspended'),
+            'billingStatus' => $newBillingStatus,
         ];
     }
 

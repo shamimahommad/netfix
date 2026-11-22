@@ -27,6 +27,7 @@ import ModernCheckbox from '@/components/common/ModernCheckbox';
 const CUSTOMER_TYPES: Record<string, { title: string; description: string; statusFilter?: string }> = {
   all: { title: 'All Customers', description: 'View all customers in your system.' },
   add: { title: 'Add Customer', description: 'Create a new customer account.' },
+  expired: { title: 'Expired Customers', description: 'View all expired customers whose subscription validity ended.', statusFilter: 'Expired' },
   suspended: { title: 'Suspended Customers', description: 'View all suspended customers.', statusFilter: 'suspended' },
   'expiring-soon': { title: 'Expiring Soon', description: 'View customers whose subscriptions are expiring soon.' },
   online: { title: 'Online Customers', description: 'View all currently online customers.' },
@@ -1664,6 +1665,7 @@ export default function CustomersPage() {
                 >
                   <option value="">All Status</option>
                   <option value="active">Active</option>
+                  <option value="expired">Expired</option>
                   <option value="suspended">Suspended</option>
                   <option value="cancelled">Cancelled</option>
                   <option value="pending_activation">Pending Activation</option>

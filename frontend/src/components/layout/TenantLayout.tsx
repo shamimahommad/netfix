@@ -95,6 +95,7 @@ export default function TenantLayout() {
           ...(canCreateCustomer ? [{ label: 'Add Customer', path: '/dashboard/customers/add' }] : []),
           { label: 'Online Customers', path: '/dashboard/customers/online' },
           { label: 'Offline Customers', path: '/dashboard/customers/offline' },
+          { label: 'Expired Customers', path: '/dashboard/customers/expired' },
           { label: 'Suspended Customers', path: '/dashboard/customers/suspended' },
           { label: 'Expiring Soon', path: '/dashboard/customers/expiring-soon' },
         ],

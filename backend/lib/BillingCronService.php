@@ -294,14 +294,16 @@ class BillingCronService {
 
     /**
      * Mark customer, service, and network account as inactive/expired in DB
+     * Note: Expired customers keep status = 'active' (with billing_status = 'Expired')
+     * so they are NOT confused with manually suspended accounts.
      */
     private static function markCustomerExpiredInDb(PDO $db, int $customerId, ?int $customerServiceId): void {
         try {
-            $db->prepare("UPDATE customers SET status = 'suspended', billing_status = 'Expired', updated_at = NOW() WHERE customer_id = :cid")
+            $db->prepare("UPDATE customers SET billing_status = 'Expired', updated_at = NOW() WHERE customer_id = :cid AND status != 'suspended'")
                ->execute(['cid' => $customerId]);
 
             if ($customerServiceId) {
-                $db->prepare("UPDATE customer_services SET status = 'suspended', updated_at = NOW() WHERE customer_service_id = :sid")
+                $db->prepare("UPDATE customer_services SET status = 'inactive', updated_at = NOW() WHERE customer_service_id = :sid")
                    ->execute(['sid' => $customerServiceId]);
             }
 
@@ -309,7 +311,7 @@ class BillingCronService {
                ->execute(['cid' => $customerId]);
 
             $db->prepare("INSERT INTO client_task_logs (tenant_id, customer_id, action, description, status, created_by, created_at)
-                SELECT tenant_id, :cid, 'AUTO_EXPIRE', 'Customer subscription expired and suspended by auto-cutoff engine', 'completed', 1, NOW()
+                SELECT tenant_id, :cid, 'AUTO_EXPIRE', 'Customer subscription expired by auto-cutoff engine', 'completed', 1, NOW()
                 FROM customers WHERE customer_id = :cid2 LIMIT 1")
                ->execute(['cid' => $customerId, 'cid2' => $customerId]);
         } catch (\Throwable $e) {
