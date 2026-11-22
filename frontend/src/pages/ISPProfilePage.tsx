@@ -33,6 +33,7 @@ import {
   ShieldCheck,
   Copy,
   Hash,
+  Share2,
   Sparkles,
 } from 'lucide-react';
 import { getCustomerViewTemplate, setCustomerViewTemplate, CustomerViewTemplate } from '@/lib/customerViewTemplate';
@@ -1142,35 +1143,135 @@ export default function ISPProfilePage() {
             </button>
           </div>
 
-          {/* Unique ISP ID & Dedicated Payment Webhook Integration Card */}
-          <div className="p-5 bg-gradient-to-r from-blue-50 to-indigo-50/60 dark:from-slate-900 dark:to-slate-900 border-b border-slate-200 dark:border-slate-700/80 space-y-3">
+          {/* MFS Pay Bill & Webhook Integration Section */}
+          <div className="p-5 bg-gradient-to-r from-blue-50 to-indigo-50/60 dark:from-slate-900 dark:to-slate-900 border-b border-slate-200 dark:border-slate-700/80 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
-                  <Hash className="w-4 h-4" />
-                  ISP Unique ID: <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 font-bold">#{tenant.tenantCode}</span>
+                  <Zap className="w-4 h-4" />
+                  MFS Pay Bill (bKash / Nagad / Rocket) & Gateway Webhook Setup
                 </span>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  Use this dedicated webhook URL in merchant portals (bKash, Nagad, SSLCommerz, SurjoPay) for automated instant payment callbacks and IPN reconciliation.
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Provide these turnkey URLs and Biller ID to bKash / Nagad / Payment Gateways for this tenant.
                 </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-              <div className="flex-1 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2 font-mono text-xs text-slate-700 dark:text-slate-300 truncate select-all">
-                {`${window.location.origin}/api/payment/webhook?isp_id=${tenant.tenantCode}`}
               </div>
               <button
                 type="button"
                 onClick={() => {
-                  navigator.clipboard.writeText(`${window.location.origin}/api/payment/webhook?isp_id=${tenant.tenantCode}`);
-                  toast.success(`Webhook URL for ${tenant.tenantCode} copied to clipboard!`);
+                  const fullText = `================================================
+NETFIX MFS PAY BILL & WEBHOOK INTEGRATION
+================================================
+ISP / Tenant:        ${tenant.tenantName}
+Biller Code:         ${tenant.tenantCode}
+Domain / Host:       ${window.location.origin}
+
+[1] MFS PAY BILL (bKash / Nagad / Rocket / Upay)
+------------------------------------------------
+1. Bill Inquiry API (GET/POST):
+   ${window.location.origin}/api/paybill/inquiry?isp=${tenant.tenantCode}
+   
+2. Bill Payment API (POST):
+   ${window.location.origin}/api/paybill/payment?isp=${tenant.tenantCode}
+
+[2] ONLINE GATEWAY WEBHOOK (IPN)
+------------------------------------------------
+1. Callback Webhook URL:
+   ${window.location.origin}/api/payment/webhook?isp_id=${tenant.tenantCode}
+================================================`;
+                  navigator.clipboard.writeText(fullText);
+                  toast.success(`All Paybill & Webhook details for ${tenant.tenantCode} copied!`);
                 }}
-                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-sm transition-all active:scale-95 shrink-0 flex items-center gap-1.5"
+                className="px-3 py-1.5 rounded-xl border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-semibold text-xs transition-colors shrink-0 flex items-center gap-1.5 shadow-2xs"
               >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy Webhook URL</span>
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Copy All Details</span>
               </button>
+            </div>
+
+            {/* Grid of 2 Paybill URLs */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Bill Inquiry URL */}
+              <div className="p-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                    <Radio className="w-3.5 h-3.5 text-blue-600" />
+                    1. Bill Inquiry URL (বিল যাচাই API)
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 font-mono font-bold">GET / POST</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="flex-1 font-mono text-[11px] text-slate-700 dark:text-slate-300 truncate select-all">
+                    {`${window.location.origin}/api/paybill/inquiry?isp=${tenant.tenantCode}`}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${window.location.origin}/api/paybill/inquiry?isp=${tenant.tenantCode}`);
+                      toast.success(`Bill Inquiry URL copied!`);
+                    }}
+                    className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 shrink-0"
+                    title="Copy Inquiry URL"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Bill Payment URL */}
+              <div className="p-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                    <CreditCard className="w-3.5 h-3.5 text-indigo-600" />
+                    2. Bill Payment URL (পেমেন্ট গ্রহণ API)
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 font-mono font-bold">POST</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="flex-1 font-mono text-[11px] text-slate-700 dark:text-slate-300 truncate select-all">
+                    {`${window.location.origin}/api/paybill/payment?isp=${tenant.tenantCode}`}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${window.location.origin}/api/paybill/payment?isp=${tenant.tenantCode}`);
+                      toast.success(`Bill Payment URL copied!`);
+                    }}
+                    className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 shrink-0"
+                    title="Copy Payment URL"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Gateway Webhook URL */}
+            <div className="p-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                  <Globe className="w-3.5 h-3.5 text-purple-600" />
+                  3. Gateway Webhook URL (bKash PGW, Nagad, SSLCommerz IPN)
+                </span>
+                <span className="font-mono text-[11px] text-blue-600 dark:text-blue-400 font-bold">
+                  Biller ID: #{tenant.tenantCode}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="flex-1 font-mono text-[11px] text-slate-700 dark:text-slate-300 truncate select-all">
+                  {`${window.location.origin}/api/payment/webhook?isp_id=${tenant.tenantCode}`}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${window.location.origin}/api/payment/webhook?isp_id=${tenant.tenantCode}`);
+                    toast.success(`Webhook URL copied!`);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs shrink-0 flex items-center gap-1.5 shadow-2xs"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy Webhook URL</span>
+                </button>
+              </div>
             </div>
           </div>
 

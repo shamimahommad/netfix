@@ -34,6 +34,7 @@ import { useTenantStore } from '@/stores/tenantStore';
 import { useToastContext } from '@/contexts/ToastContext';
 import { showDeleteConfirm, showError, showSuccess } from '@/lib/swal';
 import AddISPModal from '@/components/AddISPModal';
+import PaybillWebhookModal from '@/components/PaybillWebhookModal';
 
 const CARD_COLORS = [
   'from-blue-600 to-indigo-600',
@@ -408,6 +409,8 @@ export default function ISPsListPage() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editTenant, setEditTenant] = useState<Tenant | null>(null);
+  const [paybillModalTenant, setPaybillModalTenant] = useState<Tenant | null>(null);
+  const [isPaybillModalOpen, setIsPaybillModalOpen] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | TenantStatus>('all');
@@ -878,6 +881,16 @@ export default function ISPsListPage() {
                             <LogIn className="w-3.5 h-3.5" />
                           </button>
                           <button
+                            onClick={() => {
+                              setPaybillModalTenant(t);
+                              setIsPaybillModalOpen(true);
+                            }}
+                            className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
+                            title="Paybill & Webhook Setup"
+                          >
+                            <Radio className="w-3.5 h-3.5" />
+                          </button>
+                          <button
                             onClick={() => navigate(`/saas/tenants/${t.tenantId}`)}
                             className="p-1.5 rounded-lg text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
                             title="View Profile"
@@ -928,6 +941,14 @@ export default function ISPsListPage() {
           loadTenants();
           setIsEditModalOpen(false);
           setEditTenant(null);
+        }}
+      />
+      <PaybillWebhookModal
+        isOpen={isPaybillModalOpen}
+        tenant={paybillModalTenant}
+        onClose={() => {
+          setIsPaybillModalOpen(false);
+          setPaybillModalTenant(null);
         }}
       />
     </div>

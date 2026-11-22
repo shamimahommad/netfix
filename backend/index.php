@@ -411,6 +411,39 @@ if (($method === 'POST' || $method === 'GET') && (
 }
 
 // ---------------------------------------------------------------------
+// MFS PAY BILL (bKash, Nagad, Rocket, Upay) Biller Engine
+// ---------------------------------------------------------------------
+if (
+    $uri === '/api/paybill/inquiry' ||
+    $uri === '/paybill/inquiry' ||
+    $uri === '/api/paybill/check' ||
+    $uri === '/paybill/check' ||
+    preg_match('#^/(?:api/)?paybill/inquiry/([^/]+)$#', $uri, $m)
+) {
+    if (isset($m[1])) {
+        $_GET['isp'] = $m[1];
+    }
+    require_once __DIR__ . '/controllers/PaybillController.php';
+    PaybillController::inquiry();
+    exit;
+}
+
+if (
+    $uri === '/api/paybill/payment' ||
+    $uri === '/paybill/payment' ||
+    $uri === '/api/paybill/pay' ||
+    $uri === '/paybill/pay' ||
+    preg_match('#^/(?:api/)?paybill/payment/([^/]+)$#', $uri, $m)
+) {
+    if (isset($m[1])) {
+        $_GET['isp'] = $m[1];
+    }
+    require_once __DIR__ . '/controllers/PaybillController.php';
+    PaybillController::payment();
+    exit;
+}
+
+// ---------------------------------------------------------------------
 // RESELLERS & POP HIERARCHY
 // ---------------------------------------------------------------------
 if ($method === 'GET' && $uri === '/resellers') {
