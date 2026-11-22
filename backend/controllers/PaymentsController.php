@@ -585,9 +585,12 @@ class PaymentsController {
                 $desc = "Unmatched Payment: " . ucfirst($method ?: 'MFS') . " - Ref " . $r['transaction_ref'];
             }
 
-            $trxId = $r['transaction_ref'] ?: ('TRX-' . $r['transaction_id']);
-            if (preg_match('/^TXG-\d{8}-([A-F0-9]+)$/i', $trxId)) {
-                $trxId = 'TRX-' . $r['transaction_id'];
+            $rawRef = $r['transaction_ref'] ?: (string)$r['transaction_id'];
+            if (preg_match('/^TXG-\d{8}-/i', $rawRef)) {
+                $trxId = (string)$r['transaction_id'];
+            } else {
+                $clean = preg_replace('/^(TRX[-_]RENEW|TRX[-_]BKASH|TEST[-_]UNMATCHED|BKASH|TRX|RCH|TOPUP|WT|TXG|TX)[-_]/i', '', $rawRef);
+                $trxId = !empty($clean) ? $clean : (string)$r['transaction_id'];
             }
 
             $dataRows[] = [
@@ -908,9 +911,12 @@ class PaymentsController {
                 }
             }
 
-            $trxId = $r['reference_id'] ?: ('TRX-' . $r['transaction_id']);
-            if (preg_match('/^TXG-\d{8}-([A-F0-9]+)$/i', $trxId)) {
-                $trxId = 'TRX-' . $r['transaction_id'];
+            $rawRef = $r['reference_id'] ?: (string)$r['transaction_id'];
+            if (preg_match('/^TXG-\d{8}-/i', $rawRef)) {
+                $trxId = (string)$r['transaction_id'];
+            } else {
+                $clean = preg_replace('/^(TRX[-_]RENEW|TRX[-_]BKASH|TEST[-_]UNMATCHED|BKASH|TRX|RCH|TOPUP|WT|TXG|TX)[-_]/i', '', $rawRef);
+                $trxId = !empty($clean) ? $clean : (string)$r['transaction_id'];
             }
 
             $dataRows[] = [

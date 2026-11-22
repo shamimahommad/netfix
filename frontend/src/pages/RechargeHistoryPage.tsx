@@ -5,7 +5,7 @@ import { resellerService, PopOption } from '@/services/reseller.service';
 import { paymentsService } from '@/services/payments.service';
 import { usersService } from '@/services/users.service';
 import { useToastContext } from '@/contexts/ToastContext';
-import { formatInvoiceIdDisplay } from '@/lib/formatInvoiceId';
+import { formatRealTrxId } from '@/lib/formatInvoiceId';
 import { PageHeader, MetricCard } from '@/components/common';
 
 export interface LedgerRow {
@@ -324,7 +324,7 @@ export default function RechargeHistoryPage() {
                     >
                       <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{row.sl}</td>
                       <td className="px-4 py-3 font-mono text-xs font-semibold text-slate-700 dark:text-slate-300">
-                        {row.ref}
+                        {formatRealTrxId(row.ref)}
                       </td>
                       <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{row.initiator_name || '–'}</td>
                       <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{row.pop_in_charge_name || '–'}</td>

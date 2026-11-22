@@ -4,7 +4,7 @@ import { CreditCard, Search, Download, RefreshCw, ChevronLeft, ChevronRight, Use
 import { resellerService, PopOption } from '@/services/reseller.service';
 import { paymentsService } from '@/services/payments.service';
 import { useToastContext } from '@/contexts/ToastContext';
-import { formatInvoiceIdDisplay } from '@/lib/formatInvoiceId';
+import { formatRealTrxId } from '@/lib/formatInvoiceId';
 import { PageHeader, MetricCard } from '@/components/common';
 import AssignPaymentModal from '@/components/AssignPaymentModal';
 
@@ -376,7 +376,7 @@ export default function CustomerPaymentsPage() {
                   >
                     <td className="py-3 px-4 text-sm font-medium text-slate-700 dark:text-slate-300">{row.sl}</td>
                     <td className="py-3 px-4 text-sm font-mono text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      {row.ref}
+                      {formatRealTrxId(row.ref)}
                     </td>
                     <td className="py-3 px-4 text-sm font-medium text-slate-900 dark:text-slate-100">
                       <div className="flex items-center gap-2">
