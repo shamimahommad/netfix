@@ -126,15 +126,16 @@ try {
     $stmtCust->execute(['cid' => $customerId]);
 
     // 4. Create paid invoice & record transaction
-    $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 6);
+    $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 4);
     $stmtInv = $db->prepare("INSERT INTO invoices 
-        (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, collected_by, renew_mode, notes, created_by)
-        VALUES (:tid, :cid, :sid, :inv_num, CURDATE(), CURDATE(), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :coll, :renew_mode, :notes, :uid)");
+        (tenant_id, customer_id, customer_service_id, invoice_number, invoice_no, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, collected_by, renew_mode, notes, created_by)
+        VALUES (:tid, :cid, :sid, :inv_num, :inv_no, CURDATE(), CURDATE(), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :coll, :renew_mode, :notes, :uid)");
     $stmtInv->execute([
         'tid' => $tenantId,
         'cid' => $customerId,
         'sid' => $currentService['customer_service_id'] ?? null,
         'inv_num' => $invNumber,
+        'inv_no' => $invNumber,
         'sub' => $totalAmount,
         'tot' => $totalAmount,
         'paid' => $totalAmount,

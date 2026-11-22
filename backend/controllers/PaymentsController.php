@@ -1103,8 +1103,9 @@ class PaymentsController {
                     WHERE invoice_id = :id")
                    ->execute(['amt' => $amount, 'pm' => $gateway, 'id' => $resolvedInvId]);
             } else {
-                // Create paid invoice
-                $invNumber = 'INV-' . date('Ymd') . '-' . substr(uniqid(), -4);
+                // Create paid invoice with pure numeric globally unique sequence starting from 1000
+                require_once __DIR__ . '/../lib/TenantSequenceService.php';
+                $invNumber = TenantSequenceService::generateNextCode($db, (string)$effectiveTenantId, 'invoice', 4);
                 $stmtInsInv = $db->prepare("INSERT INTO invoices 
                     (tenant_id, customer_id, customer_service_id, invoice_number, invoice_no, invoice_date, due_date, subtotal, total_amount, paid_amount, balance_due, status, payment_method, paid_at, created_at, updated_at)
                     VALUES (:tid, :cid, :csid, :num, :num2, CURDATE(), DATE_ADD(CURDATE(), INTERVAL :days DAY), :sub, :amt, :paid, 0.00, 'paid', :pm, NOW(), NOW(), NOW())");

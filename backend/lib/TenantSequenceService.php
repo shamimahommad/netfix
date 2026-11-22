@@ -16,13 +16,19 @@
 
 class TenantSequenceService {
     public const BASE_CUSTOMER_ID = 100000;
-    public const BASE_INVOICE_ID  = 200000;
+    public const BASE_INVOICE_ID  = 999;
     public const BASE_DEVICE_ID   = 300000;
 
     /**
      * Preview the next sequence code without incrementing (for UI display)
      */
-    public static function peekNextCode(PDO $db, string $tenantId, string $type = 'customer', int $padding = 6): string {
+    public static function peekNextCode(PDO $db, string $tenantId, string $type = 'customer', ?int $padding = null): string {
+        if ($padding === null || ($type === 'invoice' && $padding > 4)) {
+            $padding = match($type) {
+                'invoice' => 4,
+                default => 6,
+            };
+        }
         $isGlobal = self::isGlobalType($type);
         $effectiveTenantId = $isGlobal ? '0' : $tenantId;
         $base = self::getBaseForType($type);
@@ -54,7 +60,13 @@ class TenantSequenceService {
      * Atomically generate and lock the next sequential code.
      * MUST be called inside an active database transaction.
      */
-    public static function generateNextCode(PDO $db, string $tenantId, string $type = 'customer', int $padding = 6): string {
+    public static function generateNextCode(PDO $db, string $tenantId, string $type = 'customer', ?int $padding = null): string {
+        if ($padding === null || ($type === 'invoice' && $padding > 4)) {
+            $padding = match($type) {
+                'invoice' => 4,
+                default => 6,
+            };
+        }
         $isGlobal = self::isGlobalType($type);
         $effectiveTenantId = $isGlobal ? '0' : $tenantId;
         $base = self::getBaseForType($type);
@@ -104,7 +116,7 @@ class TenantSequenceService {
     private static function getMaxFromTable(PDO $db, string $type): int {
         return match($type) {
             'customer' => (int)$db->query("SELECT MAX(CAST(customer_code AS UNSIGNED)) FROM customers")->fetchColumn(),
-            'invoice'  => (int)$db->query("SELECT MAX(CAST(invoice_number AS UNSIGNED)) FROM invoices")->fetchColumn(),
+            'invoice'  => (int)$db->query("SELECT MAX(CAST(invoice_number AS UNSIGNED)) FROM invoices WHERE invoice_number REGEXP '^[0-9]+$'")->fetchColumn(),
             'device'   => (int)$db->query("SELECT MAX(CAST(device_code AS UNSIGNED)) FROM network_devices")->fetchColumn(),
             default    => 0,
         };

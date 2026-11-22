@@ -983,7 +983,7 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             $stmtPkg->execute(['pid' => $packageId]);
             $price = (float)($stmtPkg->fetchColumn() ?: 500.00);
 
-            $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 6);
+            $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 4);
 
             // Strict Pre-Flight Balance & Credit Limit Enforcement for Reseller, Sub-Reseller, Dealer, Agent
             if ($callerLevel > 0) {
@@ -999,13 +999,14 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             }
 
             $stmtInv = $db->prepare("INSERT INTO invoices 
-                (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, created_by)
-                VALUES (:tid, :cid, :sid, :inv_num, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 10 DAY), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :uid)");
+                (tenant_id, customer_id, customer_service_id, invoice_number, invoice_no, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, created_by)
+                VALUES (:tid, :cid, :sid, :inv_num, :inv_no, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 10 DAY), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :uid)");
             $stmtInv->execute([
                 'tid' => $tenantId,
                 'cid' => $customerId,
                 'sid' => $serviceId,
                 'inv_num' => $invNumber,
+                'inv_no' => $invNumber,
                 'sub' => $price,
                 'tot' => $price,
                 'paid' => $price,
@@ -2316,7 +2317,7 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                 // Create invoice if postpaid + requested
                 if ($createInvoice) {
                     $pkgPrice = $pkgPrices[$pkgId] ?? (!empty($row['monthly_bill']) ? (float)$row['monthly_bill'] : 0.00);
-                    $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 6);
+                    $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 4);
                     $invDate = !empty($globalInvoiceMonth) ? date('Y-m-d', strtotime($globalInvoiceMonth . '-01')) : date('Y-m-d');
                     $stmtInvoice->execute([
                         'tid' => $tenantId,

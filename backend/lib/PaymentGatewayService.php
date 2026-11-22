@@ -967,16 +967,18 @@ class PaymentGatewayService {
                     $stmtCs->execute(['cid' => $customerId, 'tid' => $tenantId]);
                     $csRow = $stmtCs->fetch(PDO::FETCH_ASSOC);
 
-                    $invNum = 'INV-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(3)));
+                    require_once __DIR__ . '/TenantSequenceService.php';
+                    $invNum = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 4);
                     $stmtNewInv = $db->prepare("INSERT INTO invoices 
-                        (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, subtotal, total_amount, paid_amount, balance_due, status, payment_method, notes, created_at, updated_at)
+                        (tenant_id, customer_id, customer_service_id, invoice_number, invoice_no, invoice_date, due_date, subtotal, total_amount, paid_amount, balance_due, status, payment_method, notes, created_at, updated_at)
                         VALUES 
-                        (:tid, :cid, :csid, :invnum, CURDATE(), CURDATE(), :subtotal, :total, :paid, 0.00, 'paid', :pm, :notes, NOW(), NOW())");
+                        (:tid, :cid, :csid, :invnum, :invno, CURDATE(), CURDATE(), :subtotal, :total, :paid, 0.00, 'paid', :pm, :notes, NOW(), NOW())");
                     $stmtNewInv->execute([
                         'tid' => $tenantId,
                         'cid' => $customerId,
                         'csid' => $csRow['customer_service_id'] ?? null,
                         'invnum' => $invNum,
+                        'invno' => $invNum,
                         'subtotal' => $amount,
                         'total' => $amount,
                         'paid' => $amount,

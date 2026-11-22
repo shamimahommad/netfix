@@ -2825,7 +2825,7 @@ class NetworkController {
 
                 if ($generateInvoice && $pkgId) {
                     $pkgPrice = $pkgPrices[$pkgId] ?? 0.00;
-                    $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 6);
+                    $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 4);
                     $invDate = !empty($invoiceMonth) ? date('Y-m-d', strtotime($invoiceMonth . '-01')) : date('Y-m-d');
                     $stmtInvoice->execute([
                         'tid' => $tenantId,

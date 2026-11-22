@@ -337,8 +337,8 @@ class BillingController {
             $stmtCust = $db->prepare("UPDATE customers SET status = 'active', billing_status = 'Paid' WHERE customer_id = :cid");
             $stmtCust->execute(['cid' => $customerId]);
 
-            // Create paid invoice with pure numeric globally unique sequence
-            $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 6);
+            // Create paid invoice with pure numeric globally unique sequence starting from 1000
+            $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 4);
 
             // Strict Pre-Flight Balance & Credit Limit Enforcement for Reseller, Sub-Reseller, Dealer, Agent
             require_once __DIR__ . '/../lib/HierarchySecurityService.php';
@@ -429,13 +429,14 @@ class BillingController {
             }
 
             $stmtInv = $db->prepare("INSERT INTO invoices 
-                (tenant_id, customer_id, customer_service_id, invoice_number, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, collected_by, charged_user_id, renew_mode, notes, previous_expire_date, created_by)
-                VALUES (:tid, :cid, :sid, :inv_num, CURDATE(), CURDATE(), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :coll, :chg, :renew_mode, :notes, :prev_exp, :uid)");
+                (tenant_id, customer_id, customer_service_id, invoice_number, invoice_no, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, collected_by, charged_user_id, renew_mode, notes, previous_expire_date, created_by)
+                VALUES (:tid, :cid, :sid, :inv_num, :inv_no, CURDATE(), CURDATE(), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :coll, :chg, :renew_mode, :notes, :prev_exp, :uid)");
             $stmtInv->execute([
                 'tid' => $tenantId,
                 'cid' => $customerId,
                 'sid' => $currentService['customer_service_id'] ?? null,
                 'inv_num' => $invNumber,
+                'inv_no' => $invNumber,
                 'sub' => $totalAmount,
                 'tot' => $totalAmount,
                 'paid' => $totalAmount,

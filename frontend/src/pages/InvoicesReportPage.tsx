@@ -146,7 +146,7 @@ export default function InvoicesReportPage() {
   function downloadCSV() {
     const headers = ['Inv ID', 'Inv Time', 'Exp.Date', 'C.Name', 'Username', 'Mobile No', 'Bill Amount', 'Balance', 'Done By'];
     const rows = rowsToExport.map((inv) => [
-      inv.invoiceId,
+      inv.invoiceNumber || inv.invoiceId,
       formatDateTime(inv.createdAt),
       formatDateOnly(inv.dueDate),
       inv.customerName ?? inv.customerId ?? '',
@@ -169,7 +169,7 @@ export default function InvoicesReportPage() {
   function downloadExcel() {
     const headers = ['Inv ID', 'Inv Time', 'Exp.Date', 'C.Name', 'Username', 'Mobile No', 'Bill Amount', 'Balance', 'Done By'];
     const rows = rowsToExport.map((inv) => [
-      inv.invoiceId,
+      inv.invoiceNumber || inv.invoiceId,
       formatDateTime(inv.createdAt),
       formatDateOnly(inv.dueDate),
       inv.customerName ?? inv.customerId ?? '',
@@ -189,7 +189,7 @@ export default function InvoicesReportPage() {
     const doc = new jsPDF({ orientation: 'landscape' });
     const headers = [['Inv ID', 'Inv Time', 'Exp.Date', 'C.Name', 'Username', 'Mobile No', 'Bill Amount', 'Balance', 'Done By']];
     const rows = rowsToExport.map((inv) => [
-      String(inv.invoiceId),
+      String(inv.invoiceNumber || inv.invoiceId),
       formatDateTime(inv.createdAt),
       formatDateOnly(inv.dueDate),
       (inv.customerName ?? inv.customerId ?? '').slice(0, 20),
@@ -463,7 +463,7 @@ export default function InvoicesReportPage() {
                       />
                     </td>
                     <td className="py-3 px-4 font-medium text-slate-900 dark:text-slate-100 font-mono text-xs">
-                      {formatInvoiceIdDisplay(inv.invoiceId)}
+                      {formatInvoiceIdDisplay(inv.invoiceNumber || inv.invoiceId)}
                     </td>
                     <td className="py-3 px-4 text-slate-600 dark:text-slate-400 whitespace-nowrap text-xs">
                       {formatDateTime(inv.createdAt)}
