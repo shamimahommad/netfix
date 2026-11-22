@@ -135,7 +135,7 @@ export default function CustomerPaymentsPage() {
   };
 
   const handleExport = () => {
-    const headers = ['SL', 'REF', 'Initiator', 'Pop In Charge', 'Debit', 'Credit', 'Balance', 'Time', 'Description'];
+    const headers = ['SL', 'TRX ID', 'Initiator', 'Pop In Charge', 'Debit', 'Credit', 'Balance', 'Time', 'Description'];
     const rows = data.map((r) => [
       r.sl,
       r.ref,
@@ -342,7 +342,7 @@ export default function CustomerPaymentsPage() {
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/75 dark:bg-slate-800/50">
                 <th className="py-3 px-4 text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider">SL</th>
-                <th className="py-3 px-4 text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider">Ref</th>
+                <th className="py-3 px-4 text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider">TRX ID</th>
                 <th className="py-3 px-4 text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider">Initiator</th>
                 <th className="py-3 px-4 text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider">POP In Charge</th>
                 <th className="py-3 px-4 text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider text-right">Debit</th>
@@ -375,8 +375,8 @@ export default function CustomerPaymentsPage() {
                     className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
                   >
                     <td className="py-3 px-4 text-sm font-medium text-slate-700 dark:text-slate-300">{row.sl}</td>
-                    <td className="py-3 px-4 text-sm font-mono text-xs text-slate-600 dark:text-slate-400">
-                      {formatInvoiceIdDisplay(row.ref)}
+                    <td className="py-3 px-4 text-sm font-mono text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      {row.ref}
                     </td>
                     <td className="py-3 px-4 text-sm font-medium text-slate-900 dark:text-slate-100">
                       <div className="flex items-center gap-2">

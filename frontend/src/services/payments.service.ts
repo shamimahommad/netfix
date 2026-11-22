@@ -274,7 +274,7 @@ export const paymentsService = {
       per_page: response.data?.per_page ?? limit,
       data: list.map((r, i) => ({
         sl: (page - 1) * limit + i + 1,
-        ref: r.ref,
+        ref: (r as any).trx_id || r.ref || ('TRX-' + (r as any).transaction_id),
         initiator_name: r.initiator_name ?? '-',
         pop_in_charge_name: (r as any).pop_in_charge_name || (r as any).pop_name || r.collector_name || '-',
         debit: r.debit ?? 0,
@@ -334,7 +334,7 @@ export const paymentsService = {
       total: response.data?.total ?? 0,
       data: list.map((r, i) => ({
         sl: (page - 1) * limit + i + 1,
-        ref: r.ref,
+        ref: (r as any).trx_id || r.ref || ('TRX-' + (r as any).transaction_id),
         initiator_name: r.initiator_name ?? '-',
         pop_in_charge_name: r.pop_in_charge_name ?? '-',
         debit: r.debit ?? 0,

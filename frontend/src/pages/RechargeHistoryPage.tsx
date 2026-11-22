@@ -112,7 +112,7 @@ export default function RechargeHistoryPage() {
   };
 
   const handleExport = () => {
-    const headers = ['SL', 'REF', 'Initiator', 'Pop In Charge', 'Debit', 'Credit', 'Balance', 'Time', 'Description'];
+    const headers = ['SL', 'TRX ID', 'Initiator', 'Pop In Charge', 'Debit', 'Credit', 'Balance', 'Time', 'Description'];
     const rows = data.map((r) => [
       r.sl,
       r.ref,
@@ -299,7 +299,7 @@ export default function RechargeHistoryPage() {
               <thead>
                 <tr className="bg-slate-100 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700/80 text-xs font-semibold text-slate-700 dark:text-slate-200 uppercase tracking-wider">
                   <th className="px-4 py-3 text-left">SL</th>
-                  <th className="px-4 py-3 text-left">REF</th>
+                  <th className="px-4 py-3 text-left">TRX ID</th>
                   <th className="px-4 py-3 text-left">Initiator</th>
                   <th className="px-4 py-3 text-left">POP In-Charge</th>
                   <th className="px-4 py-3 text-right">Debit</th>
@@ -323,8 +323,8 @@ export default function RechargeHistoryPage() {
                       className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50 transition-colors"
                     >
                       <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{row.sl}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-700 dark:text-slate-300">
-                        {formatInvoiceIdDisplay(row.ref) || row.ref}
+                      <td className="px-4 py-3 font-mono text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        {row.ref}
                       </td>
                       <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{row.initiator_name || '–'}</td>
                       <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{row.pop_in_charge_name || '–'}</td>

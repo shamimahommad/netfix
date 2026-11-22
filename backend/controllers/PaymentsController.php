@@ -585,9 +585,15 @@ class PaymentsController {
                 $desc = "Unmatched Payment: " . ucfirst($method ?: 'MFS') . " - Ref " . $r['transaction_ref'];
             }
 
+            $trxId = $r['transaction_ref'] ?: ('TRX-' . $r['transaction_id']);
+            if (preg_match('/^TXG-\d{8}-([A-F0-9]+)$/i', $trxId)) {
+                $trxId = 'TRX-' . $r['transaction_id'];
+            }
+
             $dataRows[] = [
-                'ref' => $r['transaction_ref'] ?: ('TRX-' . $r['transaction_id']),
-                'ref_no' => $r['transaction_ref'] ?: ('TRX-' . $r['transaction_id']),
+                'ref' => $trxId,
+                'trx_id' => $trxId,
+                'ref_no' => $trxId,
                 'initiator_name' => $initName,
                 'collector_name' => $popName,
                 'pop_name' => $popName,
@@ -902,10 +908,16 @@ class PaymentsController {
                 }
             }
 
+            $trxId = $r['reference_id'] ?: ('TRX-' . $r['transaction_id']);
+            if (preg_match('/^TXG-\d{8}-([A-F0-9]+)$/i', $trxId)) {
+                $trxId = 'TRX-' . $r['transaction_id'];
+            }
+
             $dataRows[] = [
                 'sl' => $sl++,
-                'ref' => $r['reference_id'] ?: ('WT-' . $r['transaction_id']),
-                'ref_no' => $r['reference_id'] ?: ('WT-' . $r['transaction_id']),
+                'ref' => $trxId,
+                'trx_id' => $trxId,
+                'ref_no' => $trxId,
                 'initiator_name' => $initName,
                 'pop_in_charge_name' => $popName,
                 'pop_name' => $popName,

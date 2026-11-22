@@ -195,8 +195,8 @@ class PaymentSplitService {
                 $lockedWallets[$bUid] = $wRow;
             }
 
-            // 8. Generate Unique Transaction Group Identifier
-            $txnGroupId = 'TXG-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(6)));
+            // 8. Generate Unique Transaction Group Identifier (Prefer actual gateway TrxID if available)
+            $txnGroupId = !empty($options['trx_id']) ? $options['trx_id'] : ('TRX-' . strtoupper(substr(uniqid(), -8)));
 
             // 9. Execute Double-Entry Disbursement & Immutable Ledger Trail
             $auditTrail = [];
