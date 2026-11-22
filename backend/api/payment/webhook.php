@@ -32,12 +32,25 @@ try {
     $status    = strtolower(trim($payload['status'] ?? ($payload['sp_massage'] ?? ($payload['transaction_status'] ?? ''))));
     $amount    = (float)($payload['amount'] ?? 0);
     $invoiceId = $payload['invoice_id'] ?? ($payload['invoice_no'] ?? null);
+    $ref       = trim(
+        $payload['reference'] 
+        ?? ($payload['payerReference'] 
+        ?? ($payload['merchantInvoiceNumber'] 
+        ?? ($payload['ref'] 
+        ?? ($payload['customer_id'] 
+        ?? ($payload['customer_code'] 
+        ?? ($payload['account_number'] 
+        ?? ($payload['bill_account_number'] ?? '')))))))
+    );
+    if (empty($invoiceId) && !empty($ref)) {
+        $invoiceId = $ref;
+    }
 
-    if (empty($paymentId) && empty($trxId) && empty($invoiceId)) {
+    if (empty($paymentId) && empty($trxId) && empty($invoiceId) && empty($ref)) {
         http_response_code(400);
         echo json_encode([
             'success' => false,
-            'message' => 'Missing required payment identifiers (paymentID, trxID, or invoice_id).'
+            'message' => 'Missing required payment identifiers (paymentID, trxID, reference, or invoice_id).'
         ]);
         exit;
     }
@@ -101,12 +114,16 @@ try {
     $resolvedInvoiceId = $intent && $intent['invoice_id'] ? (int)$intent['invoice_id'] : null;
 
     if (!$resolvedInvoiceId && !empty($invoiceId)) {
+        // Priority A: Try finding invoice strictly within this tenant
         $stmtInvLookup = $db->prepare("SELECT invoice_id, tenant_id, customer_id, total_amount 
-            FROM invoices WHERE invoice_id = :id OR invoice_number = :no OR invoice_no = :no2 LIMIT 1");
+            FROM invoices WHERE (invoice_id = :id OR invoice_number = :no OR invoice_no = :no2)
+            AND (tenant_id = :tid OR :tid2 = 0) LIMIT 1");
         $stmtInvLookup->execute([
             'id' => is_numeric($invoiceId) ? (int)$invoiceId : 0,
             'no' => (string)$invoiceId,
             'no2' => (string)$invoiceId,
+            'tid' => $tenantId,
+            'tid2' => $tenantId,
         ]);
         $invRow = $stmtInvLookup->fetch(PDO::FETCH_ASSOC);
         $stmtInvLookup->closeCursor();
@@ -118,6 +135,31 @@ try {
             if ($amount <= 0) {
                 $amount = (float)$invRow['total_amount'];
             }
+        }
+    }
+
+    // Priority B: If no invoice matched directly, search customer by Reference/Code within this tenant
+    if (!$resolvedInvoiceId && !$customerId && !empty($ref)) {
+        $stmtCustLookup = $db->prepare("SELECT c.customer_id, c.tenant_id, c.customer_code, c.full_name
+            FROM customers c
+            LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
+            WHERE (c.tenant_id = :tid OR :tid2 = 0)
+              AND (c.customer_code = :q1 OR c.customer_id = :q2 OR c.phone = :q3 OR na.username = :q4)
+            LIMIT 1");
+        $stmtCustLookup->execute([
+            'tid' => $tenantId,
+            'tid2' => $tenantId,
+            'q1' => $ref,
+            'q2' => is_numeric($ref) ? (int)$ref : 0,
+            'q3' => $ref,
+            'q4' => $ref,
+        ]);
+        $custRow = $stmtCustLookup->fetch(PDO::FETCH_ASSOC);
+        $stmtCustLookup->closeCursor();
+
+        if ($custRow) {
+            $customerId = (int)$custRow['customer_id'];
+            $tenantId = (int)$custRow['tenant_id'];
         }
     }
 
@@ -138,11 +180,39 @@ try {
         }
     }
 
-    if (!$resolvedInvoiceId) {
-        http_response_code(404);
+    // Security Gate: If customer or invoice does NOT belong to this tenant, record as UNMATCHED
+    // Money is safely credited in merchant account, but another ISP's customer is NEVER falsely renewed!
+    if (!$resolvedInvoiceId && !$customerId) {
+        $finalTrxId = $trxId ?: ('TRX-UNMATCHED-' . strtoupper(bin2hex(random_bytes(4))));
+        try {
+            $stmtCheckTx = $db->prepare("SELECT transaction_id FROM transactions WHERE transaction_ref = :ref LIMIT 1");
+            $stmtCheckTx->execute(['ref' => $finalTrxId]);
+            if (!$stmtCheckTx->fetch()) {
+                $db->prepare("INSERT INTO transactions 
+                    (tenant_id, customer_id, transaction_ref, transaction_type, amount, method, initiator_user_id, initiator_role, description, metadata)
+                    VALUES (:tid, NULL, :ref, 'UNMATCHED_PAYMENT', :amt, :method, 0, 'webhook', :desc, :meta)")
+                   ->execute([
+                       'tid' => $tenantId,
+                       'ref' => $finalTrxId,
+                       'amt' => $amount,
+                       'method' => $gateway ?: 'bkash',
+                       'desc' => strtoupper($gateway ?: 'MFS') . " Payment with Unmatched Reference '{$ref}' (TrxID: {$finalTrxId})",
+                       'meta' => json_encode($payload),
+                   ]);
+            }
+        } catch (\Throwable $txe) {
+            error_log("Unmatched transaction log note: " . $txe->getMessage());
+        }
+
+        http_response_code(200);
         echo json_encode([
-            'success' => false,
-            'message' => 'Target invoice could not be resolved from webhook payload.'
+            'success' => true,
+            'unmatched' => true,
+            'message' => "Payment received in ISP merchant account, but reference '{$ref}' does not belong to any customer of this ISP. Logged as unmatched payment.",
+            'trx_id' => $finalTrxId,
+            'amount' => $amount,
+            'tenant_id' => $tenantId,
+            'reference' => $ref,
         ]);
         exit;
     }
