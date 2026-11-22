@@ -539,14 +539,20 @@ class PaymentsController {
                 elseif (stripos($r['description'], 'cash') !== false) $method = 'cash';
             }
 
-            // 1. INITIATOR: How it happened (e.g. bKash PayBill, bKash (Online), Nagad, User name)
+            // 1. INITIATOR: How it happened (e.g. bKash PayBill, bKash, Nagad, User name)
             $initUser = !empty($r['initiator_name']) ? $r['initiator_name'] : (!empty($r['initiator_username']) ? $r['initiator_username'] : '');
-            if ($method === 'paybill') {
+            if ($method === 'paybill' || stripos($method, 'paybill') !== false) {
                 $initName = 'bKash PayBill';
             } elseif ($method === 'bkash') {
-                $initName = (!empty($initUser) && $initUser !== 'admin') ? "{$initUser} (bKash)" : "bKash (Online)";
+                $initName = (!empty($initUser) && !in_array(strtolower($initUser), ['admin', 'saasadmin', 'system'])) ? "{$initUser} (bKash)" : 'bKash';
             } elseif ($method === 'nagad') {
-                $initName = (!empty($initUser) && $initUser !== 'admin') ? "{$initUser} (Nagad)" : "Nagad (Online)";
+                $initName = (!empty($initUser) && !in_array(strtolower($initUser), ['admin', 'saasadmin', 'system'])) ? "{$initUser} (Nagad)" : 'Nagad';
+            } elseif ($method === 'rocket') {
+                $initName = 'Rocket';
+            } elseif ($method === 'upay') {
+                $initName = 'Upay';
+            } elseif ($method === 'cash') {
+                $initName = !empty($initUser) ? "{$initUser} (Cash)" : 'Cash';
             } elseif ($method === 'ssl' || $method === 'sslcommerz') {
                 $initName = 'SSLCommerz';
             } elseif ($method === 'surjopay' || $method === 'shurjopay') {
@@ -554,7 +560,7 @@ class PaymentsController {
             } elseif (!empty($initUser)) {
                 $initName = $initUser;
             } else {
-                $initName = !empty($method) ? ucfirst($method) : 'Online Gateway';
+                $initName = !empty($method) ? ucfirst($method) : 'Online';
             }
 
             // 2. POP IN-CHARGE: Under whom is this customer?
@@ -839,14 +845,20 @@ class PaymentsController {
                 }
             }
 
-            // 1. INITIATOR: How was it done? (e.g. bKash PayBill, bKash (Online), Nagad, Mango, STAR NETWORK)
+            // 1. INITIATOR: How was it done? (e.g. bKash PayBill, bKash, Nagad, Cash, Mango, STAR NETWORK)
             $initUser = !empty($r['initiator_name']) ? $r['initiator_name'] : (!empty($r['initiator_username']) ? $r['initiator_username'] : '');
-            if ($method === 'paybill') {
+            if ($method === 'paybill' || stripos($method, 'paybill') !== false) {
                 $initName = 'bKash PayBill';
             } elseif ($method === 'bkash') {
-                $initName = (!empty($initUser) && $initUser !== 'admin') ? "{$initUser} (bKash)" : "bKash (Online)";
+                $initName = (!empty($initUser) && !in_array(strtolower($initUser), ['admin', 'saasadmin', 'system'])) ? "{$initUser} (bKash)" : 'bKash';
             } elseif ($method === 'nagad') {
-                $initName = (!empty($initUser) && $initUser !== 'admin') ? "{$initUser} (Nagad)" : "Nagad (Online)";
+                $initName = (!empty($initUser) && !in_array(strtolower($initUser), ['admin', 'saasadmin', 'system'])) ? "{$initUser} (Nagad)" : 'Nagad';
+            } elseif ($method === 'rocket') {
+                $initName = 'Rocket';
+            } elseif ($method === 'upay') {
+                $initName = 'Upay';
+            } elseif ($method === 'cash') {
+                $initName = !empty($initUser) ? "{$initUser} (Cash)" : 'Cash';
             } elseif ($method === 'ssl' || $method === 'sslcommerz') {
                 $initName = 'SSLCommerz';
             } elseif ($method === 'surjopay' || $method === 'shurjopay') {
@@ -854,7 +866,7 @@ class PaymentsController {
             } elseif (!empty($initUser)) {
                 $initName = $initUser;
             } else {
-                $initName = !empty($method) ? ucfirst($method) : 'Online Gateway';
+                $initName = !empty($method) ? ucfirst($method) : 'Online';
             }
 
             // 2. POP IN-CHARGE: Under whom is this customer?
@@ -872,7 +884,7 @@ class PaymentsController {
             // 3. DESCRIPTION: Customer ID & Username or Reseller/Agent Name
             $refType = strtoupper($r['reference_type'] ?? '');
             if (!empty($custCode)) {
-                $uStr = !empty($pppoeUser) ? " (User: {$pppoeUser})" : '';
+                $uStr = !empty($pppoeUser) ? " (User: {$pppoeUser})" : (!empty($custName) ? " (Name: {$custName})" : '');
                 if ($refType === 'CUSTOMER_RECHARGE' || $refType === 'RENEW') {
                     $pkgStr = '';
                     if (preg_match('/\[Package:\s*([^\]]+)\]/i', $r['description'], $pm)) {
@@ -893,19 +905,31 @@ class PaymentsController {
                     if (preg_match('/Inv #([A-Za-z0-9\-]+)/i', $r['description'], $im)) {
                         $invStr = " [Inv #{$im[1]}]";
                     }
-                    $mStr = !empty($method) ? " via " . ucfirst($method) : '';
+                    $mStr = !empty($method) ? " via " . ($method === 'bkash' ? 'bKash' : ($method === 'paybill' ? 'bKash PayBill' : ucfirst($method))) : '';
                     $desc = "Customer Bill Received: #{$custCode}{$uStr}{$mStr}{$invStr}";
                 } else {
                     $desc = "Customer Transaction: #{$custCode}{$uStr}";
                 }
             } else {
-                // Reseller / Agent self recharge / topup
+                // Reseller / Agent self recharge / topup / transfer
                 $resellerName = !empty($r['pop_name']) ? $r['pop_name'] : (!empty($r['pop_username']) ? $r['pop_username'] : 'Reseller');
                 $resellerUname = !empty($r['pop_username']) ? " (User: {$r['pop_username']})" : '';
-                if ($refType === 'TOPUP') {
-                    $desc = "Reseller Balance Topup: {$resellerName}{$resellerUname}";
+                $initDisp = !empty($r['initiator_name']) ? $r['initiator_name'] : (!empty($r['initiator_username']) ? $r['initiator_username'] : '');
+
+                if ($refType === 'TRANSFER_IN') {
+                    $desc = "Fund Transfer Received: {$resellerName}{$resellerUname}" . (!empty($initDisp) ? " from {$initDisp}" : '');
+                } elseif ($refType === 'TRANSFER_OUT') {
+                    $desc = "Fund Transfer Sent: By {$initDisp}" . (!empty($resellerName) ? " to {$resellerName}{$resellerUname}" : '');
+                } elseif ($refType === 'TOPUP') {
+                    if (!empty($r['initiator_user_id']) && (int)$r['initiator_user_id'] === (int)($r['pop_user_id'] ?? 0)) {
+                        $desc = "Reseller Self Recharge: {$resellerName}{$resellerUname}";
+                    } else {
+                        $desc = "Reseller Balance Topup: {$resellerName}{$resellerUname}" . (!empty($initDisp) ? " by {$initDisp}" : '');
+                    }
                 } elseif ($refType === 'OPENING_BALANCE') {
                     $desc = "Opening Balance: {$resellerName}{$resellerUname}";
+                } elseif ($refType === 'MANUAL_DEBIT') {
+                    $desc = "Balance Debit: {$resellerName}{$resellerUname}" . (!empty($initDisp) ? " by {$initDisp}" : '');
                 } else {
                     $desc = "Reseller Transaction: {$resellerName}{$resellerUname} - " . $r['description'];
                 }

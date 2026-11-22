@@ -764,13 +764,15 @@ class ResellersController {
 
     public static function updateBalance(string|int $resellerId): void {
         $currentUser = AuthMiddleware::requireAuth();
-        HierarchySecurityService::requirePermission((int)$currentUser['user_id'], 'can_transfer_balance');
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
+        $operation = strtolower(trim($data['operation'] ?? 'credit'));
+        $requiredPerm = ($operation === 'debit') ? 'can_debit_balance' : 'can_transfer_balance';
+        HierarchySecurityService::requirePermission((int)$currentUser['user_id'], $requiredPerm);
+
         $userId = (int)$resellerId;
         $amount = (float)($data['amount'] ?? 0);
-        $operation = strtolower(trim($data['operation'] ?? 'credit'));
         $notes = trim($data['notes'] ?? ($operation === 'debit' ? 'Manual Balance Debit' : 'Wallet Top-up'));
 
         if (!$userId || $amount <= 0) {
@@ -789,9 +791,10 @@ class ResellersController {
 
         try {
             if ($operation === 'debit') {
-                // ONLY ISP Admin can do direct debit!
-                if (!$isAdmin) {
-                    Response::error('Permission denied: Only ISP Admins can perform direct balance debits.', 403);
+                // Admin or authorized reseller with 'can_debit_balance' permission can perform debit
+                $canDebit = $isAdmin || HierarchySecurityService::hasPermission($callerId, 'can_debit_balance');
+                if (!$canDebit) {
+                    Response::error('Permission denied: You do not have permission to debit reseller balance.', 403);
                     return;
                 }
 
@@ -1227,10 +1230,8 @@ class ResellersController {
         }
 
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
-        $permissionIds = $input['permission_ids'] ?? [];
-        if (!is_array($permissionIds)) {
-            $permissionIds = [];
-        }
+        $rawPermIds = $input['permission_ids'] ?? ($input['permissionIds'] ?? []);
+        $permissionIds = is_array($rawPermIds) ? array_map('intval', $rawPermIds) : [];
 
         try {
             $db->beginTransaction();

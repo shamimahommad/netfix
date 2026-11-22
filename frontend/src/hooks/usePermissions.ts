@@ -29,6 +29,7 @@ export interface PermissionsState {
   canManageSubTier: boolean;
   canAssignPackage: boolean;
   canTransferBalance: boolean;
+  canDebitBalance: boolean;
   canManagePermissions: boolean;
 
   // System
@@ -143,6 +144,7 @@ export function usePermissions(): PermissionsState {
       canManageSubTier: hasPermission('can_manage_sub_tier'),
       canAssignPackage: hasPermission('can_assign_package'),
       canTransferBalance: hasPermission('can_transfer_balance'),
+      canDebitBalance: hasPermission('can_debit_balance'),
       canManagePermissions: hasPermission('can_manage_permissions'),
 
       // System

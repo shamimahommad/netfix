@@ -301,6 +301,7 @@ export default function ResellerPage() {
   const permissions = usePermissions();
   const isAdmin = user?.role_code === 'admin' || user?.role_code === 'isp_admin';
   const isCompanyAdmin = isAdmin || ['saas_admin', 'tenant_admin', 'manager'].includes(user?.role_code || '');
+  const canShowDebit = isCompanyAdmin || permissions.canDebitBalance;
   const allowedAddRoles = getAllowedAddRoles(user?.role_code);
   const canShowAddUser = permissions.canManageSubTier && allowedAddRoles.length > 0;
 
@@ -604,8 +605,8 @@ export default function ResellerPage() {
       const notes = `[${rechargeMethod}]${refPart} ${rechargeRemarks.trim()}`;
 
       if (rechargeAction === 'debit') {
-        if (!isCompanyAdmin) {
-          toast.error('Only Admins can perform direct balance debits.');
+        if (!canShowDebit) {
+          toast.error('You do not have permission to perform direct balance debits.');
           return;
         }
         // Debit: admin-only manual debit; affects only reseller ledger, not admin balance
@@ -1257,8 +1258,8 @@ export default function ResellerPage() {
                     Balance {formatCurrency(currentBalance)}
                   </span>
                 </div>
-                {/* Choose Action — soft pill toggle for Admin only, or Transfer Notice for Reseller */}
-                {isCompanyAdmin ? (
+                {/* Choose Action — soft pill toggle for Admin / authorized reseller with can_debit_balance, or Transfer Notice */}
+                {canShowDebit ? (
                   <div>
                     <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Choose Action</div>
                     <div className="flex gap-1 p-1 rounded-xl bg-slate-200/60 dark:bg-slate-700/50 w-fit">
