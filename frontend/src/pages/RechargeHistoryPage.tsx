@@ -338,7 +338,9 @@ export default function RechargeHistoryPage() {
                         {formatMoney(row.balance_after)}
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{row.created_at}</td>
-                      <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-400 max-w-xs truncate">{row.description}</td>
+                      <td className="px-4 py-3 text-xs text-slate-700 dark:text-slate-300 max-w-sm font-medium" title={row.description}>
+                        {row.description}
+                      </td>
                     </tr>
                   ))
                 )}

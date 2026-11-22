@@ -276,7 +276,7 @@ export const paymentsService = {
         sl: (page - 1) * limit + i + 1,
         ref: r.ref,
         initiator_name: r.initiator_name ?? '-',
-        pop_in_charge_name: r.collector_name ?? '-',
+        pop_in_charge_name: (r as any).pop_in_charge_name || (r as any).pop_name || r.collector_name || '-',
         debit: r.debit ?? 0,
         credit: r.credit ?? null,
         balance_after: r.balance_after ?? 0,

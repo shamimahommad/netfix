@@ -501,14 +501,20 @@ class PaymentsController {
             ) as running_balance_after_transaction,
             t.description,
             t.created_at,
+            c.customer_id as cust_id,
             c.full_name as customer_name,
             c.customer_code,
+            na.username as pppoe_username,
+            TRIM(CONCAT(COALESCE(u_owner.first_name, ''), ' ', COALESCE(u_owner.last_name, ''))) as owner_name,
+            u_owner.username as owner_username,
+            u_owner.role as owner_role,
             TRIM(CONCAT(COALESCE(u_init.first_name, ''), ' ', COALESCE(u_init.last_name, ''))) as initiator_name,
             u_init.username as initiator_username,
             TRIM(CONCAT(COALESCE(u_coll.first_name, ''), ' ', COALESCE(u_coll.last_name, ''))) as collector_name,
             u_coll.username as collector_username
             FROM transactions t
             LEFT JOIN customers c ON c.customer_id = t.customer_id
+            LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
             LEFT JOIN users u_owner ON u_owner.user_id = c.owner_id
             LEFT JOIN users u_init ON u_init.user_id = t.initiator_user_id
             LEFT JOIN users u_coll ON u_coll.user_id = t.collector_user_id
@@ -525,22 +531,73 @@ class PaymentsController {
             $debit = $isDebit ? $amount : 0.0;
             $credit = $isDebit ? null : $amount;
 
-            $initName = !empty($r['initiator_name']) ? $r['initiator_name'] : (!empty($r['initiator_username']) ? $r['initiator_username'] : (!empty($r['customer_name']) ? $r['customer_name'] : 'System / Online'));
-            $collName = !empty($r['collector_name']) ? $r['collector_name'] : (!empty($r['collector_username']) ? $r['collector_username'] : 'Head Office / Online');
+            $method = strtolower($r['method'] ?: '');
+            if (empty($method)) {
+                if (stripos($r['description'], 'bkash') !== false) $method = 'bkash';
+                elseif (stripos($r['description'], 'nagad') !== false) $method = 'nagad';
+                elseif (stripos($r['description'], 'paybill') !== false) $method = 'paybill';
+                elseif (stripos($r['description'], 'cash') !== false) $method = 'cash';
+            }
+
+            // 1. INITIATOR: How it happened (e.g. bKash PayBill, bKash (Online), Nagad, User name)
+            $initUser = !empty($r['initiator_name']) ? $r['initiator_name'] : (!empty($r['initiator_username']) ? $r['initiator_username'] : '');
+            if ($method === 'paybill') {
+                $initName = 'bKash PayBill';
+            } elseif ($method === 'bkash') {
+                $initName = (!empty($initUser) && $initUser !== 'admin') ? "{$initUser} (bKash)" : "bKash (Online)";
+            } elseif ($method === 'nagad') {
+                $initName = (!empty($initUser) && $initUser !== 'admin') ? "{$initUser} (Nagad)" : "Nagad (Online)";
+            } elseif ($method === 'ssl' || $method === 'sslcommerz') {
+                $initName = 'SSLCommerz';
+            } elseif ($method === 'surjopay' || $method === 'shurjopay') {
+                $initName = 'shurjopay';
+            } elseif (!empty($initUser)) {
+                $initName = $initUser;
+            } else {
+                $initName = !empty($method) ? ucfirst($method) : 'Online Gateway';
+            }
+
+            // 2. POP IN-CHARGE: Under whom is this customer?
+            $owner = !empty($r['owner_name']) ? $r['owner_name'] : (!empty($r['owner_username']) ? $r['owner_username'] : '');
+            if (!empty($owner)) {
+                $popName = $owner;
+            } elseif (!empty($r['customer_code']) && $r['customer_code'] !== '—') {
+                $popName = 'Head Office';
+            } else {
+                $popName = !empty($r['collector_name']) ? $r['collector_name'] : (!empty($r['collector_username']) ? $r['collector_username'] : 'Head Office');
+            }
+
+            // 3. DESCRIPTION: Customer ID, username or reseller name
+            $desc = $r['description'];
+            if (!empty($r['customer_code']) && $r['customer_code'] !== '—') {
+                $uStr = !empty($r['pppoe_username']) ? " (User: {$r['pppoe_username']})" : '';
+                $mStr = !empty($method) ? " via " . ucfirst($method) : '';
+                if ($r['transaction_type'] === 'RENEW_DEBIT') {
+                    $desc = "Customer Renew Debit: #{$r['customer_code']}{$uStr}";
+                } elseif ($r['transaction_type'] === 'GATEWAY_PAYMENT' || $r['transaction_type'] === 'ONLINE_GATEWAY') {
+                    $desc = "Customer Bill Received: #{$r['customer_code']}{$uStr}{$mStr}";
+                } elseif ($r['transaction_type'] === 'MANUAL_CASH') {
+                    $desc = "Customer Cash Payment: #{$r['customer_code']}{$uStr}";
+                } else {
+                    $desc = "Customer Payment: #{$r['customer_code']}{$uStr}{$mStr}";
+                }
+            } elseif ($r['transaction_type'] === 'UNMATCHED_PAYMENT') {
+                $desc = "Unmatched Payment: " . ucfirst($method ?: 'MFS') . " - Ref " . $r['transaction_ref'];
+            }
 
             $dataRows[] = [
                 'ref' => $r['transaction_ref'] ?: ('TRX-' . $r['transaction_id']),
                 'ref_no' => $r['transaction_ref'] ?: ('TRX-' . $r['transaction_id']),
                 'initiator_name' => $initName,
-                'collector_name' => $collName,
-                'pop_name' => $collName,
-                'pop_in_charge_name' => $collName,
+                'collector_name' => $popName,
+                'pop_name' => $popName,
+                'pop_in_charge_name' => $popName,
                 'debit' => $debit,
                 'credit' => $credit,
                 'balance' => (float)($r['running_balance_after_transaction'] ?? 0),
                 'balance_after' => (float)($r['running_balance_after_transaction'] ?? 0),
                 'created_at' => $r['created_at'],
-                'description' => $r['description'] ?: 'Customer transaction',
+                'description' => $desc,
                 'customer_name' => $r['customer_name'] ?: '—',
                 'customer_code' => $r['customer_code'] ?: '—',
                 'method' => $r['method'] ?: '—',
@@ -647,7 +704,7 @@ class PaymentsController {
         $countStmt->execute($params);
         $total = (int)$countStmt->fetchColumn();
 
-        // Fetch paginated rows from wallet_transactions
+        // Fetch paginated rows from wallet_transactions with customer, owner, pppoe, and invoice payment method
         $stmt = $db->prepare("SELECT 
             wt.transaction_id,
             wt.wallet_id,
@@ -663,16 +720,65 @@ class PaymentsController {
             wt.created_at,
             TRIM(CONCAT(COALESCE(u_pop.first_name, ''), ' ', COALESCE(u_pop.last_name, ''))) as pop_name,
             u_pop.username as pop_username,
+            u_pop.role as pop_role,
             TRIM(CONCAT(COALESCE(u_init.first_name, ''), ' ', COALESCE(u_init.last_name, ''))) as initiator_name,
-            u_init.username as initiator_username
+            u_init.username as initiator_username,
+            u_init.role as initiator_role,
+            wl.source_customer_id,
+            wl.invoice_id as wl_invoice_id,
+            c_wl.customer_id as wl_cid,
+            c_wl.customer_code as wl_cust_code,
+            c_wl.full_name as wl_cust_name,
+            na_wl.username as wl_pppoe_username,
+            c_wl.owner_id as wl_owner_id,
+            u_wl_owner.username as wl_owner_username,
+            TRIM(CONCAT(COALESCE(u_wl_owner.first_name, ''), ' ', COALESCE(u_wl_owner.last_name, ''))) as wl_owner_name,
+            u_wl_owner.role as wl_owner_role,
+            inv.payment_method as inv_payment_method,
+            inv.invoice_number
             FROM wallet_transactions wt
             LEFT JOIN users u_pop ON u_pop.user_id = wt.user_id
             LEFT JOIN users u_init ON u_init.user_id = wt.created_by
+            LEFT JOIN wallet_ledger wl ON wl.txn_group_id = wt.reference_id AND wl.user_id = wt.user_id
+            LEFT JOIN customers c_wl ON c_wl.customer_id = wl.source_customer_id
+            LEFT JOIN customer_network_accounts na_wl ON na_wl.customer_id = c_wl.customer_id
+            LEFT JOIN users u_wl_owner ON u_wl_owner.user_id = c_wl.owner_id
+            LEFT JOIN invoices inv ON inv.invoice_id = wl.invoice_id
             WHERE {$whereSql}
             ORDER BY wt.transaction_id DESC
             LIMIT {$limit} OFFSET {$offset}");
         $stmt->execute($params);
-        $rows = $stmt->fetchAll();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Fallback for customer IDs mentioned in description but not in wallet_ledger
+        $custIdsToFetch = [];
+        foreach ($rows as $r) {
+            if (empty($r['wl_cust_code'])) {
+                if (preg_match('/customer #?(\d+)/i', $r['description'], $m)) {
+                    $custIdsToFetch[] = $m[1];
+                } elseif (preg_match('/Customer:\s*(\d+)/i', $r['description'], $m)) {
+                    $custIdsToFetch[] = $m[1];
+                }
+            }
+        }
+
+        $fallbackCustomers = [];
+        if (!empty($custIdsToFetch)) {
+            $inClause = implode(',', array_map('intval', array_unique($custIdsToFetch)));
+            $stmtCust = $db->query("SELECT c.customer_id, c.customer_code, c.full_name, c.owner_id,
+                na.username as pppoe_username,
+                u_owner.username as owner_username,
+                TRIM(CONCAT(COALESCE(u_owner.first_name, ''), ' ', COALESCE(u_owner.last_name, ''))) as owner_name,
+                u_owner.role as owner_role
+                FROM customers c
+                LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
+                LEFT JOIN users u_owner ON u_owner.user_id = c.owner_id
+                WHERE c.customer_id IN ({$inClause}) OR c.customer_code IN ({$inClause})");
+            while ($c = $stmtCust->fetch(PDO::FETCH_ASSOC)) {
+                $fallbackCustomers[$c['customer_id']] = $c;
+                $fallbackCustomers[$c['customer_code']] = $c;
+            }
+        }
 
         $dataRows = [];
         $sl = $offset + 1;
@@ -682,8 +788,119 @@ class PaymentsController {
             $debit = $isDebit ? $amount : 0.0;
             $credit = $isDebit ? null : $amount;
 
-            $initName = !empty($r['initiator_name']) ? $r['initiator_name'] : (!empty($r['initiator_username']) ? $r['initiator_username'] : 'System / Online');
-            $popName = !empty($r['pop_name']) ? $r['pop_name'] : (!empty($r['pop_username']) ? $r['pop_username'] : '—');
+            // Resolve Customer Info
+            $custCode = $r['wl_cust_code'] ?? '';
+            $custName = $r['wl_cust_name'] ?? '';
+            $pppoeUser = $r['wl_pppoe_username'] ?? '';
+            $ownerName = $r['wl_owner_name'] ?? '';
+            $ownerUname = $r['wl_owner_username'] ?? '';
+            $ownerRole = $r['wl_owner_role'] ?? '';
+
+            if (empty($custCode)) {
+                if (preg_match('/customer #?(\d+)/i', $r['description'], $m) && isset($fallbackCustomers[$m[1]])) {
+                    $fc = $fallbackCustomers[$m[1]];
+                    $custCode = $fc['customer_code'];
+                    $custName = $fc['full_name'];
+                    $pppoeUser = $fc['pppoe_username'];
+                    $ownerName = $fc['owner_name'];
+                    $ownerUname = $fc['owner_username'];
+                    $ownerRole = $fc['owner_role'];
+                } elseif (preg_match('/Customer:\s*(\d+)/i', $r['description'], $m) && isset($fallbackCustomers[$m[1]])) {
+                    $fc = $fallbackCustomers[$m[1]];
+                    $custCode = $fc['customer_code'];
+                    $custName = $fc['full_name'];
+                    $pppoeUser = $fc['pppoe_username'];
+                    $ownerName = $fc['owner_name'];
+                    $ownerUname = $fc['owner_username'];
+                    $ownerRole = $fc['owner_role'];
+                }
+            }
+
+            // Resolve Payment Method
+            $method = strtolower($r['inv_payment_method'] ?? '');
+            if (empty($method)) {
+                if (preg_match('/\[cash\]/i', $r['description']) || stripos($r['description'], 'cash') !== false) {
+                    $method = 'cash';
+                } elseif (stripos($r['description'], 'bkash') !== false || stripos($r['reference_id'], 'bkash') !== false) {
+                    $method = 'bkash';
+                } elseif (stripos($r['description'], 'nagad') !== false) {
+                    $method = 'nagad';
+                } elseif (stripos($r['description'], 'paybill') !== false) {
+                    $method = 'paybill';
+                }
+            }
+
+            // 1. INITIATOR: How was it done? (e.g. bKash PayBill, bKash (Online), Nagad, Mango, STAR NETWORK)
+            $initUser = !empty($r['initiator_name']) ? $r['initiator_name'] : (!empty($r['initiator_username']) ? $r['initiator_username'] : '');
+            if ($method === 'paybill') {
+                $initName = 'bKash PayBill';
+            } elseif ($method === 'bkash') {
+                $initName = (!empty($initUser) && $initUser !== 'admin') ? "{$initUser} (bKash)" : "bKash (Online)";
+            } elseif ($method === 'nagad') {
+                $initName = (!empty($initUser) && $initUser !== 'admin') ? "{$initUser} (Nagad)" : "Nagad (Online)";
+            } elseif ($method === 'ssl' || $method === 'sslcommerz') {
+                $initName = 'SSLCommerz';
+            } elseif ($method === 'surjopay' || $method === 'shurjopay') {
+                $initName = 'shurjopay';
+            } elseif (!empty($initUser)) {
+                $initName = $initUser;
+            } else {
+                $initName = !empty($method) ? ucfirst($method) : 'Online Gateway';
+            }
+
+            // 2. POP IN-CHARGE: Under whom is this customer?
+            if (!empty($ownerName)) {
+                $popName = $ownerName;
+            } elseif (!empty($ownerUname)) {
+                $popName = $ownerUname;
+            } elseif (!empty($custCode)) {
+                $popName = 'Head Office';
+            } else {
+                // Reseller balance topup / opening balance / wallet adjustment
+                $popName = !empty($r['pop_name']) ? $r['pop_name'] : (!empty($r['pop_username']) ? $r['pop_username'] : 'Head Office');
+            }
+
+            // 3. DESCRIPTION: Customer ID & Username or Reseller/Agent Name
+            $refType = strtoupper($r['reference_type'] ?? '');
+            if (!empty($custCode)) {
+                $uStr = !empty($pppoeUser) ? " (User: {$pppoeUser})" : '';
+                if ($refType === 'CUSTOMER_RECHARGE' || $refType === 'RENEW') {
+                    $pkgStr = '';
+                    if (preg_match('/\[Package:\s*([^\]]+)\]/i', $r['description'], $pm)) {
+                        $pkgStr = " [{$pm[1]}]";
+                    } elseif (preg_match('/\(Package:\s*([^\)]+)\)/i', $r['description'], $pm)) {
+                        $pkgStr = " [{$pm[1]}]";
+                    }
+                    $durStr = '';
+                    if (preg_match('/\((\d+\s*(?:Month|Day)\(s\))\)/i', $r['description'], $dm)) {
+                        $durStr = " - {$dm[1]}";
+                    }
+                    $desc = "Customer Renew: #{$custCode}{$uStr}{$durStr}{$pkgStr}";
+                } elseif ($refType === 'COMMISSION_MARGIN') {
+                    $roleLabel = !empty($r['pop_role']) ? ucfirst(str_replace('_', ' ', $r['pop_role'])) : 'Reseller';
+                    $desc = "{$roleLabel} Commission: Customer #{$custCode}{$uStr} Bill Payment";
+                } elseif ($refType === 'CUSTOMER_PAYMENT') {
+                    $invStr = '';
+                    if (preg_match('/Inv #([A-Za-z0-9\-]+)/i', $r['description'], $im)) {
+                        $invStr = " [Inv #{$im[1]}]";
+                    }
+                    $mStr = !empty($method) ? " via " . ucfirst($method) : '';
+                    $desc = "Customer Bill Received: #{$custCode}{$uStr}{$mStr}{$invStr}";
+                } else {
+                    $desc = "Customer Transaction: #{$custCode}{$uStr}";
+                }
+            } else {
+                // Reseller / Agent self recharge / topup
+                $resellerName = !empty($r['pop_name']) ? $r['pop_name'] : (!empty($r['pop_username']) ? $r['pop_username'] : 'Reseller');
+                $resellerUname = !empty($r['pop_username']) ? " (User: {$r['pop_username']})" : '';
+                if ($refType === 'TOPUP') {
+                    $desc = "Reseller Balance Topup: {$resellerName}{$resellerUname}";
+                } elseif ($refType === 'OPENING_BALANCE') {
+                    $desc = "Opening Balance: {$resellerName}{$resellerUname}";
+                } else {
+                    $desc = "Reseller Transaction: {$resellerName}{$resellerUname} - " . $r['description'];
+                }
+            }
 
             $dataRows[] = [
                 'sl' => $sl++,
@@ -692,12 +909,13 @@ class PaymentsController {
                 'initiator_name' => $initName,
                 'pop_in_charge_name' => $popName,
                 'pop_name' => $popName,
+                'collector_name' => $popName,
                 'debit' => $debit,
                 'credit' => $credit,
                 'balance' => (float)$r['balance_after'],
                 'balance_after' => (float)$r['balance_after'],
                 'created_at' => $r['created_at'],
-                'description' => $r['description'] ?: 'Wallet transaction',
+                'description' => $desc,
             ];
         }
 
