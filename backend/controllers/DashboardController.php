@@ -7,6 +7,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
 require_once __DIR__ . '/../lib/AuthMiddleware.php';
 require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+require_once __DIR__ . '/HealthController.php';
 
 class DashboardController {
     public static function stats(): void {
@@ -358,13 +359,14 @@ class DashboardController {
             ORDER BY ll.id DESC LIMIT 8");
         $recentLogs = $stmt->fetchAll() ?: [];
 
-        // 8. Infrastructure Health
+        // 8. Infrastructure Health & Comprehensive Diagnostics (Restricted to SaaS Admin)
+        $diagnostics = HealthController::getDetailedDiagnostics();
         $health = [
             'phpVersion' => PHP_VERSION,
             'memoryUsage' => round(memory_get_usage(true) / 1024 / 1024, 2) . ' MB',
             'serverTime' => date('Y-m-d H:i:s'),
             'apiPort' => 4000,
-            'dbStatus' => 'connected',
+            'dbStatus' => (($diagnostics['checks']['database']['status'] ?? 'healthy') === 'healthy') ? 'connected' : 'error',
             'telemetryStatus' => 'active',
         ];
 
@@ -414,7 +416,8 @@ class DashboardController {
                 ];
             }, $tenantsList),
             'recentLogs' => $recentLogs,
-            'health' => $health
+            'health' => $health,
+            'telemetry' => $diagnostics
         ]);
     }
 }

@@ -69,6 +69,10 @@ if (in_array($uri, ['/', '/health', '/healthcheck', '/health-check', '/ping', '/
     HealthController::check();
 }
 
+if ($method === 'GET' && in_array($uri, ['/saas/telemetry', '/saas/health', '/api/saas/telemetry'], true)) {
+    HealthController::detailed();
+}
+
 if ($uri === '/system/init-db') {
     try {
         $db = Database::getConnection();

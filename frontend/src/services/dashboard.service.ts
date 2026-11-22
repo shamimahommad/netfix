@@ -95,6 +95,59 @@ export interface SaaSPlatformHealth {
   telemetryStatus: string;
 }
 
+export interface SaaSPlatformTelemetry {
+  status: string;
+  overall: string;
+  service: string;
+  version: string;
+  environment: string;
+  timestamp: string;
+  total_latency_ms: number;
+  checks: {
+    database?: {
+      status: string;
+      driver?: string;
+      latency_ms?: number;
+      registered_users?: number;
+      message?: string;
+      error?: string;
+    };
+    redis?: {
+      status: string;
+      host?: string;
+      port?: number;
+      latency_ms?: number;
+      message?: string;
+    };
+    victorialogs?: {
+      status: string;
+      url?: string;
+      http_status?: number;
+      latency_ms?: number;
+      message?: string;
+    };
+    storage?: {
+      status: string;
+      free_gb?: number;
+      total_gb?: number;
+      used_percentage?: number;
+      message?: string;
+    };
+    memory?: {
+      status: string;
+      current_usage_mb?: number;
+      peak_usage_mb?: number;
+      memory_limit?: string;
+    };
+    php?: {
+      status: string;
+      version?: string;
+      sapi?: string;
+      missing_extensions?: string[];
+    };
+  };
+}
+
 export interface SaaSDashboardResponse {
   success: boolean;
   overview: SaaSDashboardOverview;
@@ -109,6 +162,7 @@ export interface SaaSDashboardResponse {
     createdAt: string;
   }>;
   health: SaaSPlatformHealth;
+  telemetry?: SaaSPlatformTelemetry;
 }
 
 export const dashboardService = {

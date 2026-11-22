@@ -1,19 +1,69 @@
 <?php
 /**
  * NetFix ISP SaaS - Health & Diagnostic Telemetry Controller
- * Implements industry standard RFC-compliant health check endpoints for
- * Docker, Kubernetes, Coolify, and Cloud Monitoring (AWS ALB, Uptime Kuma, Pingdom).
+ * Implements industry standard RFC-compliant health check endpoints:
+ * - Public /health endpoint returns minimal, non-leaking status for load balancers & monitoring.
+ * - Detailed diagnostic telemetry is restricted to authenticated SaaS Super Administrators.
  */
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
+require_once __DIR__ . '/../lib/AuthMiddleware.php';
 
 class HealthController {
     /**
-     * Public Health Check Endpoint
+     * Public Minimal Health Check Endpoint
      * Handles /health, /healthcheck, /health-check, /ping, /status
+     * Returns ONLY status, service name, and timestamp.
+     * Does NOT leak database stats, memory, disk, PHP version, or server internals.
      */
     public static function check(): void {
+        $isHealthy = false;
+        try {
+            $db = Database::tryConnection();
+            if ($db !== null) {
+                $db->query("SELECT 1");
+                $isHealthy = true;
+            }
+        } catch (\Throwable $e) {
+            $isHealthy = false;
+        }
+
+        $statusCode = $isHealthy ? 200 : 503;
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code($statusCode);
+        echo json_encode([
+            'status' => $isHealthy ? 'ok' : 'degraded',
+            'service' => 'NetFix ISP SaaS Engine',
+            'timestamp' => gmdate('Y-m-d\TH:i:s\Z'),
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+
+    /**
+     * Authenticated Detailed Diagnostic Telemetry Endpoint
+     * Restricted to SaaS Super Administrator.
+     * Returns comprehensive server telemetry: MySQL latency, disk space, memory, PHP runtime, Redis.
+     */
+    public static function detailed(): void {
+        $user = AuthMiddleware::requireAuth();
+        if (($user['role'] ?? '') !== 'saas_admin' && ($user['user_type'] ?? '') !== 'saas') {
+            Response::error('Access restricted to SaaS Super Administrator', 403);
+            return;
+        }
+
+        $diagnostics = self::getDetailedDiagnostics();
+        $statusCode = ($diagnostics['overall'] === 'healthy') ? 200 : 503;
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code($statusCode);
+        echo json_encode($diagnostics, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+
+    /**
+     * Collect full telemetry and diagnostic checks
+     */
+    public static function getDetailedDiagnostics(): array {
         $startTime = microtime(true);
         $checks = [];
         $isHealthy = true;
@@ -21,15 +71,17 @@ class HealthController {
         // 1. MySQL Database Health & Latency Probe
         $dbStart = microtime(true);
         try {
-            $db = Database::getConnection();
+            $db = Database::tryConnection();
+            if ($db === null) {
+                throw new Exception('Database connection failed');
+            }
             $stmt = $db->query("SELECT 1");
             $dbLatencyMs = round((microtime(true) - $dbStart) * 1000, 2);
 
-            // Fetch quick summary stats if possible
             $userCount = 0;
             try {
                 $userCount = (int)$db->query("SELECT COUNT(*) FROM users")->fetchColumn();
-            } catch (Throwable $e) {}
+            } catch (\Throwable $e) {}
 
             $checks['database'] = [
                 'status' => 'healthy',
@@ -38,12 +90,12 @@ class HealthController {
                 'registered_users' => $userCount,
                 'message' => "Connected ({$dbLatencyMs}ms)",
             ];
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             $isHealthy = false;
             $checks['database'] = [
                 'status' => 'unhealthy',
                 'driver' => 'mysql',
-                'error' => 'Database connection failed: ' . $e->getMessage(),
+                'error' => 'Database connection failed',
                 'message' => 'Unavailable',
             ];
         }
@@ -75,7 +127,7 @@ class HealthController {
                         'message' => "Socket unreachable: {$errStr}",
                     ];
                 }
-            } catch (Throwable $e) {
+            } catch (\Throwable $e) {
                 $checks['redis'] = [
                     'status' => 'degraded',
                     'message' => $e->getMessage(),
@@ -157,22 +209,15 @@ class HealthController {
 
         $totalLatencyMs = round((microtime(true) - $startTime) * 1000, 2);
 
-        $payload = [
+        return [
             'status' => $isHealthy ? 'ok' : 'error',
             'overall' => $isHealthy ? 'healthy' : 'unhealthy',
             'service' => 'NetFix ISP SaaS Engine',
             'version' => '1.0.0',
             'environment' => getenv('APP_ENV') ?: 'production',
-            'timestamp' => date('c'),
+            'timestamp' => gmdate('Y-m-d\TH:i:s\Z'),
             'total_latency_ms' => $totalLatencyMs,
             'checks' => $checks,
         ];
-
-        // Return HTTP 503 if critical service (Database) is down so load balancers / Docker know
-        $statusCode = $isHealthy ? 200 : 503;
-        header('Content-Type: application/json; charset=utf-8');
-        http_response_code($statusCode);
-        echo json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-        exit;
     }
 }

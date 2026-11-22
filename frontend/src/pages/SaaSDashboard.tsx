@@ -23,6 +23,8 @@ import {
   Sparkles,
   Package,
   Receipt,
+  Database,
+  HardDrive,
 } from 'lucide-react';
 import { dashboardService, SaaSDashboardResponse, SaaSTenantItem } from '@/services/dashboard.service';
 import { useTenantStore } from '@/stores/tenantStore';
@@ -87,6 +89,7 @@ export default function SaaSDashboard() {
   const tenants = data?.tenants || [];
   const recentLogs = data?.recentLogs || [];
   const health = data?.health;
+  const telemetry = data?.telemetry;
 
   // Filtered tenants for preview table
   const filteredTenants = useMemo(() => {
@@ -370,66 +373,143 @@ export default function SaaSDashboard() {
         })}
       </div>
 
-      {/* Live System Health & Infrastructure Telemetry Row */}
+      {/* Live System Health & Infrastructure Telemetry Row (Restricted SaaS Admin Only) */}
       <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
-        <div className="border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center justify-between">
+        <div className="border-b border-slate-100 dark:border-slate-800 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-              Platform Infrastructure Health
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <Activity className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                Platform Infrastructure Telemetry
+              </h2>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+                <ShieldCheck className="w-3 h-3" />
+                SaaS Admin Only
+              </span>
+            </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Live runtime telemetry, database state, and server resources
+              Detailed database engine latency, storage capacity, memory profile, and runtime diagnostics
             </p>
           </div>
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            System Healthy
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              {telemetry?.overall === 'healthy' || health?.dbStatus === 'connected' ? 'Core Online' : 'System Degraded'}
+            </span>
+            {telemetry?.total_latency_ms !== undefined && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                ⚡ {telemetry.total_latency_ms}ms
+              </span>
+            )}
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/60 dark:border-slate-800 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-              <Server className="w-4 h-4" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Database Engine Probe */}
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/60 dark:border-slate-800 flex flex-col justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                <Database className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">MySQL Database Core</p>
+                <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                  {telemetry?.checks?.database?.driver ? telemetry.checks.database.driver.toUpperCase() : 'MySQL 8 Engine'}
+                </p>
+                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                  {telemetry?.checks?.database?.latency_ms !== undefined ? `Active (${telemetry.checks.database.latency_ms}ms)` : 'Operational (Port 3306)'}
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">REST API Engine</p>
-              <p className="text-xs font-bold text-slate-900 dark:text-slate-100">PHP {health?.phpVersion || '8.2'}</p>
-              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Port {health?.apiPort || 4000} Online</p>
+            {telemetry?.checks?.database?.registered_users !== undefined && (
+              <div className="pt-1.5 border-t border-slate-200/40 dark:border-slate-800 text-[10px] text-slate-500 flex justify-between">
+                <span>Total DB Users:</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-300">{telemetry.checks.database.registered_users}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Storage & Filesystem Capacity */}
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/60 dark:border-slate-800 flex flex-col justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                <HardDrive className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Storage Capacity</p>
+                <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
+                  {telemetry?.checks?.storage?.free_gb !== undefined
+                    ? `${telemetry.checks.storage.free_gb} GB Free`
+                    : 'Disk Subsystem'}
+                </p>
+                <p className="text-[10px] text-slate-500 font-medium">
+                  {telemetry?.checks?.storage?.total_gb !== undefined
+                    ? `of ${telemetry.checks.storage.total_gb} GB Total (${telemetry.checks.storage.used_percentage}% used)`
+                    : 'System Volume'}
+                </p>
+              </div>
+            </div>
+            {telemetry?.checks?.storage?.used_percentage !== undefined && (
+              <div className="w-full bg-slate-200 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden mt-1">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    telemetry.checks.storage.used_percentage > 90
+                      ? 'bg-rose-500'
+                      : telemetry.checks.storage.used_percentage > 75
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-500'
+                  }`}
+                  style={{ width: `${Math.min(100, telemetry.checks.storage.used_percentage)}%` }}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Memory Allocation */}
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/60 dark:border-slate-800 flex flex-col justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                <Cpu className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Memory Allocation</p>
+                <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                  {telemetry?.checks?.memory?.current_usage_mb !== undefined
+                    ? `${telemetry.checks.memory.current_usage_mb} MB`
+                    : health?.memoryUsage || '4.0 MB'}
+                </p>
+                <p className="text-[10px] text-slate-500 font-medium">
+                  {telemetry?.checks?.memory?.peak_usage_mb !== undefined
+                    ? `Peak: ${telemetry.checks.memory.peak_usage_mb} MB`
+                    : 'High Efficiency'}
+                </p>
+              </div>
+            </div>
+            <div className="pt-1.5 border-t border-slate-200/40 dark:border-slate-800 text-[10px] text-slate-500 flex justify-between">
+              <span>Memory Limit:</span>
+              <span className="font-semibold text-slate-700 dark:text-slate-300">{telemetry?.checks?.memory?.memory_limit || 'Unlimited'}</span>
             </div>
           </div>
 
-          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/60 dark:border-slate-800 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-              <CheckCircle2 className="w-4 h-4" />
+          {/* REST API & PHP Runtime */}
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/60 dark:border-slate-800 flex flex-col justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                <Server className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">REST API Engine</p>
+                <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                  PHP {telemetry?.checks?.php?.version || health?.phpVersion || '8.2'}
+                </p>
+                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                  Port {health?.apiPort || 4000} Online
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Storage Core</p>
-              <p className="text-xs font-bold text-slate-900 dark:text-slate-100">Database Engine</p>
-              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Operational (Port 3306)</p>
-            </div>
-          </div>
-
-          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/60 dark:border-slate-800 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-              <Cpu className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Memory Allocation</p>
-              <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{health?.memoryUsage || '4.0 MB'}</p>
-              <p className="text-[10px] text-slate-500 font-medium">High Efficiency</p>
-            </div>
-          </div>
-
-          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/60 dark:border-slate-800 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
-              <Clock className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Server Synchronized</p>
-              <p className="text-xs font-bold text-slate-900 dark:text-slate-100">Asia/Dhaka (GMT+6)</p>
-              <p className="text-[10px] text-slate-500 font-medium">{health?.serverTime?.split(' ')[1] || 'Realtime'}</p>
+            <div className="pt-1.5 border-t border-slate-200/40 dark:border-slate-800 text-[10px] text-slate-500 flex justify-between">
+              <span>Server Time:</span>
+              <span className="font-semibold text-slate-700 dark:text-slate-300">{health?.serverTime?.split(' ')[1] || 'Realtime'}</span>
             </div>
           </div>
         </div>

@@ -26,7 +26,7 @@ loadEnvFile(__DIR__ . '/../.env');
 class Database {
     private static ?PDO $instance = null;
 
-    public static function getConnection(): PDO {
+    public static function tryConnection(): ?PDO {
         if (self::$instance !== null) {
             return self::$instance;
         }
@@ -49,16 +49,24 @@ class Database {
             self::ensureTables(self::$instance);
             return self::$instance;
         } catch (Throwable $e) {
-            // Log real server error to internal logs
             error_log('Database connection error: ' . $e->getMessage());
-            header('Content-Type: application/json; charset=utf-8');
-            http_response_code(503);
-            echo json_encode([
-                'success' => false,
-                'message' => 'Service temporarily unavailable. Please try again later.',
-            ]);
-            exit;
+            return null;
         }
+    }
+
+    public static function getConnection(): PDO {
+        $conn = self::tryConnection();
+        if ($conn !== null) {
+            return $conn;
+        }
+
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code(503);
+        echo json_encode([
+            'success' => false,
+            'message' => 'Service temporarily unavailable. Please try again later.',
+        ]);
+        exit;
     }
 
     public static function ensureColumn(PDO $pdo, string $table, string $column, string $definition): void {
