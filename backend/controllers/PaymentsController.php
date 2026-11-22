@@ -1165,6 +1165,30 @@ class PaymentsController {
                 }
             }
 
+            // 7. Activity Logger
+            try {
+                require_once __DIR__ . '/../lib/ActivityLogger.php';
+                ActivityLogger::log([
+                    'tenant_id' => $effectiveTenantId,
+                    'user_id' => (int)$user['user_id'],
+                    'log_type' => 'financial',
+                    'action' => 'assign_unmatched_payment',
+                    'module' => 'payment',
+                    'target_id' => (string)$customerId,
+                    'target_type' => 'customer',
+                    'description' => "Assigned unmatched payment #{$trx['transaction_ref']} (৳{$amount} via {$gateway}) to customer #{$customerCode} ({$customerName})",
+                    'metadata' => [
+                        'transaction_id' => $trxId,
+                        'transaction_ref' => $trx['transaction_ref'],
+                        'customer_id' => $customerId,
+                        'customer_code' => $customerCode,
+                        'amount' => $amount,
+                        'months' => $months,
+                        'invoice_id' => $resolvedInvId,
+                    ],
+                ]);
+            } catch (\Throwable $actErr) {}
+
             $db->commit();
         } catch (\Throwable $e) {
             $db->rollBack();

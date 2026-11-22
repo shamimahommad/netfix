@@ -297,6 +297,27 @@ class ResellersController {
                 ->execute(['amt' => $openingBalance, 'cb' => $currentUser['user_id'], 'uid' => $userId]);
         }
 
+        try {
+            require_once __DIR__ . '/../lib/ActivityLogger.php';
+            ActivityLogger::log([
+                'tenant_id' => $tenantId ? (int)$tenantId : 1,
+                'user_id' => (int)$currentUser['user_id'],
+                'log_type' => 'activity',
+                'action' => 'create_reseller',
+                'module' => 'reseller',
+                'target_id' => (string)$userId,
+                'target_type' => 'reseller',
+                'description' => "Created new {$role} '{$username}' (User #{$userId}) with opening balance ৳" . number_format($openingBalance, 2),
+                'metadata' => [
+                    'user_id' => $userId,
+                    'username' => $username,
+                    'role' => $role,
+                    'parent_id' => $parentId,
+                    'opening_balance' => $openingBalance,
+                ],
+            ]);
+        } catch (Throwable $actErr) {}
+
         Response::json([
             'success' => true,
             'data' => [
@@ -462,6 +483,23 @@ class ResellersController {
             $stmt->execute($params);
         }
 
+        try {
+            require_once __DIR__ . '/../lib/ActivityLogger.php';
+            ActivityLogger::log([
+                'tenant_id' => $tenantId ? (int)$tenantId : 1,
+                'user_id' => (int)$currentUser['user_id'],
+                'log_type' => 'activity',
+                'action' => 'update_reseller',
+                'module' => 'reseller',
+                'target_id' => (string)$id,
+                'target_type' => 'reseller',
+                'description' => "Updated settings/profile for reseller #{$id} ({$targetUser['username']})",
+                'metadata' => [
+                    'updated_fields' => array_keys($data),
+                ],
+            ]);
+        } catch (Throwable $actErr) {}
+
         Response::json([
             'success' => true,
             'message' => 'Reseller updated successfully',
@@ -518,6 +556,20 @@ class ResellersController {
         $upd = $db->prepare("UPDATE users SET password_hash = :hash, password_changed_at = NOW(), updated_at = NOW() WHERE user_id = :id");
         $upd->execute(['hash' => $newHash, 'id' => $id]);
 
+        try {
+            require_once __DIR__ . '/../lib/ActivityLogger.php';
+            ActivityLogger::log([
+                'tenant_id' => $tenantId ? (int)$tenantId : 1,
+                'user_id' => (int)$currentUser['user_id'],
+                'log_type' => 'security',
+                'action' => 'reset_password',
+                'module' => 'reseller',
+                'target_id' => (string)$id,
+                'target_type' => 'reseller',
+                'description' => "Reset password for reseller #{$id} ({$targetUser['username']})",
+            ]);
+        } catch (Throwable $actErr) {}
+
         Response::json([
             'success' => true,
             'message' => 'Password reset successfully for ' . $targetUser['username'],
@@ -547,6 +599,22 @@ class ResellersController {
 
         $upd = $db->prepare("UPDATE users SET status = :status, updated_at = NOW() WHERE user_id = :id");
         $upd->execute(['status' => $status, 'id' => $id]);
+
+        try {
+            require_once __DIR__ . '/../lib/ActivityLogger.php';
+            $targetUname = $targetUser['username'] ?? 'User';
+            ActivityLogger::log([
+                'tenant_id' => $tenantId ? (int)$tenantId : 1,
+                'user_id' => (int)$currentUser['user_id'],
+                'log_type' => 'activity',
+                'action' => 'change_status',
+                'module' => 'reseller',
+                'target_id' => (string)$id,
+                'target_type' => 'reseller',
+                'description' => "Changed status of reseller #{$id} ({$targetUname}) to '{$status}'",
+                'metadata' => ['status' => $status],
+            ]);
+        } catch (Throwable $actErr) {}
 
         Response::json(['success' => true, 'status' => $status]);
     }
@@ -578,6 +646,20 @@ class ResellersController {
         $upd = $db->prepare("UPDATE users SET status = 'inactive', deleted_at = NOW(), updated_at = NOW() WHERE user_id = :id");
         $upd->execute(['id' => $id]);
 
+        try {
+            require_once __DIR__ . '/../lib/ActivityLogger.php';
+            ActivityLogger::log([
+                'tenant_id' => $tenantId ? (int)$tenantId : 1,
+                'user_id' => (int)$currentUser['user_id'],
+                'log_type' => 'activity',
+                'action' => 'delete_reseller',
+                'module' => 'reseller',
+                'target_id' => (string)$id,
+                'target_type' => 'reseller',
+                'description' => "Soft deleted reseller #{$id} ({$targetUser['username']})",
+            ]);
+        } catch (Throwable $actErr) {}
+
         Response::json(['success' => true]);
     }
 
@@ -593,21 +675,88 @@ class ResellersController {
 
         $userId = (int)($data['userId'] ?? 0);
         $amount = (float)($data['amount'] ?? 0);
-        $notes = $data['notes'] ?? 'Wallet Top-up';
+        $notes = trim($data['notes'] ?? 'Wallet Top-up');
 
         if (!$userId || $amount <= 0) {
             Response::error('User ID and positive amount are required', 400);
+            return;
+        }
+
+        $callerId = (int)$currentUser['user_id'];
+        $isAdmin = HierarchySecurityService::isIspAdmin($currentUser);
+
+        // Security: verify downward access
+        if (!HierarchySecurityService::canAccessUser($callerId, $userId)) {
+            Response::error('Access denied: You cannot modify balance for this user.', 403);
+            return;
         }
 
         try {
-            $result = WalletLedgerService::topup(
-                (int)$currentUser['user_id'],
-                $userId,
-                $amount,
-                $notes,
-                $tenantId ? (int)$tenantId : null
-            );
-            Response::json(['success' => true, 'balance' => $result['balance_after']]);
+            if (!$isAdmin) {
+                // Non-admin (Reseller, Sub-Reseller, etc.) MUST transfer funds from their own wallet
+                $result = WalletLedgerService::transfer(
+                    $callerId,
+                    $callerId, // from caller's wallet
+                    $userId,   // to target downline
+                    $amount,
+                    $notes,
+                    $tenantId ? (int)$tenantId : null
+                );
+
+                try {
+                    require_once __DIR__ . '/../lib/ActivityLogger.php';
+                    ActivityLogger::log([
+                        'tenant_id' => $tenantId ? (int)$tenantId : 1,
+                        'user_id' => $callerId,
+                        'log_type' => 'activity',
+                        'action' => 'balance_transfer',
+                        'module' => 'reseller',
+                        'target_id' => (string)$userId,
+                        'target_type' => 'reseller',
+                        'description' => "Transferred ৳{$amount} from {$currentUser['username']} to downline user #{$userId} ({$notes})",
+                        'metadata' => [
+                            'amount' => $amount,
+                            'from_user_id' => $callerId,
+                            'to_user_id' => $userId,
+                            'from_balance_after' => $result['from_balance_after'],
+                            'to_balance_after' => $result['to_balance_after'],
+                        ],
+                    ]);
+                } catch (Throwable $e) {}
+
+                Response::json(['success' => true, 'balance' => $result['to_balance_after'], 'data' => $result]);
+            } else {
+                // Admin direct top-up
+                $result = WalletLedgerService::topup(
+                    $callerId,
+                    $userId,
+                    $amount,
+                    $notes,
+                    $tenantId ? (int)$tenantId : null
+                );
+
+                try {
+                    require_once __DIR__ . '/../lib/ActivityLogger.php';
+                    ActivityLogger::log([
+                        'tenant_id' => $tenantId ? (int)$tenantId : 1,
+                        'user_id' => $callerId,
+                        'log_type' => 'activity',
+                        'action' => 'balance_topup',
+                        'module' => 'reseller',
+                        'target_id' => (string)$userId,
+                        'target_type' => 'reseller',
+                        'description' => "Admin top-up of ৳{$amount} for reseller #{$userId} ({$notes})",
+                        'metadata' => [
+                            'amount' => $amount,
+                            'target_user_id' => $userId,
+                            'balance_before' => $result['balance_before'],
+                            'balance_after' => $result['balance_after'],
+                        ],
+                    ]);
+                } catch (Throwable $e) {}
+
+                Response::json(['success' => true, 'balance' => $result['balance_after'], 'data' => $result]);
+            }
         } catch (Throwable $e) {
             Response::error($e->getMessage(), 400);
         }
@@ -629,57 +778,135 @@ class ResellersController {
             return;
         }
 
-        // Downward hierarchy security check
-        if (!HierarchySecurityService::canAccessUser((int)$currentUser['user_id'], $userId)) {
+        $callerId = (int)$currentUser['user_id'];
+        $isAdmin = HierarchySecurityService::isIspAdmin($currentUser);
+
+        // Security: Downward hierarchy security check
+        if (!HierarchySecurityService::canAccessUser($callerId, $userId)) {
             Response::error('Access denied: You cannot modify balance for this reseller.', 403);
             return;
         }
 
         try {
             if ($operation === 'debit') {
+                // ONLY ISP Admin can do direct debit!
+                if (!$isAdmin) {
+                    Response::error('Permission denied: Only ISP Admins can perform direct balance debits.', 403);
+                    return;
+                }
+
                 $result = WalletLedgerService::debit(
-                    (int)$currentUser['user_id'],
+                    $callerId,
                     $userId,
                     $amount,
                     $notes,
                     $tenantId ? (int)$tenantId : null
                 );
-            } else {
-                $result = WalletLedgerService::topup(
-                    (int)$currentUser['user_id'],
-                    $userId,
-                    $amount,
-                    $notes,
-                    $tenantId ? (int)$tenantId : null
-                );
-            }
 
-            try {
-                require_once __DIR__ . '/../lib/ActivityLogger.php';
-                ActivityLogger::log([
-                    'tenant_id' => $tenantId ? (int)$tenantId : 1,
-                    'user_id' => (int)$currentUser['user_id'],
-                    'log_type' => 'activity',
-                    'action' => $operation === 'debit' ? 'balance_debit' : 'balance_topup',
-                    'module' => 'reseller',
-                    'target_id' => (string)$userId,
-                    'target_type' => 'reseller',
-                    'description' => ($operation === 'debit' ? "Debited" : "Credited") . " ৳{$amount} for reseller #{$userId} ({$notes})",
-                    'metadata' => [
-                        'amount' => $amount,
-                        'operation' => $operation,
-                        'balance_before' => $result['balance_before'],
-                        'balance_after' => $result['balance_after'],
-                    ],
+                try {
+                    require_once __DIR__ . '/../lib/ActivityLogger.php';
+                    ActivityLogger::log([
+                        'tenant_id' => $tenantId ? (int)$tenantId : 1,
+                        'user_id' => $callerId,
+                        'log_type' => 'activity',
+                        'action' => 'balance_debit',
+                        'module' => 'reseller',
+                        'target_id' => (string)$userId,
+                        'target_type' => 'reseller',
+                        'description' => "Admin debited ৳{$amount} from reseller #{$userId} ({$notes})",
+                        'metadata' => [
+                            'amount' => $amount,
+                            'operation' => 'debit',
+                            'balance_before' => $result['balance_before'],
+                            'balance_after' => $result['balance_after'],
+                        ],
+                    ]);
+                } catch (Throwable $e) {}
+
+                Response::json([
+                    'success' => true,
+                    'message' => 'Balance debited successfully',
+                    'balance' => $result['balance_after'],
+                    'data' => $result,
                 ]);
-            } catch (Throwable $e) {}
+            } else {
+                // Credit
+                if (!$isAdmin) {
+                    // Non-admin MUST transfer funds from their own wallet
+                    $result = WalletLedgerService::transfer(
+                        $callerId,
+                        $callerId,
+                        $userId,
+                        $amount,
+                        $notes,
+                        $tenantId ? (int)$tenantId : null
+                    );
 
-            Response::json([
-                'success' => true,
-                'message' => $operation === 'debit' ? 'Balance debited successfully' : 'Balance credited successfully',
-                'balance' => $result['balance_after'],
-                'data' => $result,
-            ]);
+                    try {
+                        require_once __DIR__ . '/../lib/ActivityLogger.php';
+                        ActivityLogger::log([
+                            'tenant_id' => $tenantId ? (int)$tenantId : 1,
+                            'user_id' => $callerId,
+                            'log_type' => 'activity',
+                            'action' => 'balance_transfer',
+                            'module' => 'reseller',
+                            'target_id' => (string)$userId,
+                            'target_type' => 'reseller',
+                            'description' => "Transferred ৳{$amount} from {$currentUser['username']} to downline reseller #{$userId} ({$notes})",
+                            'metadata' => [
+                                'amount' => $amount,
+                                'from_user_id' => $callerId,
+                                'to_user_id' => $userId,
+                                'from_balance_after' => $result['from_balance_after'],
+                                'to_balance_after' => $result['to_balance_after'],
+                            ],
+                        ]);
+                    } catch (Throwable $e) {}
+
+                    Response::json([
+                        'success' => true,
+                        'message' => 'Fund transferred successfully',
+                        'balance' => $result['to_balance_after'],
+                        'data' => $result,
+                    ]);
+                } else {
+                    // Admin direct top-up
+                    $result = WalletLedgerService::topup(
+                        $callerId,
+                        $userId,
+                        $amount,
+                        $notes,
+                        $tenantId ? (int)$tenantId : null
+                    );
+
+                    try {
+                        require_once __DIR__ . '/../lib/ActivityLogger.php';
+                        ActivityLogger::log([
+                            'tenant_id' => $tenantId ? (int)$tenantId : 1,
+                            'user_id' => $callerId,
+                            'log_type' => 'activity',
+                            'action' => 'balance_topup',
+                            'module' => 'reseller',
+                            'target_id' => (string)$userId,
+                            'target_type' => 'reseller',
+                            'description' => "Admin credited ৳{$amount} for reseller #{$userId} ({$notes})",
+                            'metadata' => [
+                                'amount' => $amount,
+                                'operation' => 'credit',
+                                'balance_before' => $result['balance_before'],
+                                'balance_after' => $result['balance_after'],
+                            ],
+                        ]);
+                    } catch (Throwable $e) {}
+
+                    Response::json([
+                        'success' => true,
+                        'message' => 'Balance credited successfully',
+                        'balance' => $result['balance_after'],
+                        'data' => $result,
+                    ]);
+                }
+            }
         } catch (Throwable $e) {
             Response::error($e->getMessage(), 400);
         }
@@ -694,15 +921,39 @@ class ResellersController {
         $fromUserId = (int)($data['fromUserId'] ?? 0);
         $toUserId = (int)($data['toUserId'] ?? 0);
         $amount = (float)($data['amount'] ?? 0);
-        $notes = $data['notes'] ?? 'Wallet Transfer';
+        $notes = trim($data['notes'] ?? 'Wallet Transfer');
 
         if (!$fromUserId || !$toUserId || $amount <= 0) {
             Response::error('From User, To User, and positive amount are required', 400);
+            return;
+        }
+
+        $callerId = (int)$currentUser['user_id'];
+        $isAdmin = HierarchySecurityService::isIspAdmin($currentUser);
+
+        // Security check:
+        // Non-admin can ONLY transfer funds FROM their own account ($fromUserId === $callerId)
+        // and TO their downline child that they have access to!
+        if (!$isAdmin) {
+            if ($fromUserId !== $callerId) {
+                Response::error('Access denied: You can only transfer funds from your own wallet.', 403);
+                return;
+            }
+            if (!HierarchySecurityService::canAccessUser($callerId, $toUserId)) {
+                Response::error('Access denied: You can only transfer funds to your own downline resellers/agents.', 403);
+                return;
+            }
+        } else {
+            // Admin can transfer between downlines, but both must be accessible
+            if (!HierarchySecurityService::canAccessUser($callerId, $fromUserId) || !HierarchySecurityService::canAccessUser($callerId, $toUserId)) {
+                Response::error('Access denied: One or both target users cannot be accessed.', 403);
+                return;
+            }
         }
 
         try {
             $result = WalletLedgerService::transfer(
-                (int)$currentUser['user_id'],
+                $callerId,
                 $fromUserId,
                 $toUserId,
                 $amount,
@@ -714,17 +965,30 @@ class ResellersController {
                 require_once __DIR__ . '/../lib/ActivityLogger.php';
                 ActivityLogger::log([
                     'tenant_id' => $tenantId ? (int)$tenantId : 1,
-                    'user_id' => (int)$currentUser['user_id'],
+                    'user_id' => $callerId,
                     'log_type' => 'activity',
                     'action' => 'balance_transfer',
                     'module' => 'reseller',
                     'target_id' => (string)$toUserId,
                     'target_type' => 'reseller',
                     'description' => "Transferred balance of ৳{$amount} from user #{$fromUserId} to user #{$toUserId} ({$notes})",
-                    'metadata' => ['from_user' => $fromUserId, 'to_user' => $toUserId, 'amount' => $amount],
+                    'metadata' => [
+                        'amount' => $amount,
+                        'from_user' => $fromUserId,
+                        'to_user' => $toUserId,
+                        'from_balance_after' => $result['from_balance_after'],
+                        'to_balance_after' => $result['to_balance_after'],
+                    ],
                 ]);
             } catch (\Throwable $actErr) {}
-            Response::json(['success' => true, 'data' => $result]);
+
+            Response::json([
+                'success' => true,
+                'message' => 'Balance transferred successfully',
+                'fromBalance' => $result['from_balance_after'],
+                'toBalance' => $result['to_balance_after'],
+                'data' => $result,
+            ]);
         } catch (Throwable $e) {
             Response::error($e->getMessage(), 400);
         }
@@ -857,6 +1121,21 @@ class ResellersController {
                 );
             }
 
+            try {
+                require_once __DIR__ . '/../lib/ActivityLogger.php';
+                ActivityLogger::log([
+                    'tenant_id' => $tenantId ? (int)$tenantId : 1,
+                    'user_id' => (int)$currentUser['user_id'],
+                    'log_type' => 'activity',
+                    'action' => 'update_plan_permissions',
+                    'module' => 'reseller',
+                    'target_id' => (string)$targetUserId,
+                    'target_type' => 'reseller',
+                    'description' => "Updated package margins and price floors for user #{$targetUserId}",
+                    'metadata' => ['item_count' => count($items)],
+                ]);
+            } catch (Throwable $actErr) {}
+
             Response::json(['success' => true, 'message' => 'Package permissions and price floors updated successfully']);
         } catch (DomainException $de) {
             Response::error($de->getMessage(), 400);
@@ -976,6 +1255,22 @@ class ResellersController {
             }
 
             $db->commit();
+
+            try {
+                require_once __DIR__ . '/../lib/ActivityLogger.php';
+                ActivityLogger::log([
+                    'tenant_id' => $tenantId ? (int)$tenantId : 1,
+                    'user_id' => (int)$currentUser['user_id'],
+                    'log_type' => 'security',
+                    'action' => 'update_permissions',
+                    'module' => 'reseller',
+                    'target_id' => (string)$targetUserId,
+                    'target_type' => 'reseller',
+                    'description' => "Updated role permissions for user #{$targetUserId} ({$targetUser['username']})",
+                    'metadata' => ['granted_count' => count($permissionIds)],
+                ]);
+            } catch (Throwable $actErr) {}
+
             Response::json(['success' => true, 'message' => 'Permissions updated successfully']);
         } catch (Throwable $e) {
             if ($db->inTransaction()) {

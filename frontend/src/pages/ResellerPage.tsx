@@ -297,7 +297,7 @@ export default function ResellerPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const toast = useToastContext();
-  const { user, refreshMe } = useAuthStore();
+  const { user, balance: myBalance, refreshMe } = useAuthStore();
   const permissions = usePermissions();
   const isAdmin = user?.role_code === 'admin' || user?.role_code === 'isp_admin';
   const isCompanyAdmin = isAdmin || ['saas_admin', 'tenant_admin', 'manager'].includes(user?.role_code || '');
@@ -604,6 +604,10 @@ export default function ResellerPage() {
       const notes = `[${rechargeMethod}]${refPart} ${rechargeRemarks.trim()}`;
 
       if (rechargeAction === 'debit') {
+        if (!isCompanyAdmin) {
+          toast.error('Only Admins can perform direct balance debits.');
+          return;
+        }
         // Debit: admin-only manual debit; affects only reseller ledger, not admin balance
         await api.patch(`/resellers/${addBalanceUserId}/balance`, {
           amount,
@@ -612,9 +616,20 @@ export default function ResellerPage() {
         });
         toast.success('Balance debited from reseller');
       } else {
-        // Credit: add balance to reseller (ledger credit only)
-        await resellerService.addBalance(addBalanceUserId, amount, notes);
-        toast.success('Balance recharged');
+        if (isCompanyAdmin) {
+          // Admin credit: direct wallet topup
+          await resellerService.addBalance(addBalanceUserId, amount, notes);
+          toast.success('Balance recharged for reseller');
+        } else {
+          // Reseller / Sub-reseller: Fund Transfer from own balance to sub-reseller
+          await api.post('/resellers/transfer-balance', {
+            fromUserId: user?.user_id,
+            toUserId: addBalanceUserId,
+            amount,
+            notes,
+          });
+          toast.success(`৳${amount} transferred from your wallet to sub-reseller`);
+        }
       }
       closeRechargeModal();
       loadList();
@@ -1242,34 +1257,46 @@ export default function ResellerPage() {
                     Balance {formatCurrency(currentBalance)}
                   </span>
                 </div>
-                {/* Choose Action — soft pill toggle */}
-                <div>
-                  <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Choose Action</div>
-                  <div className="flex gap-1 p-1 rounded-xl bg-slate-200/60 dark:bg-slate-700/50 w-fit">
-                    <button
-                      type="button"
-                      onClick={() => setRechargeAction('credit')}
-                      className={`px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
-                        rechargeAction === 'credit'
-                          ? 'bg-teal-500 text-white shadow-md shadow-teal-500/30'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                      }`}
-                    >
-                      Credit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRechargeAction('debit')}
-                      className={`px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
-                        rechargeAction === 'debit'
-                          ? 'bg-rose-400 text-white shadow-md shadow-rose-400/30'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                      }`}
-                    >
-                      Debit
-                    </button>
+                {/* Choose Action — soft pill toggle for Admin only, or Transfer Notice for Reseller */}
+                {isCompanyAdmin ? (
+                  <div>
+                    <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Choose Action</div>
+                    <div className="flex gap-1 p-1 rounded-xl bg-slate-200/60 dark:bg-slate-700/50 w-fit">
+                      <button
+                        type="button"
+                        onClick={() => setRechargeAction('credit')}
+                        className={`px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                          rechargeAction === 'credit'
+                            ? 'bg-teal-500 text-white shadow-md shadow-teal-500/30'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        Credit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRechargeAction('debit')}
+                        className={`px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                          rechargeAction === 'debit'
+                            ? 'bg-rose-400 text-white shadow-md shadow-rose-400/30'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        Debit
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-200 space-y-1">
+                    <div className="font-semibold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-500" />
+                      <span>Fund Transfer from Your Account</span>
+                    </div>
+                    <p className="text-amber-700 dark:text-amber-300">
+                      Recharged amount will be debited from your personal wallet (Your Balance: <strong className="font-mono">{formatCurrency(myBalance ?? 0)}</strong>) and credited to this sub-reseller.
+                    </p>
+                  </div>
+                )}
                 {/* Form — clean inputs, sky focus */}
                 <div className="space-y-3">
                   <div>
