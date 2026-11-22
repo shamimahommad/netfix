@@ -345,4 +345,34 @@ export const paymentsService = {
       })),
     };
   },
+
+  /** Get all unmatched / suspense payments */
+  async getUnmatchedPayments(): Promise<Array<{
+    transaction_id: number;
+    transaction_ref: string;
+    amount: number;
+    method: string;
+    raw_reference: string;
+    description: string;
+    created_at: string;
+    metadata?: any;
+  }>> {
+    const res = await api.get<{ success: boolean; data: any[] }>('/payments/unmatched');
+    return res.data?.data || [];
+  },
+
+  /** Reconcile & assign an unmatched payment to a customer, extending service & unblocking router */
+  async assignUnmatchedPayment(payload: {
+    transaction_id: number | string;
+    customer_id: number | string;
+    months?: number;
+    notes?: string;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    data?: any;
+  }> {
+    const res = await api.post('/payments/assign-unmatched', payload);
+    return res.data;
+  },
 };

@@ -328,6 +328,12 @@ if ($method === 'GET' && $uri === '/payments/recharge-history') {
 if ($method === 'GET' && ($uri === '/payments/customer-payments' || $uri === '/payments/recharge-history-combined')) {
     PaymentsController::customerPayments();
 }
+if ($method === 'GET' && ($uri === '/payments/unmatched' || $uri === '/api/payments/unmatched')) {
+    PaymentsController::unmatchedPayments();
+}
+if ($method === 'POST' && ($uri === '/payments/assign-unmatched' || $uri === '/api/payments/assign-unmatched')) {
+    PaymentsController::assignUnmatched();
+}
 if ($method === 'POST' && $uri === '/payments/bkash/callback') {
     PaymentsController::bkashCallback();
 }

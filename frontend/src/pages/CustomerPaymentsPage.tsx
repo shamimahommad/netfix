@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CreditCard, Search, Download, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { CreditCard, Search, Download, RefreshCw, ChevronLeft, ChevronRight, UserCheck } from 'lucide-react';
 import { resellerService, PopOption } from '@/services/reseller.service';
 import { paymentsService } from '@/services/payments.service';
 import { useToastContext } from '@/contexts/ToastContext';
 import { formatInvoiceIdDisplay } from '@/lib/formatInvoiceId';
 import { PageHeader, MetricCard } from '@/components/common';
+import AssignPaymentModal from '@/components/AssignPaymentModal';
 
 export interface CustomerPaymentRow {
   sl: number;
@@ -17,6 +18,9 @@ export interface CustomerPaymentRow {
   balance_after: number;
   created_at: string;
   description: string;
+  is_unmatched?: boolean;
+  transaction_id?: number;
+  method?: string;
 }
 
 const PAGE_SIZES = [10, 25, 50] as const;
@@ -33,6 +37,8 @@ export default function CustomerPaymentsPage() {
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [assigningPayment, setAssigningPayment] = useState<any | null>(null);
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [popOptions, setPopOptions] = useState<PopOption[]>([]);
   const [initiatorOptions, setInitiatorOptions] = useState<PopOption[]>([]);
   const [page, setPage] = useState(1);
@@ -101,6 +107,9 @@ export default function CustomerPaymentsPage() {
         balance_after: Number(item.balance || item.balance_after || 0),
         created_at: item.created_at || '—',
         description: item.description || item.note || '—',
+        is_unmatched: Boolean(item.is_unmatched || item.transaction_type === 'UNMATCHED_PAYMENT'),
+        transaction_id: item.transaction_id,
+        method: item.method,
       }));
 
       setData(rows);
@@ -369,7 +378,31 @@ export default function CustomerPaymentsPage() {
                     <td className="py-3 px-4 text-sm font-mono text-xs text-slate-600 dark:text-slate-400">
                       {formatInvoiceIdDisplay(row.ref)}
                     </td>
-                    <td className="py-3 px-4 text-sm font-medium text-slate-900 dark:text-slate-100">{row.initiator_name}</td>
+                    <td className="py-3 px-4 text-sm font-medium text-slate-900 dark:text-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span>{row.initiator_name}</span>
+                        {row.is_unmatched && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAssigningPayment({
+                                transaction_id: row.transaction_id,
+                                transaction_ref: row.ref,
+                                amount: row.credit || row.debit,
+                                method: row.method,
+                                description: row.description,
+                              });
+                              setIsAssignModalOpen(true);
+                            }}
+                            className="px-2 py-0.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-[10px] flex items-center gap-1 transition-all shadow-2xs cursor-pointer"
+                            title="Assign Unmatched Payment to Customer"
+                          >
+                            <UserCheck className="w-3 h-3" />
+                            <span>Assign</span>
+                          </button>
+                        )}
+                      </div>
+                    </td>
                     <td className="py-3 px-4 text-sm text-slate-700 dark:text-slate-300">{row.pop_in_charge_name}</td>
                     <td className="py-3 px-4 text-sm text-right font-semibold text-rose-600 dark:text-rose-400">
                       {row.debit > 0 ? `৳${formatMoney(row.debit)}` : '—'}
@@ -422,6 +455,19 @@ export default function CustomerPaymentsPage() {
           </div>
         )}
       </div>
+
+      {/* Assign Unmatched Payment Modal */}
+      <AssignPaymentModal
+        isOpen={isAssignModalOpen}
+        payment={assigningPayment}
+        onClose={() => {
+          setIsAssignModalOpen(false);
+          setAssigningPayment(null);
+        }}
+        onSuccess={() => {
+          loadPayments();
+        }}
+      />
     </div>
   );
 }

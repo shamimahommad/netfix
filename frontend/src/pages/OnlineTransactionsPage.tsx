@@ -13,7 +13,8 @@ import {
   X,
   CheckCircle2,
   Clock,
-  AlertCircle
+  AlertCircle,
+  UserCheck
 } from 'lucide-react';
 import {
   paymentsService,
@@ -24,6 +25,7 @@ import {
 } from '@/services/payments.service';
 import { formatInvoiceIdDisplay } from '@/lib/formatInvoiceId';
 import PageHeader from '@/components/common/PageHeader';
+import AssignPaymentModal from '@/components/AssignPaymentModal';
 
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All' },
@@ -142,6 +144,8 @@ export default function OnlineTransactionsPage() {
 
   // Selected item for Details Modal
   const [selectedTxn, setSelectedTxn] = useState<OnlineTransactionItem | null>(null);
+  const [assigningPayment, setAssigningPayment] = useState<any | null>(null);
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
 
   // Sorting
   const [sortField, setSortField] = useState<keyof OnlineTransactionItem>('createdAt');
@@ -809,7 +813,7 @@ export default function OnlineTransactionsPage() {
 
                       {/* 14. Actions */}
                       <td className="px-3 py-3 whitespace-nowrap text-center">
-                        <div className="inline-flex items-center justify-center gap-2">
+                        <div className="inline-flex items-center justify-center gap-1.5">
                           <button
                             type="button"
                             onClick={() => setSelectedTxn(r)}
@@ -828,7 +832,18 @@ export default function OnlineTransactionsPage() {
                               <User className="w-3.5 h-3.5" />
                             </button>
                           ) : (
-                            <span className="w-3.5 h-3.5 inline-block opacity-0" />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAssigningPayment(r);
+                                setIsAssignModalOpen(true);
+                              }}
+                              title="Assign Unmatched Payment to Customer"
+                              className="px-2 py-0.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-[10px] flex items-center gap-1 transition-all shadow-2xs"
+                            >
+                              <UserCheck className="w-3 h-3" />
+                              <span>Assign</span>
+                            </button>
                           )}
                         </div>
                       </td>
@@ -968,7 +983,22 @@ export default function OnlineTransactionsPage() {
               </div>
             </div>
 
-            <div className="pt-2 flex justify-end">
+            <div className="pt-2 flex justify-between items-center">
+              {!selectedTxn.customerId ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const tx = selectedTxn;
+                    setSelectedTxn(null);
+                    setAssigningPayment(tx);
+                    setIsAssignModalOpen(true);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                >
+                  <UserCheck className="w-4 h-4" />
+                  <span>Assign to Customer</span>
+                </button>
+              ) : <div />}
               <button
                 type="button"
                 onClick={() => setSelectedTxn(null)}
@@ -980,6 +1010,19 @@ export default function OnlineTransactionsPage() {
           </div>
         </div>
       )}
+
+      {/* Assign Unmatched Payment Modal */}
+      <AssignPaymentModal
+        isOpen={isAssignModalOpen}
+        payment={assigningPayment}
+        onClose={() => {
+          setIsAssignModalOpen(false);
+          setAssigningPayment(null);
+        }}
+        onSuccess={() => {
+          fetchTransactions();
+        }}
+      />
     </div>
   );
 }

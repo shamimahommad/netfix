@@ -544,6 +544,9 @@ class PaymentsController {
                 'customer_name' => $r['customer_name'] ?: '—',
                 'customer_code' => $r['customer_code'] ?: '—',
                 'method' => $r['method'] ?: '—',
+                'transaction_id' => (int)$r['transaction_id'],
+                'transaction_type' => $r['transaction_type'],
+                'is_unmatched' => ($r['transaction_type'] === 'UNMATCHED_PAYMENT' || empty($r['customer_name']) || $r['customer_name'] === '—'),
             ];
         }
 
@@ -724,6 +727,245 @@ class PaymentsController {
             'paymentID' => $paymentId,
             'trxID' => $trxId,
             'message' => 'bKash instant webhook reconnect processed successfully',
+        ]);
+    }
+
+    /**
+     * GET /payments/unmatched
+     * List all unmatched / suspense payments in this tenant
+     */
+    public static function unmatchedPayments(): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = (int)AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $stmt = $db->prepare("SELECT 
+            t.transaction_id,
+            t.tenant_id,
+            t.transaction_ref,
+            t.transaction_type,
+            t.amount,
+            t.method,
+            t.description,
+            t.metadata,
+            t.created_at,
+            t.customer_id
+            FROM transactions t
+            WHERE (t.tenant_id = :tid OR :tid2 = 0)
+              AND (t.transaction_type = 'UNMATCHED_PAYMENT' OR (t.customer_id IS NULL AND t.description LIKE '%Unmatched%'))
+            ORDER BY t.transaction_id DESC
+            LIMIT 50");
+        $stmt->execute(['tid' => $tenantId, 'tid2' => $tenantId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $data = array_map(function($r) {
+            $meta = !empty($r['metadata']) ? json_decode($r['metadata'], true) : [];
+            $rawRef = $meta['reference'] ?? ($meta['payerReference'] ?? ($meta['ref'] ?? ($meta['customer_code'] ?? '')));
+            return [
+                'transaction_id' => (int)$r['transaction_id'],
+                'transaction_ref' => $r['transaction_ref'],
+                'amount' => (float)$r['amount'],
+                'method' => $r['method'],
+                'raw_reference' => $rawRef,
+                'description' => $r['description'],
+                'created_at' => $r['created_at'],
+                'metadata' => $meta,
+            ];
+        }, $rows);
+
+        Response::json([
+            'success' => true,
+            'count' => count($data),
+            'data' => $data,
+        ]);
+    }
+
+    /**
+     * POST /payments/assign-unmatched
+     * Assigns an unmatched payment to a customer, settles bill, and reactivates MikroTik
+     */
+    public static function assignUnmatched(): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = (int)AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+        $trxIdentifier = trim($data['transaction_id'] ?? ($data['transaction_ref'] ?? ($data['trx_id'] ?? '')));
+        $targetCustomer = trim($data['customer_id'] ?? ($data['customer_code'] ?? ($data['username'] ?? '')));
+        $months = max(1, (int)($data['months'] ?? 1));
+        $notes = trim($data['notes'] ?? 'Manually assigned unmatched MFS payment');
+
+        if (empty($trxIdentifier) || empty($targetCustomer)) {
+            Response::error('Transaction ID/Ref and Customer ID/Code are required', 400);
+            return;
+        }
+
+        // 1. Find Transaction
+        $stmtTrx = $db->prepare("SELECT * FROM transactions 
+            WHERE (transaction_id = :id OR transaction_ref = :ref) 
+              AND (tenant_id = :tid OR :tid2 = 0) LIMIT 1");
+        $stmtTrx->execute([
+            'id' => is_numeric($trxIdentifier) ? (int)$trxIdentifier : 0,
+            'ref' => $trxIdentifier,
+            'tid' => $tenantId,
+            'tid2' => $tenantId,
+        ]);
+        $trx = $stmtTrx->fetch(PDO::FETCH_ASSOC);
+
+        if (!$trx) {
+            Response::error('Transaction not found in this tenant', 404);
+            return;
+        }
+
+        if (!empty($trx['customer_id']) && $trx['transaction_type'] !== 'UNMATCHED_PAYMENT') {
+            Response::error("Transaction is already assigned to Customer #{$trx['customer_id']}", 400);
+            return;
+        }
+
+        $effectiveTenantId = (int)$trx['tenant_id'];
+        $amount = (float)$trx['amount'];
+        $gateway = $trx['method'] ?: 'bkash';
+
+        // 2. Find Target Customer
+        $stmtCust = $db->prepare("SELECT c.*, cs.customer_service_id, cs.expires_at, cs.access_profile_id, ap.profile_name, ap.price
+            FROM customers c
+            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status != 'cancelled'
+            LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
+            WHERE (c.customer_id = :cid OR c.customer_code = :code OR c.phone = :phone)
+              AND c.tenant_id = :tid LIMIT 1");
+        $stmtCust->execute([
+            'cid' => is_numeric($targetCustomer) ? (int)$targetCustomer : 0,
+            'code' => $targetCustomer,
+            'phone' => $targetCustomer,
+            'tid' => $effectiveTenantId,
+        ]);
+        $cust = $stmtCust->fetch(PDO::FETCH_ASSOC);
+
+        if (!$cust) {
+            Response::error('Target customer not found in this tenant', 404);
+            return;
+        }
+
+        $customerId = (int)$cust['customer_id'];
+        $customerCode = $cust['customer_code'];
+        $customerName = $cust['full_name'];
+
+        $db->beginTransaction();
+        try {
+            // 3. Settle or Create Invoice
+            $stmtInv = $db->prepare("SELECT invoice_id, total_amount, balance_due FROM invoices 
+                WHERE customer_id = :cid AND tenant_id = :tid AND status IN ('pending', 'partially_paid') 
+                ORDER BY invoice_id ASC LIMIT 1");
+            $stmtInv->execute(['cid' => $customerId, 'tid' => $effectiveTenantId]);
+            $inv = $stmtInv->fetch(PDO::FETCH_ASSOC);
+
+            $resolvedInvId = null;
+            if ($inv) {
+                $resolvedInvId = (int)$inv['invoice_id'];
+                $db->prepare("UPDATE invoices 
+                    SET status = 'paid', paid_amount = :amt, balance_due = 0.00, payment_method = :pm, paid_at = NOW(), updated_at = NOW() 
+                    WHERE invoice_id = :id")
+                   ->execute(['amt' => $amount, 'pm' => $gateway, 'id' => $resolvedInvId]);
+            } else {
+                // Create paid invoice
+                $invNumber = 'INV-' . date('Ymd') . '-' . substr(uniqid(), -4);
+                $stmtInsInv = $db->prepare("INSERT INTO invoices 
+                    (tenant_id, customer_id, customer_service_id, invoice_number, invoice_no, invoice_date, due_date, subtotal, total_amount, paid_amount, balance_due, status, payment_method, paid_at, created_at, updated_at)
+                    VALUES (:tid, :cid, :csid, :num, :num2, CURDATE(), DATE_ADD(CURDATE(), INTERVAL :days DAY), :sub, :amt, :paid, 0.00, 'paid', :pm, NOW(), NOW(), NOW())");
+                $stmtInsInv->execute([
+                    'tid' => $effectiveTenantId,
+                    'cid' => $customerId,
+                    'csid' => !empty($cust['customer_service_id']) ? (int)$cust['customer_service_id'] : null,
+                    'num' => $invNumber,
+                    'num2' => $invNumber,
+                    'days' => $months * 30,
+                    'sub' => $amount,
+                    'amt' => $amount,
+                    'paid' => $amount,
+                    'pm' => $gateway,
+                ]);
+                $resolvedInvId = (int)$db->lastInsertId();
+            }
+
+            // 4. Extend Customer Expiry (+30 days * months)
+            $daysToAdd = $months * 30;
+            $db->prepare("UPDATE customer_services 
+                SET expires_at = DATE_ADD(GREATEST(COALESCE(expires_at, NOW()), NOW()), INTERVAL :days DAY),
+                    status = 'active',
+                    updated_at = NOW()
+                WHERE customer_id = :cid AND tenant_id = :tid")
+               ->execute(['days' => $daysToAdd, 'cid' => $customerId, 'tid' => $effectiveTenantId]);
+
+            // Reactivate Customer Status
+            $db->prepare("UPDATE customers 
+                SET status = 'active', billing_status = 'Paid', updated_at = NOW() 
+                WHERE customer_id = :cid AND tenant_id = :tid")
+               ->execute(['cid' => $customerId, 'tid' => $effectiveTenantId]);
+
+            // 5. Update Transaction Record
+            $newDesc = $trx['description'] . " [Reconciled & Assigned to #{$customerCode} ({$customerName}) by {$user['username']}]";
+            $db->prepare("UPDATE transactions 
+                SET customer_id = :cid,
+                    transaction_type = 'GATEWAY_PAYMENT',
+                    collector_user_id = :uid,
+                    description = :desc
+                WHERE transaction_id = :tid")
+               ->execute([
+                   'cid' => $customerId,
+                   'uid' => $user['user_id'],
+                   'desc' => $newDesc,
+                   'tid' => $trx['transaction_id'],
+               ]);
+
+            // 6. Execute Multi-Tier Split if invoice exists and reseller assigned
+            if ($resolvedInvId) {
+                try {
+                    require_once __DIR__ . '/../lib/PaymentSplitService.php';
+                    $splitService = new PaymentSplitService($db);
+                    $splitService->processCustomerPayment($resolvedInvId, $amount, $gateway, ['trx_id' => $trx['transaction_ref']]);
+                } catch (\Throwable $se) {
+                    error_log("Assign Payment Split Note: " . $se->getMessage());
+                }
+            }
+
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollBack();
+            error_log("Assign Payment DB Error: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
+            Response::error('Failed to assign payment: ' . $e->getMessage(), 500);
+            return;
+        }
+
+        // 7. MikroTik Router Instant Reactivation
+        $mtMsg = 'Internet unblocked and profile synced';
+        try {
+            require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+            $mtRes = MikrotikSyncService::renewCustomer($db, $customerId);
+            if (!empty($mtRes['message'])) {
+                $mtMsg = $mtRes['message'];
+            }
+        } catch (\Throwable $mte) {
+            $mtMsg = 'MikroTik update queued: ' . $mte->getMessage();
+        }
+
+        // 8. Fetch updated expiry date
+        $stmtExp = $db->prepare("SELECT expires_at FROM customer_services WHERE customer_id = :cid ORDER BY customer_service_id DESC LIMIT 1");
+        $stmtExp->execute(['cid' => $customerId]);
+        $newExpires = $stmtExp->fetchColumn();
+
+        Response::json([
+            'success' => true,
+            'message' => "Payment of ৳" . number_format($amount, 2) . " successfully assigned to {$customerName} ({$customerCode}). Service reactivated!",
+            'data' => [
+                'transaction_id' => (int)$trx['transaction_id'],
+                'transaction_ref' => $trx['transaction_ref'],
+                'amount' => $amount,
+                'customer_id' => $customerId,
+                'customer_code' => $customerCode,
+                'customer_name' => $customerName,
+                'new_expiry' => $newExpires,
+                'mikrotik' => $mtMsg,
+            ],
         ]);
     }
 }

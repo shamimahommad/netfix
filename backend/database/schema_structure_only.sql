@@ -841,7 +841,7 @@ CREATE TABLE `transactions` (
   `tenant_id` bigint(20) unsigned NOT NULL,
   `customer_id` bigint(20) unsigned DEFAULT NULL,
   `transaction_ref` varchar(120) NOT NULL,
-  `transaction_type` enum('GATEWAY_PAYMENT','MANUAL_CASH','ADMIN_ADJUST','RENEW_DEBIT','COMMISSION_CREDIT','REFUND','REVERSE_COMMISSION','ONLINE_GATEWAY') NOT NULL,
+  `transaction_type` varchar(50) NOT NULL DEFAULT 'GATEWAY_PAYMENT',
   `amount` decimal(15,2) NOT NULL,
   `method` varchar(30) DEFAULT 'cash',
   `initiator_user_id` bigint(20) unsigned DEFAULT NULL,
