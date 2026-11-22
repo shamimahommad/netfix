@@ -174,6 +174,28 @@ try {
         ]
     );
 
+    // 5b. Record in transactions table as online payment
+    try {
+        $stmtCheckTx = $db->prepare("SELECT transaction_id FROM transactions WHERE transaction_ref = :ref LIMIT 1");
+        $stmtCheckTx->execute(['ref' => $finalTrxId]);
+        if (!$stmtCheckTx->fetch()) {
+            $stmtTrx = $db->prepare("INSERT INTO transactions 
+                (tenant_id, customer_id, transaction_ref, transaction_type, amount, method, initiator_user_id, initiator_role, description, metadata)
+                VALUES (:tid, :cid, :ref, 'GATEWAY_PAYMENT', :amt, :method, 0, 'webhook', :desc, :meta)");
+            $stmtTrx->execute([
+                'tid' => $tenantId,
+                'cid' => $customerId ?: null,
+                'ref' => $finalTrxId,
+                'amt' => $amount,
+                'method' => strtolower($gateway ?: 'webhook'),
+                'desc' => strtoupper($gateway ?: 'ONLINE') . " Webhook / Paybill Payment (Ref: {$finalTrxId})",
+                'meta' => json_encode($payload),
+            ]);
+        }
+    } catch (Throwable $txe) {
+        error_log("Webhook transaction insert note: " . $txe->getMessage());
+    }
+
     // 6. Extend Customer Subscription & Reactivate on MikroTik
     $mikrotikResult = null;
     if ($customerId) {

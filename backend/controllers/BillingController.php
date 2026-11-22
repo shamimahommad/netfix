@@ -457,7 +457,7 @@ class BillingController {
 
             $stmtTrx = $db->prepare("INSERT INTO transactions 
                 (tenant_id, customer_id, transaction_ref, transaction_type, amount, method, initiator_user_id, initiator_role, collector_user_id, description)
-                VALUES (:tid, :cid, :ref, 'RENEW_DEBIT', :amt, 'system', :uid, :role, :coll, :descr)");
+                VALUES (:tid, :cid, :ref, 'RENEW_DEBIT', :amt, 'cash', :uid, :role, :coll, :descr)");
             $stmtTrx->execute([
                 'tid' => $tenantId,
                 'cid' => $customerId,

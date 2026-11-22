@@ -42,19 +42,43 @@ class DashboardController {
         $c = $stmt->fetch() ?: [];
 
         // 2. Collection metrics scoped downward to user's branch
-        $txWhere = !empty($scope['whereSql']) ? "WHERE {$scope['whereSql']}" : "WHERE t.tenant_id = :scope_tenant_id";
+        $isLevel0 = (HierarchySecurityService::getHierarchyLevel($user['role'] ?? '') === 0 || ($user['role'] ?? '') === 'saas_admin');
+        $txParams = ['scope_tenant_id' => $tenantId];
+
+        if ($isLevel0) {
+            $txWhere = "WHERE t.tenant_id = :scope_tenant_id";
+        } else {
+            $rawPath = $user['hierarchy_path'] ?? "/{$callerId}/";
+            $userPath = '/' . trim($rawPath, '/') . '/';
+            $txParams['scope_uid'] = $callerId;
+            $txParams['scope_path_wildcard'] = $userPath . '%';
+            $txWhere = "WHERE t.tenant_id = :scope_tenant_id 
+                AND (c.owner_id = :scope_uid 
+                     OR u.hierarchy_path LIKE :scope_path_wildcard 
+                     OR c.owner_path LIKE :scope_path_wildcard 
+                     OR t.initiator_user_id = :scope_uid 
+                     OR u_init.hierarchy_path LIKE :scope_path_wildcard 
+                     OR t.collector_user_id = :scope_uid)";
+        }
+
+        // Online payment identification rule:
+        // Gateway transactions, paybill, webhooks, or online payment gateways (bKash, Nagad, etc.)
+        // Renewals or recharges from balance/wallet are Cash ('cash'), NOT online.
+        $onlineCondition = "(t.transaction_type = 'GATEWAY_PAYMENT' OR LOWER(COALESCE(t.method, '')) IN ('bkash', 'nagad', 'rocket', 'upay', 'sslcommerz', 'ssl', 'surjopay', 'shurjopay', 'aamarpay', 'online', 'webhook', 'paybill', 'pgw'))";
+
         $stmt = $db->prepare("SELECT 
-            SUM(CASE WHEN DATE(t.created_at) = CURDATE() THEN t.amount ELSE 0 END) as today_collection,
-            SUM(CASE WHEN t.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01') THEN t.amount ELSE 0 END) as this_month_collection,
-            SUM(CASE WHEN t.created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) AND t.created_at < DATE_FORMAT(NOW(), '%Y-%m-01') THEN t.amount ELSE 0 END) as last_month_collection,
-            SUM(CASE WHEN DATE(t.created_at) = CURDATE() AND t.method != 'cash' THEN t.amount ELSE 0 END) as online_today,
-            SUM(CASE WHEN t.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01') AND t.method != 'cash' THEN t.amount ELSE 0 END) as online_this_month,
-            SUM(CASE WHEN t.created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) AND t.method != 'cash' THEN t.amount ELSE 0 END) as online_last_month
+            SUM(CASE WHEN DATE(t.created_at) = CURDATE() AND t.transaction_type != 'REFUND' THEN t.amount ELSE 0 END) as today_collection,
+            SUM(CASE WHEN t.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01') AND t.transaction_type != 'REFUND' THEN t.amount ELSE 0 END) as this_month_collection,
+            SUM(CASE WHEN t.created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) AND t.created_at < DATE_FORMAT(NOW(), '%Y-%m-01') AND t.transaction_type != 'REFUND' THEN t.amount ELSE 0 END) as last_month_collection,
+            SUM(CASE WHEN DATE(t.created_at) = CURDATE() AND {$onlineCondition} THEN t.amount ELSE 0 END) as online_today,
+            SUM(CASE WHEN t.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01') AND {$onlineCondition} THEN t.amount ELSE 0 END) as online_this_month,
+            SUM(CASE WHEN t.created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) AND {$onlineCondition} THEN t.amount ELSE 0 END) as online_last_month
             FROM transactions t
             LEFT JOIN customers c ON c.customer_id = t.customer_id
             LEFT JOIN users u ON u.user_id = c.owner_id
+            LEFT JOIN users u_init ON u_init.user_id = t.initiator_user_id
             {$txWhere}");
-        $stmt->execute($custParams);
+        $stmt->execute($txParams);
         $t = $stmt->fetch() ?: [];
 
         $hideSales = HierarchySecurityService::hasPermission($callerId, 'hide_dashboard_sales');
