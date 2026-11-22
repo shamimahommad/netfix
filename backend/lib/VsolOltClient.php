@@ -31,6 +31,14 @@ class VsolOltClient {
         }
     }
 
+    public function getPort(): int {
+        return $this->port;
+    }
+
+    public function getProtocol(): string {
+        return $this->protocol;
+    }
+
     private function getBaseUrl(string $proto = null): string {
         $p = $proto ?: $this->protocol;
         return "{$p}://{$this->host}:{$this->port}/action";
@@ -75,6 +83,40 @@ class VsolOltClient {
                 $this->protocol = $proto;
                 $this->isLoggedIn = true;
                 return true;
+            }
+        }
+
+        // Auto-fallback between standard web ports (80 <-> 443) if primary port failed to authenticate
+        if (in_array($this->port, [80, 443], true)) {
+            $altPort = ($this->port === 80) ? 443 : 80;
+            $altProtos = ($altPort === 443) ? ['https', 'http'] : ['http', 'https'];
+            foreach ($altProtos as $altProto) {
+                $url = "{$altProto}://{$this->host}:{$altPort}/action/main.html";
+                $ch = curl_init($url);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_TIMEOUT, $this->timeout);
+                curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 4);
+                curl_setopt($ch, CURLOPT_COOKIEJAR, $this->cookieFile);
+                curl_setopt($ch, CURLOPT_COOKIEFILE, $this->cookieFile);
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query([
+                    'user' => $this->username,
+                    'pass' => $this->password,
+                    'who'  => '100',
+                ]));
+
+                $res = curl_exec($ch);
+                $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+
+                if ($code === 200 && $res && (stripos($res, 'menu') !== false || stripos($res, 'OLT Web') !== false || stripos($res, 'systeminfo') !== false)) {
+                    $this->port = $altPort;
+                    $this->protocol = $altProto;
+                    $this->isLoggedIn = true;
+                    return true;
+                }
             }
         }
 

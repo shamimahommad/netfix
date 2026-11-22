@@ -110,12 +110,34 @@ export interface SessionLogRow {
   isOngoing: boolean;
 }
 
+export interface SessionDailyBreakdownItem {
+  date: string;
+  downloadBytes: number;
+  uploadBytes: number;
+  totalBytes: number;
+  downloadGb: number;
+  uploadGb: number;
+  totalGb: number;
+  uptimeSeconds: number;
+  uptimeFormatted: string;
+  sessionCount: number;
+  disconnectCount: number;
+  assignedIps: string[];
+}
+
 export interface SessionLogsData {
   stats: {
     today: string;
     week: string;
     month: string;
     lastMonth: string;
+    preset?: string;
+    rangeTotal?: string;
+    rangeDownload?: string;
+    rangeUpload?: string;
+    rangeUptime?: string;
+    assignedIps?: string[];
+    dailyBreakdown?: SessionDailyBreakdownItem[];
   };
   rows: SessionLogRow[];
 }
@@ -153,9 +175,23 @@ export interface CustomerLogsResponse {
 }
 
 export const customerLogsService = {
-  getLogs: async (customerId: string, tab: CustomerLogTabType = 'mac'): Promise<CustomerLogsResponse> => {
+  getLogs: async (
+    customerId: string,
+    tab: CustomerLogTabType = 'mac',
+    filters?: { preset?: string; date_from?: string; date_to?: string }
+  ): Promise<CustomerLogsResponse> => {
+    const params: Record<string, any> = { tab };
+    if (filters?.preset && filters.preset !== 'all') {
+      params.preset = filters.preset;
+    }
+    if (filters?.date_from) {
+      params.date_from = filters.date_from;
+    }
+    if (filters?.date_to) {
+      params.date_to = filters.date_to;
+    }
     const res = await api.get<CustomerLogsResponse>(`/customers/logs/${customerId}`, {
-      params: { tab },
+      params,
     });
     return res.data;
   },

@@ -38,7 +38,13 @@ import {
   Radio,
   Wifi,
   Send,
-  HelpCircle
+  HelpCircle,
+  ChevronDown,
+  ChevronUp,
+  Calendar,
+  Globe,
+  Download,
+  Filter,
 } from 'lucide-react';
 
 export default function CustomerLogsPage() {
@@ -67,12 +73,21 @@ export default function CustomerLogsPage() {
   const [selectedCall, setSelectedCall] = useState<CallLogRow | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskLogRow | null>(null);
 
+  // Session Date Filtering
+  const [sessionDatePreset, setSessionDatePreset] = useState<string>('all');
+  const [sessionDateFrom, setSessionDateFrom] = useState<string>('');
+  const [sessionDateTo, setSessionDateTo] = useState<string>('');
+  const [showDailyBreakdown, setShowDailyBreakdown] = useState<boolean>(false);
+
   const fetchLogs = useCallback(
-    async (tab: CustomerLogTabType) => {
+    async (
+      tab: CustomerLogTabType,
+      filters?: { preset?: string; date_from?: string; date_to?: string }
+    ) => {
       if (!customerId) return;
       setLoading(true);
       try {
-        const res = await customerLogsService.getLogs(customerId, tab);
+        const res = await customerLogsService.getLogs(customerId, tab, filters);
         if (res.success) {
           setCustomer(res.customer);
           setData(res.data);
@@ -87,7 +102,15 @@ export default function CustomerLogsPage() {
   );
 
   useEffect(() => {
-    fetchLogs(activeTab);
+    if (activeTab === 'sessions') {
+      fetchLogs('sessions', {
+        preset: sessionDatePreset,
+        date_from: sessionDateFrom,
+        date_to: sessionDateTo,
+      });
+    } else {
+      fetchLogs(activeTab);
+    }
     setSearchQuery('');
     setPage(1);
   }, [activeTab, fetchLogs]);
@@ -511,30 +534,215 @@ export default function CustomerLogsPage() {
 
           {activeTab === 'sessions' && (
             <>
+              {/* Date Range Dropdown Bar */}
+              <div className="col-span-full bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <Filter className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Filter by Date:
+                    </span>
+                    <div className="relative">
+                      <select
+                        value={sessionDatePreset}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSessionDatePreset(val);
+                          if (val !== 'custom') {
+                            fetchLogs('sessions', { preset: val, date_from: '', date_to: '' });
+                          }
+                        }}
+                        className="px-3.5 py-1.5 pr-8 rounded-xl text-xs font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer appearance-none"
+                      >
+                        <option value="all">All Time</option>
+                        <option value="today">Today</option>
+                        <option value="yesterday">Yesterday</option>
+                        <option value="this_week">This Week</option>
+                        <option value="last_week">Last Week</option>
+                        <option value="this_month">This Month</option>
+                        <option value="last_month">Last Month</option>
+                        <option value="custom">Custom Date Range</option>
+                      </select>
+                      <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                  </div>
+
+                  {/* Custom Date Pickers */}
+                  {sessionDatePreset === 'custom' && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="text-slate-500 text-[11px] font-medium">From:</span>
+                      <input
+                        type="date"
+                        value={sessionDateFrom}
+                        onChange={(e) => setSessionDateFrom(e.target.value)}
+                        className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-200"
+                      />
+                      <span className="text-slate-500 text-[11px] font-medium">To:</span>
+                      <input
+                        type="date"
+                        value={sessionDateTo}
+                        onChange={(e) => setSessionDateTo(e.target.value)}
+                        className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-200"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          fetchLogs('sessions', {
+                            preset: 'custom',
+                            date_from: sessionDateFrom,
+                            date_to: sessionDateTo,
+                          })
+                        }
+                        className="px-3 py-1 rounded-lg bg-indigo-600 text-white font-semibold text-xs hover:bg-indigo-700 transition-colors"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Range Stats Cards */}
               <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-                <div className="text-xs text-slate-500 font-medium">Today's Traffic</div>
+                <div className="text-xs text-slate-500 font-medium">Data Used in Range</div>
                 <div className="text-xl sm:text-2xl font-bold text-indigo-600 dark:text-indigo-400 mt-1">
-                  {(data as SessionLogsData).stats?.today ?? '0 B'}
+                  {(data as SessionLogsData).stats?.rangeTotal || (data as SessionLogsData).stats?.today || '0 B'}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                  ↓ {(data as SessionLogsData).stats?.rangeDownload || '0 B'} · ↑ {(data as SessionLogsData).stats?.rangeUpload || '0 B'}
                 </div>
               </div>
+
               <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-                <div className="text-xs text-slate-500 font-medium">This Week</div>
+                <div className="text-xs text-slate-500 font-medium">Time Online in Range</div>
                 <div className="text-xl sm:text-2xl font-bold text-teal-600 dark:text-teal-400 mt-1">
-                  {(data as SessionLogsData).stats?.week ?? '0 B'}
+                  {(data as SessionLogsData).stats?.rangeUptime || '0m'}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                  Active connection uptime
                 </div>
               </div>
+
               <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-                <div className="text-xs text-slate-500 font-medium">This Month</div>
-                <div className="text-xl sm:text-2xl font-bold text-sky-600 dark:text-sky-400 mt-1">
-                  {(data as SessionLogsData).stats?.month ?? '0 B'}
+                <div className="text-xs text-slate-500 font-medium flex items-center justify-between">
+                  <span>Assigned IPs</span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
+                    {(data as SessionLogsData).stats?.assignedIps?.length ?? 0}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1 mt-1.5 min-h-[28px]">
+                  {((data as SessionLogsData).stats?.assignedIps && (data as SessionLogsData).stats.assignedIps!.length > 0) ? (
+                    (data as SessionLogsData).stats.assignedIps!.slice(0, 2).map((ip) => (
+                      <span
+                        key={ip}
+                        className="px-1.5 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700"
+                      >
+                        {ip}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-xs text-slate-400 font-mono">—</span>
+                  )}
+                  {((data as SessionLogsData).stats?.assignedIps?.length || 0) > 2 && (
+                    <span className="text-[10px] text-slate-400 font-mono self-center">
+                      +{(data as SessionLogsData).stats.assignedIps!.length - 2} more
+                    </span>
+                  )}
                 </div>
               </div>
+
               <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-                <div className="text-xs text-slate-500 font-medium">Last Month</div>
-                <div className="text-xl sm:text-2xl font-bold text-slate-700 dark:text-slate-300 mt-1">
-                  {(data as SessionLogsData).stats?.lastMonth ?? '0 B'}
+                <div className="text-xs text-slate-500 font-medium">Historical Month Totals</div>
+                <div className="text-sm font-bold text-slate-800 dark:text-slate-200 mt-1">
+                  This Month: <span className="text-sky-600 dark:text-sky-400">{(data as SessionLogsData).stats?.month ?? '0 B'}</span>
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                  Last Month: {(data as SessionLogsData).stats?.lastMonth ?? '0 B'}
                 </div>
               </div>
+
+              {/* Collapsible Daily Breakdown Table */}
+              {((data as SessionLogsData).stats?.dailyBreakdown && (data as SessionLogsData).stats.dailyBreakdown!.length > 0) && (
+                <div className="col-span-full bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
+                  <button
+                    type="button"
+                    onClick={() => setShowDailyBreakdown((prev) => !prev)}
+                    className="w-full px-4 py-3 bg-slate-50/70 dark:bg-slate-800/40 hover:bg-slate-100 dark:hover:bg-slate-800/70 flex items-center justify-between transition-colors text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        Daily Usage Breakdown
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-[10px] font-mono font-semibold">
+                        {(data as SessionLogsData).stats.dailyBreakdown!.length} days
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                      <span>{showDailyBreakdown ? 'Hide details' : 'View day-by-day table'}</span>
+                      {showDailyBreakdown ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </div>
+                  </button>
+
+                  {showDailyBreakdown && (
+                    <div className="p-3 sm:p-4 border-t border-slate-100 dark:border-slate-800 overflow-x-auto">
+                      <table className="w-full text-left text-xs font-mono">
+                        <thead>
+                          <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400 font-sans">
+                            <th className="py-2.5 px-3">Date</th>
+                            <th className="py-2.5 px-3">Total Data</th>
+                            <th className="py-2.5 px-3">Time Online</th>
+                            <th className="py-2.5 px-3">Assigned IP(s)</th>
+                            <th className="py-2.5 px-3 text-right">Disconnects</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                          {(data as SessionLogsData).stats.dailyBreakdown!.map((d) => (
+                            <tr key={d.date} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30">
+                              <td className="py-2.5 px-3 font-semibold text-slate-900 dark:text-slate-100 font-sans">
+                                {d.date}
+                              </td>
+                              <td className="py-2.5 px-3 font-bold text-indigo-600 dark:text-indigo-400">
+                                {d.totalGb} GB
+                              </td>
+                              <td className="py-2.5 px-3 font-semibold text-teal-600 dark:text-teal-400">
+                                {d.uptimeFormatted || '0m'}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <div className="flex flex-wrap gap-1 max-w-[200px]">
+                                  {d.assignedIps && d.assignedIps.length > 0 ? (
+                                    d.assignedIps.map((ip) => (
+                                      <span
+                                        key={ip}
+                                        className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+                                      >
+                                        {ip}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-slate-400">—</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3 text-right">
+                                <span
+                                  className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    d.disconnectCount > 0
+                                      ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400'
+                                      : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
+                                  }`}
+                                >
+                                  {d.disconnectCount}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
 

@@ -47,6 +47,9 @@ class OltCronController {
             return;
         }
 
+        @set_time_limit(600);
+        @ini_set('max_execution_time', '600');
+
         $body = json_decode(file_get_contents('php://input'), true) ?: [];
 
         $targetTenant = $isSaas ? null : ($tenantId ? (int)$tenantId : null);
@@ -76,6 +79,9 @@ class OltCronController {
             return;
         }
 
+        @set_time_limit(600);
+        @ini_set('max_execution_time', '600');
+
         $body = json_decode(file_get_contents('php://input'), true) ?: [];
         $force = !empty($body['force']);
 
@@ -94,6 +100,9 @@ class OltCronController {
      * Public or API token authenticated cron endpoint for external cron providers
      */
     public static function webCron(): void {
+        @set_time_limit(600);
+        @ini_set('max_execution_time', '600');
+
         // Optional security key check
         $providedKey = $_GET['key'] ?? ($_SERVER['HTTP_X_CRON_KEY'] ?? '');
         $configuredKey = getenv('CRON_SECRET_KEY');

@@ -674,7 +674,7 @@ class NetworkController {
                     if ($managementPort) $ports[] = $managementPort;
                     if (empty($ports)) {
                         $def = ($vendor === 'btpon') ? 16148 : (($vendor === 'focuscom') ? 2322 : ($vendor === 'atop' ? 2000 : 80));
-                        $ports = [$def, 80, 23];
+                        $ports = ($vendor === 'vsol') ? [443, 80, 23] : [$def, 80, 23];
                     }
                 }
             }
@@ -1009,19 +1009,22 @@ class NetworkController {
                         }
                     } else {
                         // Default VSOL or others
+                        @set_time_limit(60);
                         require_once __DIR__ . '/../lib/VsolOltClient.php';
                         $port = $webPort ?: ($managementPort ?: 80);
                         $proto = ($port == 443 || $port != 80) ? 'https' : 'http';
-                        $client = new VsolOltClient($ip, $port, $username, $password, $proto, 6);
+                        $client = new VsolOltClient($ip, $port, $username, $password, $proto, 8);
                         $ok = @$client->login();
                         if ($ok) {
-                            $sys = $client->getSystemInfo(4);
+                            $sys = $client->getSystemInfo(8);
                             $model = $sys['model'] ?? 'VSOL OLT';
+                            $actualPort = $client->getPort();
+                            $portNote = ($actualPort !== $port) ? " (auto-detected port {$actualPort})" : "";
                             Response::json([
                                 'success' => true,
                                 'status' => 'authenticated',
-                                'message' => "Login Successful! Connected to {$model} Web Management Interface.",
-                                'data' => ['model' => $model],
+                                'message' => "Login Successful! Connected to {$model} Web Management Interface{$portNote}.",
+                                'data' => ['model' => $model, 'port' => $actualPort, 'protocol' => $client->getProtocol()],
                             ]);
                             return;
                         } else {
@@ -1513,6 +1516,8 @@ class NetworkController {
         require_once __DIR__ . '/../lib/OltSyncService.php';
         $force = !empty($_GET['refresh']) && $_GET['refresh'] === 'true';
         if ($force) {
+            @set_time_limit(300);
+            @ini_set('max_execution_time', '300');
             $data = OltSyncService::sync($db, $device, true);
         } else {
             $data = OltSyncService::getLocalData($db, (int)$device['tenant_id'], (int)$device['network_device_id'], $device);
@@ -1666,6 +1671,8 @@ class NetworkController {
             Response::error('OLT device not found', 404);
         }
 
+        @set_time_limit(300);
+        @ini_set('max_execution_time', '300');
         require_once __DIR__ . '/../lib/OltSyncService.php';
         $data = OltSyncService::sync($db, $device, true);
 

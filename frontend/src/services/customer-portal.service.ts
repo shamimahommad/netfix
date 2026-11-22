@@ -7,6 +7,7 @@ export interface CustomerDashboardData {
     customerCode: string;
     phone: string | null;
     email: string | null;
+    address?: string | null;
   };
   packageName: string | null;
   expiryDate: string | null;
@@ -29,6 +30,112 @@ export interface CustomerDashboardData {
     uploadBytes: number | null;
     downloadBytes: number | null;
   } | null;
+  monthlyUsage?: {
+    downloadBytes: number;
+    uploadBytes: number;
+    totalBytes: number;
+    downloadGB: number;
+    uploadGB: number;
+    totalGB: number;
+    monthName: string;
+    disconnectCount: number;
+    quotaGB: number | null;
+    isUnlimited: boolean;
+  } | null;
+  onu?: {
+    onuMac?: string;
+    rxPower?: number;
+    power?: string;
+    laserStatus?: string;
+    oltName?: string;
+    ponPort?: string;
+    status?: string;
+  } | null;
+  router?: {
+    routerName?: string;
+    routerIp?: string | null;
+    macAddress?: string;
+    deviceVendor?: string;
+    currentIp?: string;
+    protocol?: string;
+    uptimeSeconds?: number;
+    uptimeFormatted?: string;
+    lastOnlineAt?: string | null;
+    lastOfflineAt?: string | null;
+    lastDisconnectReason?: string | null;
+  } | null;
+  company?: {
+    name?: string;
+    supportPhone?: string;
+    logoUrl?: string | null;
+  } | null;
+}
+
+export interface CustomerSessionLogItem {
+  session_id?: string;
+  id?: string | number;
+  username?: string;
+  connection_date?: string;
+  connectedAt?: string;
+  disconnection_date?: string | null;
+  disconnectedAt?: string | null;
+  upload?: number;
+  uploadBytes?: number;
+  download?: number;
+  downloadBytes?: number;
+  session_time?: number;
+  durationSeconds?: number;
+  session_time_formatted?: string;
+  disconnect_reason?: string | null;
+  terminateCause?: string | null;
+  caller_mac?: string | null;
+  callerMac?: string | null;
+  assigned_ip?: string | null;
+  framedIp?: string | null;
+  status?: string;
+}
+
+export interface CustomerDailyUsageItem {
+  date: string;
+  downloadBytes: number;
+  uploadBytes: number;
+  totalBytes: number;
+  downloadGb: number;
+  uploadGb: number;
+  totalGb: number;
+  uptimeSeconds: number;
+  uptimeFormatted: string;
+  sessionCount: number;
+  disconnectCount: number;
+  assignedIps: string[];
+}
+
+export interface CustomerSessionSummary {
+  preset?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  totalSessions: number;
+  totalDisconnects: number;
+  totalDownloadBytes: number;
+  totalDownloadGb: number;
+  totalUploadBytes: number;
+  totalUploadGb: number;
+  totalUsageBytes: number;
+  totalUsageGb: number;
+  totalUptimeSeconds: number;
+  totalUptimeFormatted: string;
+  assignedIps: string[];
+  averageSessionMinutes: number;
+  averageSessionFormatted: string;
+  lastDisconnectedAt: string | null;
+  currentOnline: boolean;
+  dailyBreakdown?: CustomerDailyUsageItem[];
+}
+
+export interface CustomerSessionFilterParams {
+  preset?: 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom' | 'all' | string;
+  startDate?: string;
+  endDate?: string;
 }
 
 export interface CustomerDashboardResponse {
@@ -164,20 +271,27 @@ export const customerPortalService = {
     return response.data;
   },
 
-  async getSessionLog(page = 1, limit = 20): Promise<{
+  async getSessionLog(
+    page = 1,
+    limit = 20,
+    filters?: CustomerSessionFilterParams
+  ): Promise<{
     success: boolean;
-    data: Array<{
-      session_id: string;
-      username: string;
-      connection_date: string;
-      disconnection_date: string | null;
-      upload: number;
-      download: number;
-      session_time: number;
-    }>;
-    meta: { total: number; page: number; limit: number; totalPages: number };
+    data: CustomerSessionLogItem[];
+    summary: CustomerSessionSummary;
+    meta: { total: number; page: number; limit: number; totalPages: number; preset?: string };
   }> {
-    const response = await api.get('/customer/session-log', { params: { page, limit } });
+    const params: Record<string, any> = { page, limit };
+    if (filters?.preset && filters.preset !== 'all') {
+      params.preset = filters.preset;
+    }
+    if (filters?.startDate) {
+      params.start_date = filters.startDate;
+    }
+    if (filters?.endDate) {
+      params.end_date = filters.endDate;
+    }
+    const response = await api.get('/customer/session-log', { params });
     return response.data;
   },
 
@@ -226,6 +340,16 @@ export const customerPortalService = {
     data: { ticket_id: string; ticket_number: string; title: string; description: string | null; status: string; created_at: string };
   }> {
     const response = await api.post('/customer/tickets', { title, description });
+    return response.data;
+  },
+
+  async updateProfile(payload: {
+    fullName?: string;
+    phone?: string;
+    address?: string;
+    email?: string;
+  }): Promise<{ success: boolean; message: string; data?: any }> {
+    const response = await api.post<{ success: boolean; message: string; data?: any }>('/customer/update-profile', payload);
     return response.data;
   },
 };

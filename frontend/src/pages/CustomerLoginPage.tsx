@@ -13,10 +13,8 @@ import {
   FileText,
   Ticket,
   Wifi,
-  CheckCircle2,
   AlertCircle,
   X,
-  Zap,
   HelpCircle,
   ShieldCheck,
   ChevronRight,
@@ -36,22 +34,22 @@ export default function CustomerLoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [company, setCompany] = useState<{ name: string; logoUrl: string | null } | null>(null);
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
 
-  // Clear stale persisted auth state if access token is missing
-  useEffect(() => {
-    if (!token && (isAuthenticated || user)) {
-      setUser(null);
-    }
-  }, [token, isAuthenticated, user, setUser]);
-
-  // Load remembered customer login on mount
+  // Load remembered customer login and company branding on mount
   useEffect(() => {
     const savedLogin = localStorage.getItem('netfix_customer_login');
     if (savedLogin) {
       setLogin(savedLogin);
       setRememberMe(true);
+    }
+    const savedCompany = localStorage.getItem('netfix_customer_company');
+    if (savedCompany) {
+      try {
+        setCompany(JSON.parse(savedCompany));
+      } catch {}
     }
   }, []);
 
@@ -77,10 +75,15 @@ export default function CustomerLoginPage() {
 
       const response = await authService.customerLogin(login.trim(), phone.trim());
       const userObj = response?.user || (response as any)?.data?.user;
+      const compObj = (response as any)?.company || (response as any)?.data?.company || (userObj as any)?.company;
 
       if (!userObj) {
         setError((response as any)?.message || 'Customer authentication failed. Please try again.');
         return;
+      }
+
+      if (compObj) {
+        localStorage.setItem('netfix_customer_company', JSON.stringify(compObj));
       }
 
       setUser(userObj);
@@ -109,24 +112,37 @@ export default function CustomerLoginPage() {
 
       {/* Top Header Bar */}
       <header className="relative z-20 w-full max-w-7xl mx-auto px-4 sm:px-8 py-4 sm:py-6 flex items-center justify-between">
-        {/* Brand Logo */}
+        {/* Brand Logo (Dynamic Company Logo / Name) */}
         <Link to="/customer/login" className="flex items-center gap-3 group focus:outline-none">
-          <img 
-            src="/logo-icon.svg" 
-            alt="NetFix Logo" 
-            className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl shadow-lg shadow-cyan-500/20 group-hover:shadow-cyan-500/40 group-hover:scale-105 transition-all" 
-          />
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xl sm:text-2xl font-black tracking-tight text-white font-sans">
-                Net<span className="text-cyan-400">Fix</span>
-              </span>
+          {company?.logoUrl ? (
+            <div className="flex items-center gap-2.5">
+              <img 
+                src={company.logoUrl} 
+                alt={company.name} 
+                className="h-10 sm:h-11 w-auto max-w-[160px] object-contain rounded-xl shadow-lg shadow-cyan-500/10 group-hover:scale-105 transition-all" 
+              />
               <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
                 Self-Care
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 hidden sm:block">Customer Self-Service Portal</p>
-          </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-lg shadow-cyan-500/20 group-hover:scale-105 transition-all">
+                <Sparkles className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xl sm:text-2xl font-black tracking-tight text-white font-sans">
+                    {company?.name || 'Customer Portal'}
+                  </span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                    Self-Care
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 hidden sm:block">Customer Self-Service Portal</p>
+              </div>
+            </div>
+          )}
         </Link>
 
         {/* Top Header Right Actions */}
@@ -474,7 +490,7 @@ export default function CustomerLoginPage() {
       {/* Desktop & Mobile Bottom Footer */}
       <footer className="relative z-20 w-full max-w-7xl mx-auto px-4 sm:px-8 py-4 sm:py-6 text-xs text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-slate-900">
         <div>
-          © 2026 <span className="text-slate-300 font-semibold">NetFix</span> Customer Self-Care. All rights reserved.
+          © {new Date().getFullYear()} <span className="text-slate-300 font-semibold">{company?.name || 'Customer Self-Care'}</span>. All rights reserved.
         </div>
         <div className="flex items-center gap-4 text-[11px]">
           <Link to="/topup" className="text-slate-400 hover:text-cyan-400 transition-colors">

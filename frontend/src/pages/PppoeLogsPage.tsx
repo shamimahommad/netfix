@@ -205,7 +205,7 @@ export default function PppoeLogsPage() {
   // Filters
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [eventTypeFilter, setEventTypeFilter] = useState<'all' | 'connected' | 'disconnected' | 'auth_failed'>('all');
-  const [dateRangePreset, setDateRangePreset] = useState<'all' | 'today' | 'yesterday' | '7d' | '30d' | 'custom'>('all');
+  const [dateRangePreset, setDateRangePreset] = useState<'all' | 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | '7d' | '30d' | 'custom'>('all');
   const [customDateFrom, setCustomDateFrom] = useState<string>('');
   const [customDateTo, setCustomDateTo] = useState<string>('');
   const [userFilter, setUserFilter] = useState<string | null>(null);
@@ -282,6 +282,31 @@ export default function PppoeLogsPage() {
         yesterday.setDate(yesterday.getDate() - 1);
         params.date_from = formatDate(yesterday);
         params.date_to = formatDate(yesterday);
+      } else if (dateRangePreset === 'this_week') {
+        const dayOfWeek = today.getDay(); // 0 is Sunday, 1 is Monday
+        const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        const monday = new Date(today);
+        monday.setDate(monday.getDate() + mondayOffset);
+        params.date_from = formatDate(monday);
+        params.date_to = formatDate(today);
+      } else if (dateRangePreset === 'last_week') {
+        const dayOfWeek = today.getDay();
+        const lastMondayOffset = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek) - 7;
+        const lastMonday = new Date(today);
+        lastMonday.setDate(lastMonday.getDate() + lastMondayOffset);
+        const lastSunday = new Date(lastMonday);
+        lastSunday.setDate(lastMonday.getDate() + 6);
+        params.date_from = formatDate(lastMonday);
+        params.date_to = formatDate(lastSunday);
+      } else if (dateRangePreset === 'this_month') {
+        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+        params.date_from = formatDate(firstDay);
+        params.date_to = formatDate(today);
+      } else if (dateRangePreset === 'last_month') {
+        const firstDayLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const lastDayLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+        params.date_from = formatDate(firstDayLastMonth);
+        params.date_to = formatDate(lastDayLastMonth);
       } else if (dateRangePreset === '7d') {
         const d7 = new Date(today);
         d7.setDate(d7.getDate() - 7);
@@ -854,33 +879,34 @@ export default function PppoeLogsPage() {
             </button>
           </div>
 
-          {/* Date Presets */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider flex items-center gap-1 mr-1">
-              <Calendar className="w-3.5 h-3.5" />
-              <span>Time:</span>
+          {/* Date Range Dropdown Menu */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold flex items-center gap-1.5">
+              <Calendar className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span>Date Range:</span>
             </span>
-            {(['all', 'today', 'yesterday', '7d', '30d', 'custom'] as const).map((preset) => (
-              <button
-                key={preset}
-                onClick={() => {
-                  setDateRangePreset(preset);
+            <div className="relative">
+              <select
+                value={dateRangePreset}
+                onChange={(e) => {
+                  setDateRangePreset(e.target.value as any);
                   setPage(1);
                 }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
-                  dateRangePreset === preset
-                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 font-bold shadow-xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700/60'
-                }`}
+                className="px-3.5 py-1.5 pr-8 rounded-xl text-xs font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm cursor-pointer appearance-none transition-colors"
               >
-                {preset === 'all' && 'All Time'}
-                {preset === 'today' && 'Today'}
-                {preset === 'yesterday' && 'Yesterday'}
-                {preset === '7d' && '7 Days'}
-                {preset === '30d' && '30 Days'}
-                {preset === 'custom' && 'Custom'}
-              </button>
-            ))}
+                <option value="all">All Time</option>
+                <option value="today">Today</option>
+                <option value="yesterday">Yesterday</option>
+                <option value="this_week">This Week</option>
+                <option value="last_week">Last Week</option>
+                <option value="this_month">This Month</option>
+                <option value="last_month">Last Month</option>
+                <option value="7d">Last 7 Days</option>
+                <option value="30d">Last 30 Days</option>
+                <option value="custom">Custom Date Range</option>
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
           </div>
 
           {/* Search Input */}

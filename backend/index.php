@@ -751,7 +751,7 @@ if ($method === 'GET' && ($uri === '/company/profile' || $uri === '/settings/com
 if (($method === 'POST' || $method === 'PUT') && ($uri === '/company/profile' || $uri === '/settings/company-profile' || $uri === '/tenants/my/profile' || $uri === '/tenants/my/company')) {
     CompanyProfileController::update();
 }
-if ($method === 'GET' && preg_match('#^/uploads/logos/([a-zA-Z0-9_\-\.]+)$#', $uri, $m)) {
+if ($method === 'GET' && preg_match('#^/(?:api/v1/)?uploads/logos/([a-zA-Z0-9_\-\.]+)$#', $uri, $m)) {
     $filename = basename($m[1]);
     $filePath = __DIR__ . '/uploads/logos/' . $filename;
     if (file_exists($filePath)) {
@@ -836,6 +836,21 @@ if ($method === 'DELETE' && preg_match('#^/tenants/([^/]+)$#', $uri, $m)) {
 // ---------------------------------------------------------------------
 if ($method === 'GET' && $uri === '/customer/dashboard') {
     CustomerPortalController::dashboard();
+}
+if ($method === 'GET' && $uri === '/customer/session-log') {
+    CustomerPortalController::sessionLog();
+}
+if ($method === 'GET' && $uri === '/customer/live-traffic') {
+    CustomerPortalController::liveTraffic();
+}
+if ($method === 'POST' && $uri === '/customer/renew') {
+    CustomerPortalController::renew();
+}
+if ($method === 'POST' && $uri === '/customer/change-password') {
+    CustomerPortalController::changePassword();
+}
+if ($method === 'POST' && $uri === '/customer/update-profile') {
+    CustomerPortalController::updateProfile();
 }
 if ($method === 'GET' && $uri === '/customer/invoices') {
     CustomerPortalController::invoices();

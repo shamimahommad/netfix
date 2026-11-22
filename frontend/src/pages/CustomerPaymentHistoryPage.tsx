@@ -1,7 +1,19 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FileText, ChevronLeft, ChevronRight, Banknote, Receipt, Calendar } from 'lucide-react';
-import { customerPortalService, CustomerPaymentHistoryItem } from '@/services/customer-portal.service';
+import {
+  FileText,
+  ChevronLeft,
+  ChevronRight,
+  Banknote,
+  Receipt,
+  Calendar,
+  CreditCard,
+  ArrowUpRight,
+} from 'lucide-react';
+import {
+  customerPortalService,
+  CustomerPaymentHistoryItem,
+} from '@/services/customer-portal.service';
 
 function formatDate(s: string | null): string {
   if (!s) return '—';
@@ -24,10 +36,16 @@ function formatAmount(n: number): string {
 
 function getStatusStyle(status: string): string {
   const s = (status || '').toLowerCase();
-  if (s === 'paid' || s === 'completed') return 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300';
-  if (s === 'failed' || s === 'overdue' || s === 'expired') return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300';
-  if (s === 'pending' || s === 'partial') return 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300';
-  return 'bg-slate-100 dark:bg-slate-700/50 text-slate-600 dark:text-slate-400';
+  if (s === 'paid' || s === 'completed') {
+    return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/80';
+  }
+  if (s === 'failed' || s === 'overdue' || s === 'expired') {
+    return 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-800';
+  }
+  if (s === 'pending' || s === 'partial') {
+    return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800';
+  }
+  return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700';
 }
 
 export default function CustomerPaymentHistoryPage() {
@@ -42,7 +60,7 @@ export default function CustomerPaymentHistoryPage() {
     customerPortalService
       .getPaymentHistory(page, 12)
       .then((res) => {
-        setPayments(res.data);
+        setPayments(res.data || []);
         setTotalPages(res.meta?.totalPages ?? 1);
         setMeta(res.meta ?? null);
       })
@@ -55,174 +73,217 @@ export default function CustomerPaymentHistoryPage() {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="p-4 lg:p-6 space-y-6"
+      transition={{ duration: 0.2 }}
+      className="max-w-4xl mx-auto space-y-4 sm:space-y-6"
     >
-      <h1 className="text-xl font-display font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-        <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-        Payment History
-      </h1>
+      {/* ────────────────── HEADER ────────────────── */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-4 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-xs mb-1">
+            <span className="font-mono text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Financial Statements
+            </span>
+            <span className="text-slate-300 dark:text-slate-700">·</span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+              Receipt Ledger
+            </span>
+          </div>
+          <h1 className="text-lg sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
+            Payment History & Receipts
+          </h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Verified subscriber transactions, invoice receipts & recharge records
+          </p>
+        </div>
 
-      {!loading && payments.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="grid grid-cols-1 sm:grid-cols-2 gap-4"
-        >
-          <motion.section
-            whileHover={{ y: -2 }}
-            className="glass-card rounded-2xl shadow-lg border border-slate-200/80 dark:border-slate-700/80 p-5 transition-all duration-300"
-          >
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-emerald-100 dark:bg-emerald-900/30">
-                <Banknote className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-              </div>
-              <div>
-                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Total Paid</p>
-                <p className="text-lg font-bold text-emerald-700 dark:text-emerald-300">{formatAmount(totalPaid)} ৳</p>
-              </div>
-            </div>
-          </motion.section>
-          <motion.section
-            whileHover={{ y: -2 }}
-            className="glass-card rounded-2xl shadow-lg border border-slate-200/80 dark:border-slate-700/80 p-5 transition-all duration-300"
-          >
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-blue-100 dark:bg-blue-900/30">
-                <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              </div>
-              <div>
-                <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Transactions</p>
-                <p className="text-lg font-bold text-slate-800 dark:text-slate-200">
-                  {meta?.total ?? payments.length} <span className="text-sm font-normal text-slate-500 dark:text-slate-400">(paid: {paidCount})</span>
-                </p>
-              </div>
-            </div>
-          </motion.section>
-        </motion.div>
-      )}
+        {meta && (
+          <div className="self-start sm:self-center px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px] font-mono text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+            Total Records: <strong className="text-slate-900 dark:text-slate-100">{meta.total}</strong>
+          </div>
+        )}
+      </div>
 
-      <motion.section
-        whileHover={{ y: -2 }}
-        className="glass-card rounded-2xl shadow-lg border border-slate-200/80 dark:border-slate-700/80 overflow-hidden transition-all duration-300"
-      >
-        <h2 className="px-6 py-4 border-b border-slate-200/60 dark:border-slate-700/60 font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-          <Receipt className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-          Recent Payments
-        </h2>
+      {/* ────────────────── TOP STATS (2 Compact Side-by-Side Cards) ────────────────── */}
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
+        {/* Total Paid */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-3.5 sm:p-5 shadow-[0_1px_3px_rgba(0,0,0,0.03)] flex items-center gap-3">
+          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200/60 dark:border-emerald-800/60 shrink-0">
+            <Banknote className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-mono uppercase tracking-wider text-slate-400 font-semibold truncate">
+              Total Settled
+            </p>
+            <p className="text-base sm:text-xl font-mono font-bold text-emerald-600 dark:text-emerald-400 truncate">
+              ৳{formatAmount(totalPaid)}
+            </p>
+          </div>
+        </div>
+
+        {/* Transactions Count */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-3.5 sm:p-5 shadow-[0_1px_3px_rgba(0,0,0,0.03)] flex items-center gap-3">
+          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center border border-blue-200/60 dark:border-blue-800/60 shrink-0">
+            <Receipt className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-mono uppercase tracking-wider text-slate-400 font-semibold truncate">
+              Transactions
+            </p>
+            <p className="text-base sm:text-xl font-mono font-bold text-slate-900 dark:text-slate-100 truncate">
+              {meta?.total ?? payments.length}{' '}
+              <span className="text-[11px] font-sans font-normal text-slate-400">
+                ({paidCount} paid)
+              </span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* ────────────────── PAYMENT STATEMENTS LIST ────────────────── */}
+      <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+        <div className="px-4 sm:px-6 py-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+          <h2 className="text-xs font-mono uppercase tracking-wider font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-2">
+            <CreditCard className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+            Verified Billing Ledger
+          </h2>
+          <span className="text-[11px] font-mono text-slate-400">
+            Page {page} of {totalPages}
+          </span>
+        </div>
 
         {loading ? (
-          <div className="p-6">
-            <div className="space-y-4">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="flex items-center gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 animate-pulse">
-                  <div className="w-12 h-12 rounded-xl bg-slate-200 dark:bg-slate-700" />
-                  <div className="flex-1 space-y-2">
-                    <div className="h-4 w-1/3 rounded bg-slate-200 dark:bg-slate-700" />
-                    <div className="h-3 w-1/4 rounded bg-slate-200 dark:bg-slate-700" />
+          <div className="p-4 sm:p-6 space-y-3">
+            {[1, 2, 3, 4].map((i) => (
+              <div
+                key={i}
+                className="h-16 rounded-xl bg-slate-100 dark:bg-slate-800/60 animate-pulse"
+              />
+            ))}
+          </div>
+        ) : payments.length === 0 ? (
+          <div className="p-12 text-center text-xs text-slate-400 font-mono">
+            No previous payment statements found.
+          </div>
+        ) : (
+          <>
+            {/* MOBILE VIEW (< sm): Clean native transaction cards */}
+            <div className="sm:hidden divide-y divide-slate-100 dark:divide-slate-800">
+              {payments.map((p) => (
+                <div key={p.paymentId} className="p-3.5 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
+                      {p.tranId}
+                    </span>
+                    <span
+                      className={`inline-flex px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${getStatusStyle(
+                        p.status
+                      )}`}
+                    >
+                      {p.status || 'Paid'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400 flex items-center gap-1">
+                      <Calendar className="w-3 h-3 text-slate-400" />
+                      {formatDate(p.paidAt)}
+                    </span>
+                    <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                      ৳{formatAmount(p.amount ?? 0)}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 pt-0.5">
+                    <span className="font-mono uppercase font-semibold text-slate-700 dark:text-slate-300">
+                      Gateway: {p.gateway || 'CASH'}
+                    </span>
+                    {(p.remarks || p.doneBy) && (
+                      <span className="truncate max-w-[170px] text-slate-400">
+                        {p.remarks || `By ${p.doneBy}`}
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
-          </div>
-        ) : payments.length === 0 ? (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="p-16 text-center"
-          >
-            <div className="inline-flex p-4 rounded-full bg-slate-100 dark:bg-slate-800/50 mb-4">
-              <Receipt className="w-12 h-12 text-slate-400 dark:text-slate-500" />
-            </div>
-            <p className="text-slate-600 dark:text-slate-400 font-medium">No payment history yet</p>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Your invoices and payments will appear here</p>
-          </motion.div>
-        ) : (
-          <>
-            <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
-              <AnimatePresence mode="popLayout">
-                {payments.map((p, i) => (
-                  <motion.article
-                    key={p.paymentId}
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ delay: i * 0.03 }}
-                    className="group hover:bg-slate-50/80 dark:hover:bg-slate-800/30 transition-colors duration-200"
-                  >
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-4 px-6 py-4">
-                      <div className="flex items-center gap-4 flex-1">
-                        <div className="flex-shrink-0 p-2.5 rounded-xl bg-blue-50 dark:bg-blue-900/20 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 transition-colors">
-                          <Calendar className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="font-semibold text-slate-900 dark:text-slate-100">{p.tranId}</p>
-                          <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-0.5">
-                            <Calendar className="w-3.5 h-3.5" />
-                            {formatDate(p.paidAt)}
-                          </p>
-                          {(p.remarks?.trim() || p.doneBy) && (
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 truncate max-w-md">
-                              {(p.remarks?.trim() || `Done by ${p.doneBy}`).trim()}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-4 sm:gap-6">
-                        <div className="text-right">
-                          <p className="text-xs text-slate-500 dark:text-slate-400">Gateway</p>
-                          <p className="font-medium text-slate-800 dark:text-slate-200">{String(p.gateway || '—').toUpperCase()}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-xs text-slate-500 dark:text-slate-400">Amount</p>
-                          <p className="font-semibold text-emerald-600 dark:text-emerald-400">{formatAmount(p.amount ?? 0)} ৳</p>
-                        </div>
+
+            {/* DESKTOP VIEW (>= sm): Structured ledger rows */}
+            <div className="hidden sm:block overflow-x-auto customer-portal-scrollbar">
+              <table className="w-full text-left text-xs font-mono min-w-[500px] whitespace-nowrap">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 uppercase text-[10px] tracking-wider border-b border-slate-100 dark:border-slate-800">
+                  <tr>
+                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">Transaction #</th>
+                    <th className="px-4 py-3">Gateway</th>
+                    <th className="px-4 py-3">Amount</th>
+                    <th className="px-4 py-3 text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {payments.map((p) => (
+                    <tr
+                      key={p.paymentId}
+                      className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30 transition-colors"
+                    >
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-400 font-sans">
+                        {formatDate(p.paidAt)}
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-slate-900 dark:text-slate-100">
+                        {p.tranId}
+                      </td>
+                      <td className="px-4 py-3 uppercase font-medium text-slate-600 dark:text-slate-300">
+                        {p.gateway || 'CASH'}
+                      </td>
+                      <td className="px-4 py-3 font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                        ৳{formatAmount(p.amount ?? 0)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
                         <span
-                          className={`inline-flex px-3 py-1 rounded-xl text-xs font-semibold ${getStatusStyle(p.status)}`}
+                          className={`inline-flex px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${getStatusStyle(
+                            p.status
+                          )}`}
                         >
-                          {p.status || '—'}
+                          {p.status || 'Paid'}
                         </span>
-                      </div>
-                    </div>
-                  </motion.article>
-                ))}
-              </AnimatePresence>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
 
+            {/* Pagination */}
             {totalPages > 1 && (
-              <div className="px-4 py-4 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/30">
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.97 }}
+              <div className="px-4 py-3 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/20 text-xs font-mono">
+                <button
                   type="button"
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page <= 1}
-                  className="flex items-center gap-2 px-4 py-2 rounded-2xl border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300 disabled:opacity-50 hover:bg-white dark:hover:bg-slate-800 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 disabled:opacity-40 hover:bg-white dark:hover:bg-slate-800 transition-all"
                 >
-                  <ChevronLeft className="w-4 h-4" />
-                  Previous
-                </motion.button>
-                <span className="text-slate-600 dark:text-slate-400 text-sm font-medium">
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>Prev</span>
+                </button>
+                <span className="text-slate-500">
                   Page {page} of {totalPages}
                 </span>
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.97 }}
+                <button
                   type="button"
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page >= totalPages}
-                  className="flex items-center gap-2 px-4 py-2 rounded-2xl border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300 disabled:opacity-50 hover:bg-white dark:hover:bg-slate-800 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 disabled:opacity-40 hover:bg-white dark:hover:bg-slate-800 transition-all"
                 >
-                  Next
-                  <ChevronRight className="w-4 h-4" />
-                </motion.button>
+                  <span>Next</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
               </div>
             )}
           </>
         )}
-      </motion.section>
+      </section>
     </motion.div>
   );
 }

@@ -513,6 +513,80 @@
   .dark .text-text-muted {
     color: #64748B !important;
   }
+
+  /* =========================================================
+     GLOBAL UNIVERSAL SCROLLBAR SYSTEM
+     Automatically applies across the entire application:
+     html, body, and all scrollable containers (current & future)
+     ========================================================= */
+
+  /* Standard CSS (Firefox 64+) */
+  html,
+  body,
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+
+  .dark,
+  .dark *,
+  .dark html,
+  .dark body {
+    scrollbar-color: #475569 transparent;
+  }
+
+  /* WebKit Browsers (Chrome, Edge, Safari, Opera, Brave) */
+  *::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 9999px;
+    border: 1.5px solid transparent;
+    background-clip: padding-box;
+    transition: background-color 0.15s ease-in-out;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
+  }
+
+  *::-webkit-scrollbar-thumb:active {
+    background-color: #64748b;
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* WebKit Dark Mode */
+  .dark *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .dark *::-webkit-scrollbar-thumb {
+    background-color: #475569;
+    border: 1.5px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .dark *::-webkit-scrollbar-thumb:hover {
+    background-color: #64748b;
+  }
+
+  .dark *::-webkit-scrollbar-thumb:active {
+    background-color: #94a3b8;
+  }
+
+  .dark *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
 
 @layer utilities {
@@ -578,39 +652,92 @@
   .customer-portal-stagger > *:nth-child(5) { animation-delay: 0.25s; }
   .customer-portal-stagger > *:nth-child(6) { animation-delay: 0.3s; }
 
-  /* Custom Scrollbar */
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 8px;
-  }
+  /* =========================================================
+     SCROLLBAR UTILITIES & COMPATIBILITY HELPERS
+     ========================================================= */
 
-  .custom-scrollbar::-webkit-scrollbar-track {
+  /* Unified classes for existing references (.custom-scrollbar & .customer-portal-scrollbar) */
+  .custom-scrollbar,
+  .customer-portal-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+  .dark .custom-scrollbar,
+  .dark .customer-portal-scrollbar {
+    scrollbar-color: #475569 transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar,
+  .customer-portal-scrollbar::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track,
+  .customer-portal-scrollbar::-webkit-scrollbar-track {
     background: transparent;
   }
-
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
-    border-radius: 4px;
+  .custom-scrollbar::-webkit-scrollbar-thumb,
+  .customer-portal-scrollbar::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 9999px;
+    border: 1.5px solid transparent;
+    background-clip: padding-box;
+    transition: background-color 0.15s ease-in-out;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover,
+  .customer-portal-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:active,
+  .customer-portal-scrollbar::-webkit-scrollbar-thumb:active {
+    background-color: #64748b;
+  }
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb,
+  .dark .customer-portal-scrollbar::-webkit-scrollbar-thumb {
+    background-color: #475569;
+    border: 1.5px solid transparent;
+    background-clip: padding-box;
+  }
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover,
+  .dark .customer-portal-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: #64748b;
+  }
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb:active,
+  .dark .customer-portal-scrollbar::-webkit-scrollbar-thumb:active {
+    background-color: #94a3b8;
   }
 
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #94a3b8;
+  /* Ultra-thin scrollbar (5px) for compact areas (dropdowns, small popovers, badges) */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    border-width: 1px;
   }
 
-  .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #475569;
+  /* Utility classes matching Tailwind scrollbar plugin patterns */
+  .scrollbar-track-transparent::-webkit-scrollbar-track {
+    background: transparent !important;
+  }
+  .scrollbar-thumb-blue-300::-webkit-scrollbar-thumb {
+    background-color: #93c5fd !important;
+  }
+  .dark .scrollbar-thumb-blue-300::-webkit-scrollbar-thumb {
+    background-color: #2563eb !important;
+  }
+  .scrollbar-thumb-gray-300::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1 !important;
+  }
+  .dark .scrollbar-thumb-gray-300::-webkit-scrollbar-thumb {
+    background-color: #475569 !important;
   }
 
-  .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #64748b;
-  }
-
-  /* Hide scrollbar but keep scroll (dashboard cards) */
-  .scrollbar-hide {
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
+  /* Prevent page layout shifts when scrollbar appears */
+  .scrollbar-gutter-stable {
+    scrollbar-gutter: stable;
   }
 
   /* Customer Portal premium styles */
@@ -621,20 +748,6 @@
   .customer-portal-app h2,
   .customer-portal-app .font-display {
     font-family: 'Poppins', sans-serif;
-  }
-  .customer-portal-scrollbar::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  .customer-portal-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  .customer-portal-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(100, 116, 139, 0.3);
-    border-radius: 3px;
-  }
-  .customer-portal-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: rgba(100, 116, 139, 0.5);
   }
   .status-dot-online {
     animation: pulse-dot 2s ease-in-out infinite;
@@ -684,6 +797,7 @@
   /* Completely hide scrollbars while keeping smooth scroll functionality */
   .no-scrollbar::-webkit-scrollbar,
   .scrollbar-hide::-webkit-scrollbar,
+  .scrollbar-none::-webkit-scrollbar,
   [data-no-scrollbar]::-webkit-scrollbar {
     display: none !important;
     width: 0 !important;
@@ -692,17 +806,25 @@
   }
   .no-scrollbar::-webkit-scrollbar-thumb,
   .scrollbar-hide::-webkit-scrollbar-thumb,
+  .scrollbar-none::-webkit-scrollbar-thumb,
   [data-no-scrollbar]::-webkit-scrollbar-thumb,
   .dark .no-scrollbar::-webkit-scrollbar-thumb,
   .dark .scrollbar-hide::-webkit-scrollbar-thumb,
+  .dark .scrollbar-none::-webkit-scrollbar-thumb,
   .dark [data-no-scrollbar]::-webkit-scrollbar-thumb {
     display: none !important;
     background: transparent !important;
   }
   .no-scrollbar,
   .scrollbar-hide,
+  .scrollbar-none,
   [data-no-scrollbar] {
     -ms-overflow-style: none !important;
     scrollbar-width: none !important;
+  }
+
+  /* iOS safe area for bottom tab bar */
+  .safe-area-pb {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 }

@@ -213,6 +213,20 @@ class AuthController {
 
         $token = JWT::encode($payload, 86400 * 7);
 
+        // Fetch company / tenant profile for customer branding
+        $tenantId = (int)$customer['tenant_id'];
+        $stmtTenant = $db->prepare("SELECT tenant_id, tenant_code, tenant_name, business_email, business_phone, support_phone, business_address, logo_url FROM tenants WHERE tenant_id = :tid LIMIT 1");
+        $stmtTenant->execute(['tid' => $tenantId]);
+        $tenant = $stmtTenant->fetch();
+
+        $companyInfo = [
+            'tenantId' => (string)($tenant['tenant_id'] ?? $tenantId),
+            'name' => $tenant['tenant_name'] ?: 'Broadband ISP',
+            'logoUrl' => !empty($tenant['logo_url']) ? $tenant['logo_url'] : null,
+            'supportPhone' => $tenant['support_phone'] ?: ($tenant['business_phone'] ?: null),
+            'email' => $tenant['business_email'] ?: null,
+        ];
+
         Response::json([
             'access_token' => $token,
             'user' => [
@@ -223,7 +237,9 @@ class AuthController {
                 'tenant_id' => (string)$customer['tenant_id'],
                 'user_type' => 'customer',
                 'role_code' => 'customer',
+                'company' => $companyInfo,
             ],
+            'company' => $companyInfo,
             'redirect_url' => '/customer/dashboard',
         ]);
     }

@@ -417,9 +417,95 @@ class CustomerLogsController {
     private static function getSessionLogs(PDO $db, int $tenantId, string $username, string $currentMac): array {
         if (empty($username) && empty($currentMac)) {
             return [
-                'stats' => ['today' => '0 B', 'week' => '0 B', 'month' => '0 B', 'lastMonth' => '0 B'],
+                'stats' => [
+                    'today' => '0 B',
+                    'week' => '0 B',
+                    'month' => '0 B',
+                    'lastMonth' => '0 B',
+                    'rangeTotal' => '0 B',
+                    'rangeDownload' => '0 B',
+                    'rangeUpload' => '0 B',
+                    'rangeUptime' => '0m',
+                    'assignedIps' => [],
+                    'dailyBreakdown' => [],
+                ],
                 'rows' => []
             ];
+        }
+
+        // Date range filtering parameters
+        $preset = strtolower(trim($_GET['preset'] ?? 'all'));
+        $dateFromParam = trim($_GET['date_from'] ?? $_GET['startDate'] ?? '');
+        $dateToParam = trim($_GET['date_to'] ?? $_GET['endDate'] ?? '');
+
+        $rangeStart = null;
+        $rangeEnd = null;
+
+        switch ($preset) {
+            case 'today':
+                $rangeStart = date('Y-m-d 00:00:00');
+                $rangeEnd = date('Y-m-d 23:59:59');
+                break;
+            case 'yesterday':
+                $rangeStart = date('Y-m-d 00:00:00', strtotime('-1 day'));
+                $rangeEnd = date('Y-m-d 23:59:59', strtotime('-1 day'));
+                break;
+            case 'this_week':
+            case 'thisweek':
+                $rangeStart = date('Y-m-d 00:00:00', strtotime('monday this week'));
+                $rangeEnd = date('Y-m-d 23:59:59');
+                break;
+            case 'last_week':
+            case 'lastweek':
+                $rangeStart = date('Y-m-d 00:00:00', strtotime('monday last week'));
+                $rangeEnd = date('Y-m-d 23:59:59', strtotime('sunday last week'));
+                break;
+            case 'this_month':
+            case 'thismonth':
+                $rangeStart = date('Y-m-01 00:00:00');
+                $rangeEnd = date('Y-m-d 23:59:59');
+                break;
+            case 'last_month':
+            case 'lastmonth':
+                $rangeStart = date('Y-m-01 00:00:00', strtotime('first day of last month'));
+                $rangeEnd = date('Y-m-t 23:59:59', strtotime('last day of last month'));
+                break;
+            case 'custom':
+                if (!empty($dateFromParam)) {
+                    $rangeStart = date('Y-m-d 00:00:00', strtotime($dateFromParam));
+                }
+                if (!empty($dateToParam)) {
+                    $rangeEnd = date('Y-m-d 23:59:59', strtotime($dateToParam));
+                }
+                break;
+            default:
+                if (!empty($dateFromParam) && !empty($dateToParam)) {
+                    $preset = 'custom';
+                    $rangeStart = date('Y-m-d 00:00:00', strtotime($dateFromParam));
+                    $rangeEnd = date('Y-m-d 23:59:59', strtotime($dateToParam));
+                }
+                break;
+        }
+
+        $whereClause = "tenant_id = :tid AND (:uname != '' AND username = :uname2 OR :cmac != '' AND caller_mac = :cmac2)";
+        $queryParams = [
+            'tid' => $tenantId,
+            'uname' => $username,
+            'uname2' => $username,
+            'cmac' => $currentMac,
+            'cmac2' => $currentMac,
+        ];
+
+        if ($rangeStart !== null && $rangeEnd !== null) {
+            $whereClause .= " AND logged_at >= :rstart AND logged_at <= :rend";
+            $queryParams['rstart'] = $rangeStart;
+            $queryParams['rend'] = $rangeEnd;
+        } elseif ($rangeStart !== null) {
+            $whereClause .= " AND logged_at >= :rstart";
+            $queryParams['rstart'] = $rangeStart;
+        } elseif ($rangeEnd !== null) {
+            $whereClause .= " AND logged_at <= :rend";
+            $queryParams['rend'] = $rangeEnd;
         }
 
         $stmt = $db->prepare("
@@ -436,18 +522,11 @@ class CustomerLogsController {
                 logged_at,
                 created_at
             FROM pppoe_connection_logs
-            WHERE tenant_id = :tid 
-              AND (:uname != '' AND username = :uname2 OR :cmac != '' AND caller_mac = :cmac2)
+            WHERE {$whereClause}
             ORDER BY id DESC
-            LIMIT 100
+            LIMIT 200
         ");
-        $stmt->execute([
-            'tid' => $tenantId,
-            'uname' => $username,
-            'uname2' => $username,
-            'cmac' => $currentMac,
-            'cmac2' => $currentMac,
-        ]);
+        $stmt->execute($queryParams);
         $rawRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Stats tracking
@@ -463,19 +542,60 @@ class CustomerLogsController {
         $bytesMonth = 0;
         $bytesLastMonth = 0;
 
+        $rangeDown = 0;
+        $rangeUp = 0;
+        $rangeSeconds = 0;
+        $distinctIps = [];
+        $dailyMap = [];
+
         $rows = [];
         foreach ($rawRows as $r) {
             $up = (float)($r['bytes_uploaded'] ?? 0);
             $down = (float)($r['bytes_downloaded'] ?? 0);
             $tot = $up + $down;
+            $durationSec = (int)($r['session_time_seconds'] ?? 0);
+            $ip = trim($r['assigned_ip'] ?? '');
+            $logTimeStr = $r['logged_at'] ?: $r['created_at'];
+            $logTime = strtotime($logTimeStr);
 
-            $logTime = strtotime($r['logged_at'] ?: $r['created_at']);
+            $rangeDown += $down;
+            $rangeUp += $up;
+            $rangeSeconds += $durationSec;
+            if ($ip && !in_array($ip, $distinctIps, true)) {
+                $distinctIps[] = $ip;
+            }
+
+            // Daily tracking
+            $dayKey = date('Y-m-d', $logTime);
+            if (!isset($dailyMap[$dayKey])) {
+                $dailyMap[$dayKey] = [
+                    'date' => $dayKey,
+                    'downloadBytes' => 0,
+                    'uploadBytes' => 0,
+                    'totalBytes' => 0,
+                    'uptimeSeconds' => 0,
+                    'assignedIps' => [],
+                    'sessionCount' => 0,
+                    'disconnectCount' => 0,
+                ];
+            }
+            $dailyMap[$dayKey]['downloadBytes'] += $down;
+            $dailyMap[$dayKey]['uploadBytes'] += $up;
+            $dailyMap[$dayKey]['totalBytes'] += $tot;
+            $dailyMap[$dayKey]['uptimeSeconds'] += $durationSec;
+            $dailyMap[$dayKey]['sessionCount'] += 1;
+            if ($r['event_type'] === 'disconnected') {
+                $dailyMap[$dayKey]['disconnectCount'] += 1;
+            }
+            if ($ip && !in_array($ip, $dailyMap[$dayKey]['assignedIps'], true)) {
+                $dailyMap[$dayKey]['assignedIps'][] = $ip;
+            }
+
             if ($logTime >= $todayStart) $bytesToday += $tot;
             if ($logTime >= $weekStart) $bytesWeek += $tot;
             if ($logTime >= $monthStart) $bytesMonth += $tot;
             if ($logTime >= $lastMonthStart && $logTime <= $lastMonthEnd) $bytesLastMonth += $tot;
 
-            $durationSec = (int)($r['session_time_seconds'] ?? 0);
             $isOngoing = ($r['event_type'] === 'connected');
 
             $rows[] = [
@@ -488,10 +608,29 @@ class CustomerLogsController {
                 'download' => self::formatBytes($down),
                 'total' => self::formatBytes($tot),
                 'totalBytes' => $tot,
-                'ip' => $r['assigned_ip'] ?: '—',
+                'ip' => $ip ?: '—',
                 'mac' => $r['caller_mac'] ?: '—',
                 'reason' => $r['disconnect_reason'] ?: ($isOngoing ? 'Active Session' : 'Session Ended'),
                 'isOngoing' => $isOngoing,
+            ];
+        }
+
+        // Format daily breakdown
+        $dailyBreakdown = [];
+        foreach ($dailyMap as $dayItem) {
+            $dailyBreakdown[] = [
+                'date' => $dayItem['date'],
+                'downloadBytes' => $dayItem['downloadBytes'],
+                'uploadBytes' => $dayItem['uploadBytes'],
+                'totalBytes' => $dayItem['totalBytes'],
+                'downloadGb' => round($dayItem['downloadBytes'] / (1024 * 1024 * 1024), 2),
+                'uploadGb' => round($dayItem['uploadBytes'] / (1024 * 1024 * 1024), 2),
+                'totalGb' => round($dayItem['totalBytes'] / (1024 * 1024 * 1024), 2),
+                'uptimeSeconds' => $dayItem['uptimeSeconds'],
+                'uptimeFormatted' => self::formatDuration($dayItem['uptimeSeconds']),
+                'sessionCount' => $dayItem['sessionCount'],
+                'disconnectCount' => $dayItem['disconnectCount'],
+                'assignedIps' => $dayItem['assignedIps'],
             ];
         }
 
@@ -501,6 +640,13 @@ class CustomerLogsController {
                 'week' => self::formatBytes($bytesWeek),
                 'month' => self::formatBytes($bytesMonth),
                 'lastMonth' => self::formatBytes($bytesLastMonth),
+                'preset' => $preset,
+                'rangeTotal' => self::formatBytes($rangeDown + $rangeUp),
+                'rangeDownload' => self::formatBytes($rangeDown),
+                'rangeUpload' => self::formatBytes($rangeUp),
+                'rangeUptime' => self::formatDuration($rangeSeconds),
+                'assignedIps' => $distinctIps,
+                'dailyBreakdown' => $dailyBreakdown,
             ],
             'rows' => $rows,
         ];

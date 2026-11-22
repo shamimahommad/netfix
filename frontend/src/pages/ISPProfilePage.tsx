@@ -1833,28 +1833,28 @@ Domain / Host:       ${window.location.origin}
               </p>
             </div>
 
-            {/* VictoriaLogs Retention Days */}
+            {/* Log Retention Days */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                Archive Retention Period (VictoriaLogs)
+                PPPoE Session Log Retention Period
               </label>
               <div className="relative">
                 <select
                   value={logPolicyForm.logRetentionDays}
-                  disabled={logPolicyForm.logStorageMode !== 'long_term_victoria'}
                   onChange={(e) => setLogPolicyForm({ ...logPolicyForm, logRetentionDays: parseInt(e.target.value) || 30 })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium disabled:opacity-50"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium"
                 >
                   <option value={7}>7 Days (1 Week Fast Retention)</option>
-                  <option value={30}>30 Days (1 Month Standard)</option>
+                  <option value={15}>15 Days (2 Weeks Standard)</option>
+                  <option value={30}>30 Days (1 Month Recommended)</option>
                   <option value={60}>60 Days (2 Months)</option>
-                  <option value={90}>90 Days (3 Months ISP Regulatory)</option>
+                  <option value={90}>90 Days (3 Months ISP Regulatory BTRC)</option>
                   <option value={180}>180 Days (6 Months Enterprise Archive)</option>
                   <option value={365}>365 Days (1 Full Year Compliance)</option>
                 </select>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Logs older than this retention threshold are automatically pruned by VictoriaLogs retention engine.
+                PPPoE session logs older than this threshold will be automatically pruned during the nightly cleanup worker.
               </p>
             </div>
           </div>

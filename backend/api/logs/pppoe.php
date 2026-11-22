@@ -80,12 +80,14 @@ try {
         $rStmt->execute(['tid' => $tenantId]);
         $routers = $rStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-        // Apply filters (search, event type, router)
+        // Apply filters (search, event type, router, date range)
         $search = strtolower(trim($_GET['search'] ?? ''));
         $eventType = strtolower(trim($_GET['event_type'] ?? ''));
         $targetRouterId = $_GET['router_id'] ?? null;
+        $dateFrom = trim($_GET['date_from'] ?? '');
+        $dateTo = trim($_GET['date_to'] ?? '');
 
-        $filtered = array_filter($redisLogs, function ($log) use ($search, $eventType, $targetRouterId) {
+        $filtered = array_filter($redisLogs, function ($log) use ($search, $eventType, $targetRouterId, $dateFrom, $dateTo) {
             if ($targetRouterId && $targetRouterId !== 'all') {
                 if ((string)($log['router_id'] ?? '') !== (string)$targetRouterId) {
                     return false;
@@ -93,6 +95,18 @@ try {
             }
             if (!empty($eventType) && $eventType !== 'all') {
                 if (strtolower($log['event_type'] ?? '') !== $eventType) {
+                    return false;
+                }
+            }
+            if (!empty($dateFrom)) {
+                $logDate = substr($log['time'] ?? ($log['logged_at'] ?? ''), 0, 10);
+                if ($logDate && $logDate < $dateFrom) {
+                    return false;
+                }
+            }
+            if (!empty($dateTo)) {
+                $logDate = substr($log['time'] ?? ($log['logged_at'] ?? ''), 0, 10);
+                if ($logDate && $logDate > $dateTo) {
                     return false;
                 }
             }

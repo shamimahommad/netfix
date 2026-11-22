@@ -168,7 +168,11 @@ export const networkService = {
   },
 
   async syncOlt(deviceId: string): Promise<{ success: boolean; message: string; data: any }> {
-    const response = await api.post<{ success: boolean; message: string; data: any }>(`/network/devices/${deviceId}/sync-olt`);
+    const response = await api.post<{ success: boolean; message: string; data: any }>(
+      `/network/devices/${deviceId}/sync-olt`,
+      {},
+      { timeout: 120000 }
+    );
     return response.data;
   },
 };

@@ -1,7 +1,8 @@
 <?php
 /**
- * NetFix ISP SaaS - High-Throughput Log Retention Housekeeping Script
- * Purges old PPPoE connection and auth logs older than retention limit (default 90 days).
+ * NetFix ISP SaaS - High-Throughput Per-ISP Log Retention Housekeeping Script
+ * Purges old PPPoE connection and auth logs based on each ISP tenant's configured
+ * `log_retention_days` (configured by SaaS Admin in Tenant Management).
  *
  * Uses non-blocking, chunked DELETE operations (default 5,000 rows per loop)
  * with a brief sleep interval to avoid table locks or row lock escalation
@@ -11,7 +12,7 @@
  *   php backend/cron/cleanup_logs.php [--days=90] [--chunk=5000] [--tenant=ID] [--dry-run]
  *
  * Crontab suggestion:
- *   0 3 * * * php /var/www/html/backend/cron/cleanup_logs.php --days=90 >> /var/log/netfix_cleanup.log 2>&1
+ *   0 3 * * * php /var/www/html/backend/cron/cleanup_logs.php >> /var/log/netfix_cleanup.log 2>&1
  */
 
 declare(ticks = 1);
@@ -20,9 +21,9 @@ set_time_limit(600); // 10 minutes max
 
 require_once __DIR__ . '/../config/database.php';
 
-$days = 90;
+$explicitDays = null;
 if (getenv('LOG_RETENTION_DAYS')) {
-    $days = max(7, (int)getenv('LOG_RETENTION_DAYS'));
+    $explicitDays = max(1, (int)getenv('LOG_RETENTION_DAYS'));
 }
 $chunkSize = 5000;
 $tenantFilter = null;
@@ -31,7 +32,7 @@ $dryRun = false;
 // Parse CLI flags
 foreach ($argv as $arg) {
     if (str_starts_with($arg, '--days=')) {
-        $days = max(1, (int)substr($arg, 7));
+        $explicitDays = max(1, (int)substr($arg, 7));
     } elseif (str_starts_with($arg, '--chunk=')) {
         $chunkSize = max(500, min(20000, (int)substr($arg, 8)));
     } elseif (str_starts_with($arg, '--tenant=')) {
@@ -41,88 +42,99 @@ foreach ($argv as $arg) {
     }
 }
 
-$cutoffDate = date('Y-m-d H:i:s', strtotime("-{$days} days"));
-
 echo "====================================================================\n";
-echo "  NetFix ISP SaaS - PPPoE Log Retention Cleanup Worker\n";
+echo "  NetFix ISP SaaS - Multi-Tenant PPPoE Log Retention Worker\n";
 echo "====================================================================\n";
-echo "  [*] Retention Policy: Purging logs older than {$days} days\n";
-echo "  [*] Cutoff Timestamp: {$cutoffDate}\n";
-echo "  [*] Chunk Size:       {$chunkSize} rows per transaction\n";
-echo "  [*] Tenant Filter:    " . ($tenantFilter ? "Tenant #{$tenantFilter}" : "All Tenants") . "\n";
-echo "  [*] Dry Run Mode:     " . ($dryRun ? "ENABLED (No rows will be deleted)" : "DISABLED") . "\n";
+echo "  [*] Mode:            " . ($explicitDays ? "Global Override ({$explicitDays} days)" : "Per-Tenant SaaS Admin Retention Policy") . "\n";
+echo "  [*] Chunk Size:      {$chunkSize} rows per transaction\n";
+echo "  [*] Tenant Filter:   " . ($tenantFilter ? "Tenant #{$tenantFilter}" : "All Active Tenants") . "\n";
+echo "  [*] Dry Run Mode:    " . ($dryRun ? "ENABLED (No rows will be deleted)" : "DISABLED") . "\n";
 echo "====================================================================\n\n";
 
 try {
     $db = Database::getConnection();
 
-    // Check total candidates for cleanup
-    $countSql = "SELECT COUNT(*) FROM pppoe_connection_logs WHERE logged_at < :cutoff";
-    $countParams = ['cutoff' => $cutoffDate];
+    // 1. Fetch tenants to process
+    $tenantQuery = "SELECT tenant_id, tenant_code, tenant_name, COALESCE(log_retention_days, 90) as retention_days 
+                    FROM tenants 
+                    WHERE status = 'active'";
+    $tenantParams = [];
+
     if ($tenantFilter) {
-        $countSql .= " AND tenant_id = :tid";
-        $countParams['tid'] = $tenantFilter;
+        $tenantQuery .= " AND tenant_id = :tid";
+        $tenantParams['tid'] = $tenantFilter;
     }
+    $tenantQuery .= " ORDER BY tenant_id ASC";
 
-    $cStmt = $db->prepare($countSql);
-    $cStmt->execute($countParams);
-    $totalCandidates = (int)$cStmt->fetchColumn();
+    $tStmt = $db->prepare($tenantQuery);
+    $tStmt->execute($tenantParams);
+    $tenants = $tStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    echo "[INFO] Found {$totalCandidates} log record(s) older than {$cutoffDate}.\n";
-
-    if ($totalCandidates === 0) {
-        echo "[OK] No expired logs to purge. Database is clean.\n";
+    if (empty($tenants)) {
+        echo "[INFO] No active tenants found to process.\n";
         exit(0);
     }
 
-    if ($dryRun) {
-        echo "[DRY RUN] Would delete {$totalCandidates} records in approximately " . ceil($totalCandidates / $chunkSize) . " batches.\n";
-        exit(0);
-    }
+    $grandTotalPurged = 0;
+    $grandStartTime = microtime(true);
 
-    // Execute chunked deletion loop
-    $startTime = microtime(true);
-    $totalPurged = 0;
-    $batchNum = 1;
+    foreach ($tenants as $t) {
+        $tid = (int)$t['tenant_id'];
+        $tName = $t['tenant_name'] ?: ("ISP #" . $t['tenant_code']);
+        $retentionDays = $explicitDays !== null ? $explicitDays : (int)$t['retention_days'];
+        $cutoffDate = date('Y-m-d H:i:s', strtotime("-{$retentionDays} days"));
 
-    $delSql = "DELETE FROM pppoe_connection_logs WHERE logged_at < :cutoff";
-    if ($tenantFilter) {
-        $delSql .= " AND tenant_id = :tid";
-    }
-    $delSql .= " LIMIT {$chunkSize}";
+        echo "--------------------------------------------------------------------\n";
+        echo "[TENANT #{$tid} - {$tName}]\n";
+        echo "  Retention Policy: {$retentionDays} days (Purging before {$cutoffDate})\n";
 
-    $delStmt = $db->prepare($delSql);
+        // Count candidates for this tenant
+        $cStmt = $db->prepare("SELECT COUNT(*) FROM pppoe_connection_logs WHERE tenant_id = :tid AND logged_at < :cutoff");
+        $cStmt->execute(['tid' => $tid, 'cutoff' => $cutoffDate]);
+        $tenantCandidates = (int)$cStmt->fetchColumn();
 
-    while (true) {
-        $delParams = ['cutoff' => $cutoffDate];
-        if ($tenantFilter) {
-            $delParams['tid'] = $tenantFilter;
+        echo "  Expired records: {$tenantCandidates}\n";
+
+        if ($tenantCandidates === 0) {
+            echo "  [OK] No expired logs for this ISP.\n";
+            continue;
         }
 
-        $delStmt->execute($delParams);
-        $deleted = $delStmt->rowCount();
-        $totalPurged += $deleted;
-
-        echo sprintf("[%s] Batch #%d: Purged %d row(s) (Total purged so far: %d / %d)\n",
-            date('H:i:s'), $batchNum, $deleted, $totalPurged, $totalCandidates);
-
-        if ($deleted < $chunkSize) {
-            // Reached end of matching records
-            break;
+        if ($dryRun) {
+            echo "  [DRY RUN] Would delete {$tenantCandidates} records for Tenant #{$tid}.\n";
+            continue;
         }
 
-        $batchNum++;
-        // Brief 50ms pause to release InnoDB row locks and allow concurrent billing transactions
-        usleep(50000);
+        $tenantPurged = 0;
+        $batchNum = 1;
+        $delStmt = $db->prepare("DELETE FROM pppoe_connection_logs WHERE tenant_id = :tid AND logged_at < :cutoff LIMIT {$chunkSize}");
+
+        while (true) {
+            $delStmt->execute(['tid' => $tid, 'cutoff' => $cutoffDate]);
+            $deleted = $delStmt->rowCount();
+            $tenantPurged += $deleted;
+
+            echo sprintf("  [%s] Batch #%d: Purged %d row(s) (Progress: %d / %d)\n",
+                date('H:i:s'), $batchNum, $deleted, $tenantPurged, $tenantCandidates);
+
+            if ($deleted < $chunkSize) {
+                break;
+            }
+
+            $batchNum++;
+            usleep(50000); // 50ms pause to release InnoDB row locks
+        }
+
+        $grandTotalPurged += $tenantPurged;
+        echo "  [DONE] Tenant #{$tid}: Successfully purged {$tenantPurged} log(s).\n";
     }
 
-    $elapsed = round(microtime(true) - $startTime, 2);
+    $elapsed = round(microtime(true) - $grandStartTime, 2);
     echo "\n====================================================================\n";
-    echo "[SUCCESS] Purged {$totalPurged} expired PPPoE log(s) in {$elapsed} seconds.\n";
+    echo "[SUCCESS] Finished log retention worker. Purged {$grandTotalPurged} expired PPPoE log(s) across " . count($tenants) . " tenant(s) in {$elapsed} seconds.\n";
     echo "====================================================================\n";
 
 } catch (\Throwable $e) {
     echo "[ERROR] Log cleanup failed: " . $e->getMessage() . "\n";
     exit(1);
 }
-

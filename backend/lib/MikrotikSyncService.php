@@ -1782,4 +1782,244 @@ class MikrotikSyncService {
         }
         return ['unbound' => $unbound, 'total' => $total];
     }
+
+    /**
+     * 5-Minute Ingestion / Polling Worker
+     * Logs into MikroTik routers, checks active users, tracks bandwidth/bytes,
+     * detects connects and disconnects, records historical logs into pppoe_connection_logs,
+     * and keeps online user count synchronized.
+     */
+    public static function pollAndRecordPppoeSessions(PDO $db, ?int $tenantId = null, ?int $routerId = null): array {
+        $where = ["(device_type = 'router' OR vendor = 'mikrotik') AND status NOT IN ('inactive', 'decommissioned')"];
+        $params = [];
+        if ($tenantId !== null) {
+            $where[] = "tenant_id = :tid";
+            $params['tid'] = $tenantId;
+        }
+        if ($routerId !== null) {
+            $where[] = "network_device_id = :did";
+            $params['did'] = $routerId;
+        }
+        $whereSql = implode(' AND ', $where);
+        $stmt = $db->prepare("SELECT * FROM network_devices WHERE {$whereSql}");
+        $stmt->execute($params);
+        $routers = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $totalActive = 0;
+        $totalOnlineUpdated = 0;
+        $totalOfflineUpdated = 0;
+        $totalConnectedLogs = 0;
+        $totalDisconnectedLogs = 0;
+        $errors = [];
+
+        // Prepare insert into pppoe_connection_logs
+        $insertLog = $db->prepare("INSERT INTO pppoe_connection_logs 
+            (tenant_id, router_id, username, event_type, assigned_ip, caller_mac, interface_name, session_time_seconds, bytes_uploaded, bytes_downloaded, disconnect_reason, raw_message, logged_at) 
+            VALUES (:tid, :rid, :uname, :event, :ip, :mac, :iface, :stime, :up, :down, :reason, :raw, :logged_at)");
+
+        foreach ($routers as $router) {
+            $rId = (int)$router['network_device_id'];
+            $rTenantId = (int)$router['tenant_id'];
+            $api = self::connect($router, 5, true);
+            if (!$api) {
+                $port = $router['management_port'] ?: 8728;
+                $errors[] = "Could not connect to router {$router['device_name']} ({$router['management_ip']}:{$port})";
+                continue;
+            }
+
+            try {
+                // 1. Fetch active sessions
+                $activeList = $api->comm('/ppp/active/print');
+                if (!is_array($activeList)) {
+                    $activeList = [];
+                }
+                $totalActive += count($activeList);
+
+                // 2. Fetch traffic on dynamic interfaces (pppoe-in)
+                $ifaces = $api->comm('/interface/print', ['?type' => 'pppoe-in']);
+                $trafficMap = [];
+                if (is_array($ifaces)) {
+                    foreach ($ifaces as $if) {
+                        $rawName = $if['name'] ?? '';
+                        $cleanUser = trim($rawName, '<>');
+                        if (str_starts_with($cleanUser, 'pppoe-')) {
+                            $cleanUser = substr($cleanUser, 6);
+                        }
+                        if ($cleanUser !== '') {
+                            $trafficMap[strtolower($cleanUser)] = [
+                                'rx' => (float)($if['rx-byte'] ?? 0),
+                                'tx' => (float)($if['tx-byte'] ?? 0),
+                                'name' => $rawName,
+                            ];
+                        }
+                    }
+                }
+
+                // 3. Fetch secrets for disconnect reasons and last-logged-out
+                $secrets = $api->comm('/ppp/secret/print');
+                $secretMap = [];
+                if (is_array($secrets)) {
+                    foreach ($secrets as $s) {
+                        $u = trim($s['name'] ?? '');
+                        if ($u !== '') {
+                            $parsedOff = !empty($s['last-logged-out']) ? self::parseRouterDate($s['last-logged-out']) : null;
+                            $secretMap[strtolower($u)] = [
+                                'last_offline_at' => $parsedOff,
+                                'reason' => $s['last-disconnect-reason'] ?? null,
+                            ];
+                        }
+                    }
+                }
+
+                // 4. Map active users
+                $activeMap = [];
+                foreach ($activeList as $act) {
+                    $u = trim($act['name'] ?? '');
+                    if ($u !== '') {
+                        $activeMap[strtolower($u)] = $act;
+                    }
+                }
+
+                $db->beginTransaction();
+
+                // Fetch existing network accounts for this router
+                $acctStmt = $db->prepare("SELECT network_account_id, tenant_id, customer_id, username, is_online, current_ip, mac_address, uptime_seconds, upload_bytes, download_bytes, last_online_at, last_offline_at FROM customer_network_accounts WHERE network_device_id = :did");
+                $acctStmt->execute(['did' => $rId]);
+                $accts = $acctStmt->fetchAll(PDO::FETCH_ASSOC);
+
+                $upOnline = $db->prepare("UPDATE customer_network_accounts 
+                    SET is_online = 1, 
+                        current_ip = :ip, 
+                        mac_address = COALESCE(:mac, mac_address), 
+                        uptime_seconds = :uptime, 
+                        upload_bytes = :up,
+                        download_bytes = :down,
+                        last_offline_at = COALESCE(:off, last_offline_at),
+                        last_disconnect_reason = COALESCE(:reason, last_disconnect_reason),
+                        last_online_at = COALESCE(last_online_at, NOW()) 
+                    WHERE network_account_id = :nid");
+
+                $upOffline = $db->prepare("UPDATE customer_network_accounts 
+                    SET is_online = 0, 
+                        uptime_seconds = 0, 
+                        last_offline_at = COALESCE(:off, NOW()), 
+                        last_disconnect_reason = COALESCE(:reason, last_disconnect_reason)
+                    WHERE network_account_id = :nid");
+
+                $now = date('Y-m-d H:i:s');
+
+                foreach ($accts as $acct) {
+                    $lowerU = strtolower(trim($acct['username']));
+                    $secData = $secretMap[$lowerU] ?? null;
+                    $lastOff = $secData['last_offline_at'] ?? null;
+                    $reason = $secData['reason'] ?? null;
+                    $wasOnline = (int)($acct['is_online'] ?? 0) === 1;
+
+                    if (isset($activeMap[$lowerU])) {
+                        // User is ACTIVE in MikroTik
+                        $act = $activeMap[$lowerU];
+                        $ip = $act['address'] ?? null;
+                        $mac = $act['caller-id'] ?? null;
+                        $uptime = self::parseUptime($act['uptime'] ?? '');
+                        $tf = $trafficMap[$lowerU] ?? ['rx' => 0, 'tx' => 0, 'name' => "<pppoe-{$act['name']}>"];
+
+                        $upOnline->execute([
+                            'ip' => $ip,
+                            'mac' => $mac,
+                            'uptime' => $uptime,
+                            'up' => $tf['rx'],
+                            'down' => $tf['tx'],
+                            'off' => $lastOff,
+                            'reason' => $reason,
+                            'nid' => $acct['network_account_id'],
+                        ]);
+                        $totalOnlineUpdated++;
+
+                        // If user transitioned from offline to online, record 'connected' log
+                        if (!$wasOnline) {
+                            try {
+                                $connectTime = date('Y-m-d H:i:s', max(time() - $uptime, strtotime('-1 day')));
+                                $insertLog->execute([
+                                    'tid' => $acct['tenant_id'] ?: $rTenantId,
+                                    'rid' => $rId,
+                                    'uname' => $acct['username'],
+                                    'event' => 'connected',
+                                    'ip' => $ip,
+                                    'mac' => $mac,
+                                    'iface' => $tf['name'] ?? "<pppoe-{$acct['username']}>",
+                                    'stime' => $uptime,
+                                    'up' => $tf['rx'],
+                                    'down' => $tf['tx'],
+                                    'reason' => null,
+                                    'raw' => "PPPoE user {$acct['username']} connected from IP {$ip}, MAC {$mac}",
+                                    'logged_at' => $connectTime,
+                                ]);
+                                $totalConnectedLogs++;
+                            } catch (\Throwable $e) {}
+                        }
+                    } else {
+                        // User is NOT active in MikroTik
+                        $upOffline->execute([
+                            'off' => $lastOff ?: $now,
+                            'reason' => $reason,
+                            'nid' => $acct['network_account_id'],
+                        ]);
+                        $totalOfflineUpdated++;
+
+                        // If user was previously online and just went offline, record 'disconnected' log!
+                        if ($wasOnline) {
+                            try {
+                                $disconnectTime = $lastOff ?: $now;
+                                $disconnectReason = $reason ?: 'Session Terminated';
+                                $insertLog->execute([
+                                    'tid' => $acct['tenant_id'] ?: $rTenantId,
+                                    'rid' => $rId,
+                                    'uname' => $acct['username'],
+                                    'event' => 'disconnected',
+                                    'ip' => $acct['current_ip'],
+                                    'mac' => $acct['mac_address'],
+                                    'iface' => "<pppoe-{$acct['username']}>",
+                                    'stime' => (int)($acct['uptime_seconds'] ?? 0),
+                                    'up' => (int)($acct['upload_bytes'] ?? 0),
+                                    'down' => (int)($acct['download_bytes'] ?? 0),
+                                    'reason' => $disconnectReason,
+                                    'raw' => "PPPoE user {$acct['username']} disconnected ({$disconnectReason}), session time: " . ($acct['uptime_seconds'] ?? 0) . "s",
+                                    'logged_at' => $disconnectTime,
+                                ]);
+                                $totalDisconnectedLogs++;
+                            } catch (\Throwable $e) {}
+                        }
+                    }
+                }
+
+                $db->commit();
+
+                // Update router sync status
+                try {
+                    $upDev = $db->prepare("UPDATE network_devices SET status = 'active', last_sync_at = NOW() WHERE network_device_id = :did");
+                    $upDev->execute(['did' => $rId]);
+                } catch (\Throwable $t) {}
+
+            } catch (\Throwable $e) {
+                if ($db->inTransaction()) {
+                    $db->rollBack();
+                }
+                $errors[] = "Error on {$router['device_name']}: " . $e->getMessage();
+            } finally {
+                try {
+                    $api->disconnect();
+                } catch (\Throwable $e) {}
+            }
+        }
+
+        return [
+            'success' => true,
+            'totalActive' => $totalActive,
+            'totalOnlineUpdated' => $totalOnlineUpdated,
+            'totalOfflineUpdated' => $totalOfflineUpdated,
+            'connectedLogsRecorded' => $totalConnectedLogs,
+            'disconnectedLogsRecorded' => $totalDisconnectedLogs,
+            'errors' => $errors,
+        ];
+    }
 }

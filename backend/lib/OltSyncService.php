@@ -20,6 +20,9 @@ class OltSyncService {
      * Only connects to hardware if interval has elapsed or if $force is true.
      */
     public static function sync(PDO $db, array $oltDev, bool $force = false, ?int $intervalSeconds = null): array {
+        @set_time_limit(300);
+        @ini_set('max_execution_time', '300');
+
         $deviceId = (int)$oltDev['network_device_id'];
         $tenantId = (int)$oltDev['tenant_id'];
 
@@ -82,15 +85,33 @@ class OltSyncService {
         if ($totalPonPorts <= 0) $totalPonPorts = (($isFocuscom || $isBdcom || $isCdata) ? 4 : 8);
         $ponType = strtolower($oltDev['pon_type'] ?? 'epon');
 
-        // Fast Pre-Flight Check: Verify OLT IP:Port responds to TCP socket in 0.5s
-        // If unreachable, avoid 25-45s timeout blocking the entire application
+        // Fast Pre-Flight Check: Verify OLT IP:Port responds to TCP socket (2.5s timeout for remote routed networks)
         $cacheDir = __DIR__ . '/../cache';
         if (!is_dir($cacheDir)) {
             @mkdir($cacheDir, 0777, true);
         }
         $oltOfflineFile = $cacheDir . '/olt_' . $deviceId . '_unreachable.txt';
 
-        $fp = @fsockopen($ip, $port, $errno, $errstr, 0.5);
+        $fp = @fsockopen($ip, $port, $errno, $errstr, 2.5);
+        if (!$fp && $vendor === 'vsol') {
+            // Auto-fallback between standard web ports (80 <-> 443) for VSOL web management
+            $altPort = ($port === 443) ? 80 : (($port === 80) ? 443 : 0);
+            if ($altPort > 0) {
+                $altFp = @fsockopen($ip, $altPort, $errno, $errstr, 2.5);
+                if ($altFp) {
+                    fclose($altFp);
+                    $port = $altPort;
+                    $proto = ($port === 443) ? 'https' : 'http';
+                    // Auto-update web_port in DB so subsequent calls don't need fallback
+                    try {
+                        $db->prepare("UPDATE network_devices SET web_port = :wp WHERE network_device_id = :did")
+                            ->execute(['wp' => $port, 'did' => $deviceId]);
+                    } catch (\Throwable $e) {}
+                    $fp = true;
+                }
+            }
+        }
+
         if (!$fp) {
             @file_put_contents($oltOfflineFile, time());
             $local = self::getLocalData($db, $tenantId, $deviceId, $oltDev);
@@ -98,14 +119,16 @@ class OltSyncService {
             $local['isOnline'] = false;
             return $local;
         }
-        fclose($fp);
+        if (is_resource($fp)) {
+            fclose($fp);
+        }
 
         if (file_exists($oltOfflineFile)) {
             @unlink($oltOfflineFile);
         }
 
-        // Dynamic timeout: 30s for 8+ port OLTs with hundreds of ONUs, 15s for 4-port
-        $timeout = ($totalPonPorts > 4) ? 30 : 15;
+        // Dynamic timeout: 45s for 8+ port OLTs with hundreds of ONUs, 20s for 4-port
+        $timeout = ($totalPonPorts > 4) ? 45 : 20;
 
         if ($isBdcom) {
             if ($proto === 'http' || $proto === 'https' || $port === 2321 || $port === 80 || $port === 8080) {
@@ -123,6 +146,15 @@ class OltSyncService {
             $client = new AtopOltClient($ip, $port, $user, $pass, $proto, $timeout);
         } else {
             $client = new VsolOltClient($ip, $port, $user, $pass, $proto, $timeout);
+            // If VSOL client auto-switched port during login, persist to DB
+            if ($client->getPort() !== $port) {
+                $port = $client->getPort();
+                $proto = $client->getProtocol();
+                try {
+                    $db->prepare("UPDATE network_devices SET web_port = :wp WHERE network_device_id = :did")
+                        ->execute(['wp' => $port, 'did' => $deviceId]);
+                } catch (\Throwable $e) {}
+            }
         }
         $sysInfo = $client->getSystemInfo($totalPonPorts);
         $ponPorts = $client->getPonPorts($totalPonPorts, $ponType);
@@ -513,6 +545,8 @@ class OltSyncService {
      * Run Scheduled OLT Sync Job across all eligible active OLTs
      */
     public static function runScheduledSync(?int $tenantId = null, string $triggerType = 'scheduled', bool $force = false): array {
+        @set_time_limit(600);
+        @ini_set('max_execution_time', '600');
         $startTime = microtime(true);
         $db = Database::getConnection();
         self::ensureOltCronSchema($db);
