@@ -46,7 +46,7 @@ class ServiceAreaController {
             sa.updated_at as updatedAt,
             COUNT(DISTINCT c.customer_id) as totalUsers,
             COUNT(DISTINCT CASE WHEN c.status = 'active' AND COALESCE(c.billing_status, '') NOT IN ('Expired', 'Left') THEN c.customer_id END) as activeUsers,
-            COUNT(DISTINCT CASE WHEN c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW() AND c.status = 'active') THEN c.customer_id END) as expiredUsers,
+            COUNT(DISTINCT CASE WHEN (c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW())) AND c.status NOT IN ('cancelled', 'terminated') THEN c.customer_id END) as expiredUsers,
             COUNT(DISTINCT CASE WHEN c.status IN ('cancelled', 'terminated', 'left') OR c.billing_status = 'Left' THEN c.customer_id END) as leftUsers,
             COUNT(DISTINCT CASE WHEN c.status = 'pending_activation' OR c.billing_status = 'Pending' THEN c.customer_id END) as pendingUsers,
             COUNT(DISTINCT CASE WHEN COALESCE(na.protocol, cs.protocol, 'pppoe') = 'pppoe' AND c.customer_id IS NOT NULL THEN c.customer_id END) as pppoeUsers,
@@ -68,7 +68,7 @@ class ServiceAreaController {
                 OR sa.name = JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.area_name'))
                 OR sa.name = JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.area'))
             )
-            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status = 'active'
+            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status != 'cancelled'
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
             WHERE sa.tenant_id = :tid 
             GROUP BY sa.service_area_id, sa.name, sa.description, sa.created_at, sa.updated_at
@@ -102,7 +102,7 @@ class ServiceAreaController {
             SELECT 
                 COUNT(DISTINCT c.customer_id) as totalUsers,
                 COUNT(DISTINCT CASE WHEN c.status = 'active' AND COALESCE(c.billing_status, '') NOT IN ('Expired', 'Left') THEN c.customer_id END) as activeUsers,
-                COUNT(DISTINCT CASE WHEN c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW() AND c.status = 'active') THEN c.customer_id END) as expiredUsers,
+                COUNT(DISTINCT CASE WHEN (c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW())) AND c.status NOT IN ('cancelled', 'terminated') THEN c.customer_id END) as expiredUsers,
                 COUNT(DISTINCT CASE WHEN c.status IN ('cancelled', 'terminated', 'left') OR c.billing_status = 'Left' THEN c.customer_id END) as leftUsers,
                 COUNT(DISTINCT CASE WHEN c.status = 'pending_activation' OR c.billing_status = 'Pending' THEN c.customer_id END) as pendingUsers,
                 COUNT(DISTINCT CASE WHEN COALESCE(na.protocol, cs.protocol, 'pppoe') = 'pppoe' AND c.customer_id IS NOT NULL THEN c.customer_id END) as pppoeUsers,
@@ -119,7 +119,7 @@ class ServiceAreaController {
                     THEN c.customer_id END) as vipUsers
             FROM customers c
             LEFT JOIN users u ON u.user_id = c.owner_id
-            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status = 'active'
+            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status != 'cancelled'
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
             WHERE c.tenant_id = :tid {$unassignedScopeWhere} AND NOT EXISTS (
                 SELECT 1 FROM service_areas sa WHERE sa.tenant_id = c.tenant_id AND (

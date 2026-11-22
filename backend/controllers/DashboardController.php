@@ -31,8 +31,8 @@ class DashboardController {
             SUM(CASE WHEN c.customer_type = 'individual' THEN 1 ELSE 0 END) as home_customers,
             SUM(CASE WHEN c.created_at >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) AND c.created_at < DATE_FORMAT(NOW(), '%Y-%m-01') THEN 1 ELSE 0 END) as last_month_join,
             SUM(CASE WHEN c.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01') THEN 1 ELSE 0 END) as this_month_join,
-            SUM(CASE WHEN (c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW())) AND c.status != 'suspended' AND c.status != 'cancelled' AND c.status != 'terminated' THEN 1 ELSE 0 END) as expired_customers,
-            SUM(CASE WHEN c.status = 'suspended' THEN 1 ELSE 0 END) as suspended_customers,
+            SUM(CASE WHEN (c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW())) AND c.status != 'cancelled' AND c.status != 'terminated' THEN 1 ELSE 0 END) as expired_customers,
+            SUM(CASE WHEN c.status = 'suspended' AND (c.billing_status != 'Expired' AND (cs.expires_at IS NULL OR cs.expires_at >= NOW())) THEN 1 ELSE 0 END) as suspended_customers,
             SUM(CASE WHEN c.status = 'cancelled' OR c.status = 'terminated' THEN 1 ELSE 0 END) as left_customers
             FROM customers c
             LEFT JOIN users u ON u.user_id = c.owner_id

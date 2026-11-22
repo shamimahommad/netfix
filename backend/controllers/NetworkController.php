@@ -2784,6 +2784,11 @@ class NetworkController {
                     $rowBillingStatus = $custBillingStatus;
                 }
 
+                // If customer is expired, their status is 'active' with billing_status = 'Expired' (not administrative suspension)
+                if ($rowBillingStatus === 'Expired') {
+                    $custStatus = 'active';
+                }
+
                 $stmtCustomer->execute([
                     'tid' => $tenantId,
                     'code' => $customerCode,

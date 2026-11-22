@@ -75,7 +75,7 @@ class BtrcReportController {
         if ($filterStatus === 'active') {
             $whereFilters[] = "c.status = 'active' AND COALESCE(c.billing_status, '') NOT IN ('Expired', 'Left')";
         } elseif ($filterStatus === 'expired') {
-            $whereFilters[] = "(c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW() AND c.status = 'active'))";
+            $whereFilters[] = "(c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW())) AND c.status NOT IN ('terminated', 'cancelled')";
         } elseif ($filterStatus === 'left') {
             $whereFilters[] = "(c.billing_status = 'Left' OR c.status IN ('terminated', 'cancelled'))";
         }

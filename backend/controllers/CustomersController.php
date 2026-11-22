@@ -30,9 +30,9 @@ class CustomersController {
             } elseif ($type === 'offline') {
                 $where[] = "(na.is_online = 0 OR na.is_online IS NULL)";
             } elseif ($type === 'suspended') {
-                $where[] = "c.status = 'suspended'";
+                $where[] = "c.status = 'suspended' AND (c.billing_status != 'Expired' AND (cs.expires_at IS NULL OR cs.expires_at >= NOW()))";
             } elseif ($type === 'expired') {
-                $where[] = "(c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW())) AND c.status != 'suspended' AND c.status != 'cancelled' AND c.status != 'terminated'";
+                $where[] = "(c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW())) AND c.status != 'cancelled' AND c.status != 'terminated'";
             } elseif ($type === 'expiring-soon') {
                 $where[] = "c.status = 'active' AND cs.expires_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 7 DAY)";
             }
@@ -42,9 +42,9 @@ class CustomersController {
         if (!empty($_GET['status']) && $_GET['status'] !== 'all') {
             $status = trim($_GET['status']);
             if (strcasecmp($status, 'expired') === 0) {
-                $where[] = "(c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW())) AND c.status != 'suspended' AND c.status != 'cancelled' AND c.status != 'terminated'";
+                $where[] = "(c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW())) AND c.status != 'cancelled' AND c.status != 'terminated'";
             } elseif ($status === 'suspended') {
-                $where[] = "c.status = 'suspended'";
+                $where[] = "c.status = 'suspended' AND (c.billing_status != 'Expired' AND (cs.expires_at IS NULL OR cs.expires_at >= NOW()))";
             } elseif ($status === 'active') {
                 $where[] = "c.status = 'active' AND c.billing_status != 'Expired' AND (cs.expires_at IS NULL OR cs.expires_at >= NOW())";
             } elseif (in_array($status, ['Paid', 'Due', 'Left', 'Suspended', 'Pending'])) {
@@ -110,7 +110,7 @@ class CustomersController {
             FROM customers c 
             LEFT JOIN users u ON u.user_id = c.owner_id
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id 
-            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status = 'active'
+            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status != 'cancelled'
             WHERE {$whereSql}");
         $countStmt->execute($params);
         $total = (int)$countStmt->fetchColumn();
@@ -160,7 +160,7 @@ class CustomersController {
             COALESCE(u.role, c.owner_role, 'isp_admin') as owner_role
             FROM customers c
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
-            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status = 'active'
+            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status != 'cancelled'
             LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
             LEFT JOIN network_devices nd ON nd.network_device_id = cs.network_device_id
             LEFT JOIN service_areas sa ON sa.service_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) AS UNSIGNED)
@@ -235,13 +235,16 @@ class CustomersController {
         $formatted = array_map(function($row) use ($now, $callerId, $isHidePassword) {
             $expiresAtTs = !empty($row['expiry_date']) ? strtotime($row['expiry_date']) : null;
             $dueAmount = (float)($row['balance_due'] ?? 0);
+            $isExpired = (strcasecmp($row['raw_billing_status'] ?? '', 'expired') === 0 || ($expiresAtTs !== null && $expiresAtTs < $now));
 
             if ($row['status'] === 'cancelled' || $row['status'] === 'terminated') {
                 $billingStatus = 'Left';
-            } elseif ($row['status'] === 'suspended') {
-                $billingStatus = 'Suspended';
-            } elseif (strcasecmp($row['raw_billing_status'] ?? '', 'expired') === 0 || ($expiresAtTs !== null && $expiresAtTs < $now)) {
+            } elseif ($isExpired) {
+                // Subscription validity ended -> Always Expired!
                 $billingStatus = 'Expired';
+            } elseif ($row['status'] === 'suspended') {
+                // Manually suspended while still within validity
+                $billingStatus = 'Suspended';
             } elseif ($dueAmount > 0) {
                 $billingStatus = 'Pending';
             } else {
@@ -275,10 +278,10 @@ class CustomersController {
                 'email' => $row['email'],
                 'username' => $row['username'],
                 'password' => $isHidePassword ? '••••••••' : ($row['password'] ?? ''),
-                'status' => $row['status'],
+                'status' => $isExpired ? 'expired' : $row['status'],
                 'billing_status' => $billingStatus,
                 'billingStatus' => $billingStatus,
-                'account_status' => $row['status'],
+                'account_status' => $isExpired ? 'expired' : $row['status'],
                 'connection_date' => $row['connection_date'],
                 'connectionDate' => $row['connection_date'],
                 'online_status' => (bool)$row['online_status'],
@@ -560,6 +563,27 @@ class CustomersController {
 
         $isHidePassword = HierarchySecurityService::hasPermission((int)$user['user_id'], 'hide_customer_password');
 
+        $now = time();
+        $serviceExpiryTs = !empty($service['expires_at']) ? strtotime($service['expires_at']) : null;
+        $isExpired = ($serviceExpiryTs !== null && $serviceExpiryTs < $now) 
+                     || strcasecmp($customer['billing_status'] ?? '', 'expired') === 0;
+
+        $detailBillingStatus = 'Paid';
+        $detailAccountStatus = 'active';
+        if ($customer['status'] === 'cancelled' || $customer['status'] === 'terminated') {
+            $detailBillingStatus = 'Left';
+            $detailAccountStatus = 'cancelled';
+        } elseif ($isExpired) {
+            $detailBillingStatus = 'Expired';
+            $detailAccountStatus = 'expired';
+        } elseif ($customer['status'] === 'suspended') {
+            $detailBillingStatus = 'Suspended';
+            $detailAccountStatus = 'suspended';
+        } elseif ((float)($inv['balance_due'] ?? 0) > 0) {
+            $detailBillingStatus = 'Pending';
+            $detailAccountStatus = 'active';
+        }
+
         Response::json([
             'success' => true,
             'data' => [
@@ -583,8 +607,10 @@ class CustomersController {
                     'countryCode' => $customer['country_code'] ?: 'BD',
                     'latitude' => $customer['latitude'] ? (float)$customer['latitude'] : null,
                     'longitude' => $customer['longitude'] ? (float)$customer['longitude'] : null,
-                    'status' => $customer['status'],
-                    'billingStatus' => $customer['billing_status'],
+                    'status' => $isExpired ? 'expired' : $customer['status'],
+                    'billingStatus' => $detailBillingStatus,
+                    'billing_status' => $detailBillingStatus,
+                    'account_status' => $detailAccountStatus,
                     'connectionDate' => $customer['connection_date'],
                     'creditLimit' => (float)($customer['credit_limit'] ?? 0),
                     'internalNotes' => $customer['internal_notes'],
@@ -628,14 +654,14 @@ class CustomersController {
                     'uploadBytes' => (float)($net['upload_bytes'] ?? 0),
                     'downloadBytes' => (float)($net['download_bytes'] ?? 0),
                     'totalDataUsed' => (float)(($net['upload_bytes'] ?? 0) + ($net['download_bytes'] ?? 0)),
-                    'isSuspended' => ($customer['status'] === 'suspended'),
+                    'isSuspended' => ($customer['status'] === 'suspended' && !$isExpired),
                 ],
                 'billing' => [
                     'balance' => (float)($inv['balance_due'] ?? 0),
                     'currentBalance' => (float)($inv['balance_due'] ?? 0),
                     'planPrice' => (float)($service['price'] ?? 0),
-                    'billingStatus' => $customer['billing_status'] ?: 'Paid',
-                    'accountStatus' => ($customer['status'] === 'suspended' ? 'suspended' : ($customer['status'] === 'inactive' ? 'expired' : 'active')),
+                    'billingStatus' => $detailBillingStatus,
+                    'accountStatus' => $detailAccountStatus,
                     'expiryDate' => $service['expires_at'] ?? null,
                     'lastPaymentDate' => $inv['invoice_date'] ?? null,
                     'connectedBy' => $connectedByName,
@@ -1594,7 +1620,7 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             COALESCE(sa.name, NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.area_name')), ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.area')), ''), 'Unassigned Area') as areaName,
             COUNT(DISTINCT c.customer_id) as total,
             COUNT(DISTINCT CASE WHEN c.status = 'active' AND COALESCE(c.billing_status, '') NOT IN ('Expired', 'Left') THEN c.customer_id END) as active,
-            COUNT(DISTINCT CASE WHEN c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW() AND c.status = 'active') THEN c.customer_id END) as expired,
+            COUNT(DISTINCT CASE WHEN (c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW())) AND c.status NOT IN ('cancelled', 'terminated') THEN c.customer_id END) as expired,
             COUNT(DISTINCT CASE WHEN c.status IN ('cancelled', 'terminated', 'left') OR c.billing_status = 'Left' THEN c.customer_id END) as `left`,
             COUNT(DISTINCT CASE WHEN c.status = 'pending_activation' OR c.billing_status = 'Pending' THEN c.customer_id END) as pending,
             COUNT(DISTINCT CASE WHEN COALESCE(na.protocol, cs.protocol, 'pppoe') = 'pppoe' AND c.customer_id IS NOT NULL THEN c.customer_id END) as pppoe,
@@ -1617,7 +1643,7 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                 OR sa.name = JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.area_name'))
                 OR sa.name = JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.area'))
             )
-            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status = 'active'
+            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status != 'cancelled'
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
             WHERE {$whereSql}
             GROUP BY COALESCE(sa.name, NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.area_name')), ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.area')), ''), 'Unassigned Area')");
@@ -1678,7 +1704,7 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             SUM(CASE WHEN c.status = 'active' THEN 1 ELSE 0 END) as active,
             SUM(CASE WHEN c.status = 'active' AND na.is_online = 1 THEN 1 ELSE 0 END) as online_cnt,
             SUM(CASE WHEN c.status = 'active' AND (na.is_online = 0 OR na.is_online IS NULL) THEN 1 ELSE 0 END) as offline_cnt,
-            SUM(CASE WHEN c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW() AND c.status = 'active') THEN 1 ELSE 0 END) as expired_cnt,
+            SUM(CASE WHEN (c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW())) AND c.status NOT IN ('cancelled', 'terminated') THEN 1 ELSE 0 END) as expired_cnt,
             SUM(CASE WHEN c.status IN ('cancelled', 'terminated', 'left') OR c.billing_status = 'Left' THEN 1 ELSE 0 END) as left_cnt,
             SUM(CASE WHEN c.status = 'pending_activation' OR c.billing_status = 'Pending' THEN 1 ELSE 0 END) as pending_cnt,
             COUNT(c.customer_id) as pppoe,
@@ -1710,7 +1736,7 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             SUM(CASE WHEN c.status = 'active' THEN 1 ELSE 0 END) as active,
             SUM(CASE WHEN c.status = 'active' AND na.is_online = 1 THEN 1 ELSE 0 END) as online_cnt,
             SUM(CASE WHEN c.status = 'active' AND (na.is_online = 0 OR na.is_online IS NULL) THEN 1 ELSE 0 END) as offline_cnt,
-            SUM(CASE WHEN c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW() AND c.status = 'active') THEN 1 ELSE 0 END) as expired_cnt
+            SUM(CASE WHEN (c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW())) AND c.status NOT IN ('cancelled', 'terminated') THEN 1 ELSE 0 END) as expired_cnt
             FROM customers c
             LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
@@ -2261,6 +2287,10 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                     $effectiveExpiry = date('Y-m-d', strtotime('-1 day'));
                     $isExpired = true;
                     $billingStatus = 'Expired';
+                }
+
+                if ($billingStatus === 'Expired' && $status === 'suspended') {
+                    $status = 'active';
                 }
 
                 // Insert customer

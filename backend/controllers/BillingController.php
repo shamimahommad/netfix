@@ -41,10 +41,10 @@ class BillingController {
                 $where[] = "cs.expires_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 7 DAY)";
                 break;
             case 'expired':
-                $where[] = "(cs.expires_at < NOW() OR c.billing_status = 'Expired') AND c.status != 'suspended' AND c.status != 'cancelled'";
+                $where[] = "(cs.expires_at < NOW() OR c.billing_status = 'Expired') AND c.status != 'cancelled' AND c.status != 'terminated'";
                 break;
             case 'suspended':
-                $where[] = "c.status = 'suspended'";
+                $where[] = "c.status = 'suspended' AND (cs.expires_at IS NULL OR cs.expires_at >= NOW()) AND c.billing_status != 'Expired'";
                 break;
             case 'left':
                 $where[] = "c.status = 'cancelled'";
@@ -94,7 +94,7 @@ class BillingController {
             last_tx.tx_method
             FROM customers c
             LEFT JOIN users owner_u ON owner_u.user_id = c.owner_id
-            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status = 'active'
+            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status != 'cancelled'
             LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
             LEFT JOIN (
@@ -151,12 +151,16 @@ class BillingController {
             $expiresAtTs = !empty($r['expiry_date']) ? strtotime($r['expiry_date']) : null;
             $dueAmount = (float)($r['balance_due'] ?? 0);
 
-            if ($r['status'] === 'suspended') {
-                $billingStatus = 'Suspended';
-            } elseif ($r['status'] === 'cancelled') {
+            $isExpired = (($expiresAtTs !== null && $expiresAtTs < $now) || strcasecmp($r['raw_billing_status'] ?? '', 'expired') === 0);
+
+            if ($r['status'] === 'cancelled' || $r['status'] === 'terminated') {
                 $billingStatus = 'Left';
-            } elseif (($expiresAtTs !== null && $expiresAtTs < $now) || strcasecmp($r['raw_billing_status'] ?? '', 'expired') === 0) {
+            } elseif ($isExpired) {
+                // Subscription validity ended -> Always Expired!
                 $billingStatus = 'Expired';
+            } elseif ($r['status'] === 'suspended') {
+                // Manually suspended while still within validity
+                $billingStatus = 'Suspended';
             } elseif ($dueAmount > 0) {
                 $billingStatus = 'Pending';
             } else {
@@ -200,7 +204,7 @@ class BillingController {
                 'expiry_date' => $r['expiry_date'],
                 'billingCycle' => $r['billing_cycle'] ?: 'monthly',
                 'billing_cycle' => $r['billing_cycle'] ?: 'monthly',
-                'status' => $r['status'],
+                'status' => $isExpired ? 'expired' : $r['status'],
                 'billingStatus' => $billingStatus,
                 'billing_status' => $billingStatus,
                 'lastPaymentDate' => $r['last_payment_date'],
