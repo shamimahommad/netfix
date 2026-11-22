@@ -608,6 +608,7 @@ export default function ResellerPage() {
         await api.patch(`/resellers/${addBalanceUserId}/balance`, {
           amount,
           operation: 'debit',
+          notes,
         });
         toast.success('Balance debited from reseller');
       } else {

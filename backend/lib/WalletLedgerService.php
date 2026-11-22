@@ -166,6 +166,142 @@ class WalletLedgerService {
     }
 
     /**
+     * Debit user wallet with strict FOR UPDATE lock
+     */
+    public static function debit(
+        int $actorUserId,
+        int $targetUserId,
+        float $amount,
+        string $notes = 'Manual Balance Debit',
+        ?int $tenantId = null
+    ): array {
+        if ($amount <= 0) {
+            throw new InvalidArgumentException("Debit amount must be greater than zero.");
+        }
+
+        $db = Database::getConnection();
+        self::ensureWallet($targetUserId, $tenantId);
+
+        $isNested = $db->inTransaction();
+        if (!$isNested) {
+            $db->beginTransaction();
+        }
+        try {
+            // Lock target wallet for update
+            $stmt = $db->prepare("SELECT wallet_id, tenant_id, balance, status 
+                FROM wallets WHERE user_id = :uid FOR UPDATE");
+            $stmt->execute(['uid' => $targetUserId]);
+            $wallet = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$wallet) {
+                throw new DomainException("Target wallet not found for user #{$targetUserId}");
+            }
+            if ($wallet['status'] !== 'active') {
+                throw new DomainException("Target wallet is {$wallet['status']} and cannot be debited.");
+            }
+
+            // Target user info & credit limit
+            $userStmt = $db->prepare("SELECT user_id, username, role, metadata FROM users WHERE user_id = :uid LIMIT 1");
+            $userStmt->execute(['uid' => $targetUserId]);
+            $targetUser = $userStmt->fetch(PDO::FETCH_ASSOC);
+
+            $meta = json_decode($targetUser['metadata'] ?? '{}', true) ?: [];
+            $creditLimit = (float)($meta['credit_limit'] ?? 0.00);
+            $balanceBefore = (float)$wallet['balance'];
+            $availableFunds = round($balanceBefore + $creditLimit, 2);
+
+            // Fetch actor user to check permissions
+            $actorStmt = $db->prepare("SELECT user_id, username, role FROM users WHERE user_id = :uid LIMIT 1");
+            $actorStmt->execute(['uid' => $actorUserId]);
+            $actorUser = $actorStmt->fetch(PDO::FETCH_ASSOC);
+            $actorRole = strtolower($actorUser['role'] ?? '');
+            $isAdmin = in_array($actorRole, ['superadmin', 'admin', 'tenant_admin', 'operator'], true);
+
+            // If not admin, check available funds
+            if (!$isAdmin && $availableFunds < $amount) {
+                $limitText = $creditLimit > 0 ? " (Credit Limit: ৳" . number_format($creditLimit, 2) . ")" : "";
+                $userLabel = !empty($targetUser['username']) ? $targetUser['username'] : "User #{$targetUserId}";
+                throw new DomainException(
+                    "Insufficient balance for '{$userLabel}'. Current balance: ৳" . number_format($balanceBefore, 2) . 
+                    $limitText . ", Attempted debit: ৳" . number_format($amount, 2)
+                );
+            }
+
+            $balanceAfter = round($balanceBefore - $amount, 2);
+            $effectiveTenantId = (int)$wallet['tenant_id'];
+
+            // Update wallet balance
+            $upStmt = $db->prepare("UPDATE wallets SET balance = :bal, updated_at = NOW() WHERE wallet_id = :wid");
+            $upStmt->execute(['bal' => $balanceAfter, 'wid' => $wallet['wallet_id']]);
+
+            $debitRef = 'DBT-' . strtoupper(bin2hex(random_bytes(4)));
+
+            // Insert audit record in wallet_transactions
+            $txStmt = $db->prepare("INSERT INTO wallet_transactions 
+                (tenant_id, wallet_id, user_id, type, amount, balance_before, balance_after, reference_type, reference_id, description, created_by)
+                VALUES (:tid, :wid, :uid, 'debit', :amt, :bb, :ba, 'MANUAL_DEBIT', :ref, :desc, :cb)");
+            $txStmt->execute([
+                'tid' => $effectiveTenantId,
+                'wid' => $wallet['wallet_id'],
+                'uid' => $targetUserId,
+                'amt' => $amount,
+                'bb' => $balanceBefore,
+                'ba' => $balanceAfter,
+                'ref' => $debitRef,
+                'desc' => $notes,
+                'cb' => $actorUserId,
+            ]);
+
+            // Keep immutable double-entry wallet_ledger in sync
+            try {
+                $db->prepare("INSERT INTO wallet_ledger 
+                    (tenant_id, wallet_id, user_id, txn_group_id, type, amount, opening_balance, closing_balance, purpose, description, created_at)
+                    VALUES (:tid, :wid, :uid, :tgid, 'debit', :amt, :bb, :ba, 'manual_debit', :desc, NOW())")
+                    ->execute([
+                        'tid' => $effectiveTenantId,
+                        'wid' => $wallet['wallet_id'],
+                        'uid' => $targetUserId,
+                        'tgid' => $debitRef,
+                        'amt' => $amount,
+                        'bb' => $balanceBefore,
+                        'ba' => $balanceAfter,
+                        'desc' => $notes,
+                    ]);
+            } catch (Throwable $ignore) {}
+
+            // Keep legacy reseller_ledger in sync
+            $rlStmt = $db->prepare("INSERT INTO reseller_ledger 
+                (tenant_id, user_id, debit, reference_type, reference_id, notes, created_by)
+                VALUES (:tid, :uid, :debit, 'MANUAL_DEBIT', :ref, :notes, :cb)");
+            $rlStmt->execute([
+                'tid' => $effectiveTenantId,
+                'uid' => $targetUserId,
+                'debit' => $amount,
+                'ref' => $debitRef,
+                'notes' => $notes,
+                'cb' => $actorUserId,
+            ]);
+
+            if (!$isNested) {
+                $db->commit();
+            }
+
+            return [
+                'success' => true,
+                'target_user_id' => $targetUserId,
+                'amount' => $amount,
+                'balance_before' => $balanceBefore,
+                'balance_after' => $balanceAfter,
+            ];
+        } catch (Throwable $e) {
+            if (!$isNested && $db->inTransaction()) {
+                $db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
      * Transfer funds between wallets with consistent locking order to prevent InnoDB deadlocks
      */
     public static function transfer(

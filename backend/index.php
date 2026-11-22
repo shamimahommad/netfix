@@ -467,6 +467,9 @@ if ($method === 'POST' && $uri === '/resellers') {
 if ($method === 'POST' && $uri === '/resellers/add-balance') {
     ResellersController::addBalance();
 }
+if (($method === 'PATCH' || $method === 'POST') && preg_match('#^/resellers/([^/]+)/balance$#', $uri, $m)) {
+    ResellersController::updateBalance($m[1]);
+}
 if ($method === 'POST' && $uri === '/resellers/transfer-balance') {
     ResellersController::transferBalance();
 }

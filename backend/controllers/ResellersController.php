@@ -613,6 +613,78 @@ class ResellersController {
         }
     }
 
+    public static function updateBalance(string|int $resellerId): void {
+        $currentUser = AuthMiddleware::requireAuth();
+        HierarchySecurityService::requirePermission((int)$currentUser['user_id'], 'can_transfer_balance');
+        $tenantId = AuthMiddleware::getTenantId();
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+
+        $userId = (int)$resellerId;
+        $amount = (float)($data['amount'] ?? 0);
+        $operation = strtolower(trim($data['operation'] ?? 'credit'));
+        $notes = trim($data['notes'] ?? ($operation === 'debit' ? 'Manual Balance Debit' : 'Wallet Top-up'));
+
+        if (!$userId || $amount <= 0) {
+            Response::error('Valid reseller ID and positive amount are required', 400);
+            return;
+        }
+
+        // Downward hierarchy security check
+        if (!HierarchySecurityService::canAccessUser((int)$currentUser['user_id'], $userId)) {
+            Response::error('Access denied: You cannot modify balance for this reseller.', 403);
+            return;
+        }
+
+        try {
+            if ($operation === 'debit') {
+                $result = WalletLedgerService::debit(
+                    (int)$currentUser['user_id'],
+                    $userId,
+                    $amount,
+                    $notes,
+                    $tenantId ? (int)$tenantId : null
+                );
+            } else {
+                $result = WalletLedgerService::topup(
+                    (int)$currentUser['user_id'],
+                    $userId,
+                    $amount,
+                    $notes,
+                    $tenantId ? (int)$tenantId : null
+                );
+            }
+
+            try {
+                require_once __DIR__ . '/../lib/ActivityLogger.php';
+                ActivityLogger::log([
+                    'tenant_id' => $tenantId ? (int)$tenantId : 1,
+                    'user_id' => (int)$currentUser['user_id'],
+                    'log_type' => 'activity',
+                    'action' => $operation === 'debit' ? 'balance_debit' : 'balance_topup',
+                    'module' => 'reseller',
+                    'target_id' => (string)$userId,
+                    'target_type' => 'reseller',
+                    'description' => ($operation === 'debit' ? "Debited" : "Credited") . " ৳{$amount} for reseller #{$userId} ({$notes})",
+                    'metadata' => [
+                        'amount' => $amount,
+                        'operation' => $operation,
+                        'balance_before' => $result['balance_before'],
+                        'balance_after' => $result['balance_after'],
+                    ],
+                ]);
+            } catch (Throwable $e) {}
+
+            Response::json([
+                'success' => true,
+                'message' => $operation === 'debit' ? 'Balance debited successfully' : 'Balance credited successfully',
+                'balance' => $result['balance_after'],
+                'data' => $result,
+            ]);
+        } catch (Throwable $e) {
+            Response::error($e->getMessage(), 400);
+        }
+    }
+
     public static function transferBalance(): void {
         $currentUser = AuthMiddleware::requireAuth();
         HierarchySecurityService::requirePermission((int)$currentUser['user_id'], 'can_transfer_balance');
