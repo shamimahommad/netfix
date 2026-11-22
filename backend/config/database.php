@@ -144,6 +144,7 @@ class Database {
             // Ensure company profile columns on tenants
             self::ensureColumn($pdo, 'tenants', 'support_phone', 'VARCHAR(50) DEFAULT NULL');
             self::ensureColumn($pdo, 'tenants', 'logo_url', 'VARCHAR(255) DEFAULT NULL');
+            self::ensureColumn($pdo, 'tenants', 'metadata', 'LONGTEXT DEFAULT NULL');
 
             // Ensure payment_gateway_settings table
             $pdo->exec("CREATE TABLE IF NOT EXISTS `payment_gateway_settings` (
@@ -199,6 +200,40 @@ class Database {
                 `completed_at` DATETIME NULL,
                 INDEX `idx_tenant_started` (`tenant_id`, `started_at` DESC)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+            // Ensure olt_cron_runs table
+            $pdo->exec("CREATE TABLE IF NOT EXISTS `olt_cron_runs` (
+                `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `tenant_id` BIGINT UNSIGNED DEFAULT NULL,
+                `trigger_type` ENUM('scheduled','manual','api') NOT NULL DEFAULT 'scheduled',
+                `status` ENUM('running','completed','failed') NOT NULL DEFAULT 'running',
+                `total_olts` INT(11) NOT NULL DEFAULT 0,
+                `synced_olts` INT(11) NOT NULL DEFAULT 0,
+                `failed_olts` INT(11) NOT NULL DEFAULT 0,
+                `skipped_olts` INT(11) NOT NULL DEFAULT 0,
+                `total_onus` INT(11) NOT NULL DEFAULT 0,
+                `online_onus` INT(11) NOT NULL DEFAULT 0,
+                `offline_onus` INT(11) NOT NULL DEFAULT 0,
+                `duration_ms` INT(11) NOT NULL DEFAULT 0,
+                `error_summary` TEXT DEFAULT NULL,
+                `started_at` DATETIME NOT NULL,
+                `completed_at` DATETIME DEFAULT NULL,
+                PRIMARY KEY (`id`),
+                KEY `idx_olt_cron_tenant` (`tenant_id`),
+                KEY `idx_olt_cron_status` (`status`),
+                KEY `idx_olt_cron_started` (`started_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+            // Ensure can_debit_balance permission exists in permissions table if table exists
+            try {
+                $pdo->exec("INSERT IGNORE INTO `permissions` (`permission_code`, `permission_name`, `module`, `description`) 
+                    VALUES ('can_debit_balance', 'Debit Downline Balance', 'reseller', 'Permission to manually debit balance from downline resellers and agents')");
+            } catch (Throwable $ignored) {}
+
+            // Ensure transactions support UNMATCHED_PAYMENT
+            try {
+                $pdo->exec("ALTER TABLE `transactions` MODIFY COLUMN `transaction_type` VARCHAR(50) NOT NULL DEFAULT 'GATEWAY_PAYMENT'");
+            } catch (Throwable $ignored) {}
 
             self::ensureColumn($pdo, 'payment_gateway_settings', 'api_context_root', 'VARCHAR(255) DEFAULT NULL');
 
