@@ -19,13 +19,22 @@ import {
   Clock,
   CheckCircle2,
   Loader2,
+  Trash2,
+  Minimize2,
+  Maximize2,
+  X,
+  Server,
+  Sparkles,
+  Layers,
 } from 'lucide-react';
 import { PageHeader } from '@/components/common';
 import { networkService } from '@/services/network.service';
 import { NetworkDevice } from '@/types/network.types';
 import { useToastContext } from '@/contexts/ToastContext';
+import { showDeleteConfirm, showLoading, closeAlert, showError } from '@/lib/swal';
 
 interface OnuRecord {
+  onuRecordId?: string | number;
   ponPort: number;
   ponPortName: string;
   onuId: string;
@@ -142,6 +151,8 @@ export default function OltDetailPage() {
 
   // Sync Progress & Loading Modal State
   const [syncSeconds, setSyncSeconds] = useState(0);
+  const [isSyncMinimized, setIsSyncMinimized] = useState(false);
+  const [bgStepMessage, setBgStepMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let timer: any;
@@ -152,6 +163,7 @@ export default function OltDetailPage() {
       }, 1000);
     } else {
       setSyncSeconds(0);
+      setBgStepMessage(null);
     }
     return () => {
       if (timer) clearInterval(timer);
@@ -168,10 +180,11 @@ export default function OltDetailPage() {
     if (!id) return;
     setIsLoading(true);
     try {
-      const [devRes, statusRes, onusRes] = await Promise.all([
+      const [devRes, statusRes, onusRes, syncJobRes] = await Promise.all([
         networkService.getNetworkDeviceById(id).catch(() => null),
         networkService.getOltStatus(id).catch(() => null),
         networkService.getOltOnus(id).catch(() => null),
+        networkService.getSyncStatus(id).catch(() => null),
       ]);
 
       if (devRes?.success && devRes.data) {
@@ -191,11 +204,60 @@ export default function OltDetailPage() {
       if (onusRes?.success && onusRes.data) {
         setOnus(onusRes.data.onus || []);
       }
+
+      // Automatically detect if a background sync is currently running for this OLT
+      if (syncJobRes?.success && syncJobRes.data?.status === 'running') {
+        if (!isSyncing) {
+          setIsSyncing(true);
+          setIsSyncMinimized(true);
+          setBgStepMessage(syncJobRes.data.step || 'Hardware synchronization running in background...');
+          startSyncPolling();
+        }
+      }
     } catch (err: any) {
       toast.error(err.message || 'Failed to load OLT details');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const startSyncPolling = () => {
+    if (!id) return;
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusRes = await networkService.getSyncStatus(id);
+        if (statusRes?.success && statusRes.data) {
+          const job = statusRes.data;
+          if (job.step) {
+            setBgStepMessage(job.step);
+          }
+          if (job.status === 'completed') {
+            clearInterval(pollInterval);
+            setIsSyncing(false);
+            setIsSyncMinimized(false);
+            setBgStepMessage(null);
+            const count = job.totalOnus ?? onus.length;
+            const dur = job.durationSeconds ? ` in ${job.durationSeconds}s` : '';
+            toast.success(`OLT synchronized successfully with hardware${dur}! (${count} ONUs processed)`);
+            await loadAllData();
+          } else if (job.status === 'failed') {
+            clearInterval(pollInterval);
+            setIsSyncing(false);
+            setIsSyncMinimized(false);
+            setBgStepMessage(null);
+            toast.error(job.error || 'Hardware sync failed');
+            await loadAllData();
+          }
+        }
+      } catch (e) {
+        // Continue polling
+      }
+    }, 2000);
+
+    // Timeout safety after 4 minutes
+    setTimeout(() => {
+      clearInterval(pollInterval);
+    }, 240000);
   };
 
   const handlePing = async () => {
@@ -230,19 +292,55 @@ export default function OltDetailPage() {
   const handleSyncNow = async () => {
     if (!id) return;
     setIsSyncing(true);
+    setIsSyncMinimized(false);
+    setSyncSeconds(0);
+    setBgStepMessage('Starting non-blocking background sync...');
     try {
       const res = await networkService.syncOlt(id);
       if (res.success) {
-        toast.success(res.message || 'OLT synchronized successfully with hardware');
-        await loadAllData();
+        if (res.isBackground || res.status === 'running') {
+          // Hardware sync running in background without blocking server
+          startSyncPolling();
+        } else {
+          // Synchronous fallback finished
+          const count = res.data?.totalOnus ?? (res.data?.countsByPon ? Object.values(res.data.countsByPon).reduce((a: any, b: any) => a + (b.count || 0), 0) : onus.length);
+          const dur = res.data?.syncDurationSeconds ? ` in ${res.data.syncDurationSeconds}s` : '';
+          toast.success(res.message || `OLT synchronized successfully with hardware${dur}! (${count} ONUs processed)`);
+          await loadAllData();
+          setIsSyncing(false);
+          setIsSyncMinimized(false);
+        }
       } else {
         toast.error(res.message || 'Hardware sync reported an issue');
+        setIsSyncing(false);
+        setIsSyncMinimized(false);
         await loadAllData();
       }
     } catch (err: any) {
-      toast.error(err.response?.data?.message || err.message || 'Sync failed');
-    } finally {
+      toast.error(err.response?.data?.message || err.message || 'Sync failed to initiate');
       setIsSyncing(false);
+      setIsSyncMinimized(false);
+    }
+  };
+
+  const handleDeleteOnu = async (onu: OnuRecord) => {
+    const displayId = onu.onuId.includes(':') ? onu.onuId.split(':')[1] : onu.onuId;
+    const result = await showDeleteConfirm(
+      `ONU #${displayId} (${onu.macAddress})`,
+      'Remove this ONU record from the server database? Use this if the ONU has been broken, replaced, or deleted on the physical OLT.'
+    );
+    if (!result.isConfirmed) return;
+
+    try {
+      showLoading('Removing ONU...', 'Deleting stale ONU record from server database...');
+      const targetId = onu.onuRecordId ? String(onu.onuRecordId) : onu.macAddress;
+      await networkService.deleteOltOnu(id!, targetId);
+      closeAlert();
+      setOnus((prev) => prev.filter((o) => o.macAddress !== onu.macAddress && (onu.onuRecordId ? o.onuRecordId !== onu.onuRecordId : true)));
+      toast.success(`ONU ${onu.macAddress} removed from server`);
+    } catch (err: any) {
+      closeAlert();
+      showError('Failed to remove ONU', err?.response?.data?.message || err?.message || 'Could not delete ONU record');
     }
   };
 
@@ -331,37 +429,88 @@ export default function OltDetailPage() {
     return activePorts;
   }, [telemetry?.ponPorts, totalPonPorts, ponStats]);
 
-  // Sync Progress Calculation & Animated Stages
-  const estimatedDuration = totalPonPorts > 4 ? 45 : 15;
-  const progressPercent = Math.min(96, Math.max(8, Math.round((syncSeconds / estimatedDuration) * 90) + 8));
+  // Smooth Asymptotic Progress Calculation (Never freezes at 96%)
+  const progressPercent = useMemo(() => {
+    if (!isSyncing) return 0;
+    const targetSec = totalPonPorts > 4 ? 35 : 18;
+    if (syncSeconds <= targetSec) {
+      // Smooth linear-to-ease progress up to 88%
+      const ratio = syncSeconds / targetSec;
+      return Math.min(88, Math.max(10, Math.round(ratio * 78) + 10));
+    }
+    // Beyond expected duration, keep gently creeping 88% -> 99% every ~3 seconds
+    const extraSec = syncSeconds - targetSec;
+    const creep = Math.min(11, Math.floor(extraSec / 3));
+    return Math.min(99, 88 + creep);
+  }, [isSyncing, syncSeconds, totalPonPorts]);
 
-  const syncStages = useMemo(() => [
-    {
-      title: 'Connecting to OLT Management Engine',
-      description: `Authenticating with ${device?.managementIp || 'OLT'}:${device?.webPort || 80} via HTTPS session...`,
-      doneAt: 2,
-    },
-    {
-      title: 'Reading Optical Transceivers & Board Telemetry',
-      description: `Querying CPU load, RAM usage, board temperature & laser power across ${totalPonPorts} PON ports...`,
-      doneAt: 6,
-    },
-    {
-      title: 'Scanning Active Customers & Link Status',
-      description: `Reading live ONU register table, distance measurements, and alive times...`,
-      doneAt: totalPonPorts > 4 ? 18 : 9,
-    },
-    {
-      title: 'Measuring Optical Signal Power (Rx / Tx DDM)',
-      description: `Diagnosing optical laser receive power and fiber attenuation dBm...`,
-      doneAt: totalPonPorts > 4 ? 35 : 12,
-    },
-    {
-      title: 'Mapping Router MACs & Database Synchronization',
-      description: `Resolving VLAN IDs, matching PPPoE user profiles & updating local records...`,
-      doneAt: totalPonPorts > 4 ? 42 : 14,
-    },
-  ], [device, totalPonPorts]);
+  const syncStages = useMemo(() => {
+    const is8 = totalPonPorts > 4;
+    return [
+      {
+        id: 'engine',
+        title: 'Connecting to OLT Management Engine',
+        description: `Authenticating with ${device?.managementIp || 'OLT'}:${device?.webPort || 80} via encrypted session...`,
+        detail: 'Validating API session tokens & TCP handshake',
+        doneAt: 2,
+      },
+      {
+        id: 'telemetry',
+        title: 'Reading Optical Transceivers & Board Telemetry',
+        description: `Querying CPU load, RAM usage, board temperature & laser power across ${totalPonPorts} PON ports...`,
+        detail: 'Transceiver SFP DDM matrix, temperature & voltage diagnostics',
+        doneAt: is8 ? 6 : 4,
+      },
+      {
+        id: 'discovery',
+        title: 'Scanning Active Customers & Link Status',
+        description: 'Reading live ONU register table, distance measurements, and alive times...',
+        detail: 'Parsing online/offline states, fiber distances & registration timestamps',
+        doneAt: is8 ? 16 : 8,
+      },
+      {
+        id: 'optics',
+        title: 'Measuring Optical Signal Power (Rx / Tx DDM)',
+        description: 'Diagnosing optical laser receive power and fiber attenuation dBm...',
+        detail: 'Live optical power telemetry (Rx/Tx dBm) & link budget calculations',
+        doneAt: is8 ? 28 : 14,
+      },
+      {
+        id: 'routing',
+        title: 'Mapping Router MACs & VLAN Routing Table',
+        description: 'Resolving subscriber router MACs, VLAN tags & PPPoE customer profiles...',
+        detail: 'Forwarding database resolution and PPPoE account cross-referencing',
+        doneAt: is8 ? 40 : 20,
+      },
+      {
+        id: 'reconcile',
+        title: 'Database Ingestion & Hardware Reconciliation',
+        description: 'Upserting live telemetry, refreshing cache & auto-pruning deleted ONUs...',
+        detail: 'Reconciling decommissioned ONUs & committing local records',
+        doneAt: is8 ? 52 : 26,
+      },
+    ];
+  }, [device, totalPonPorts]);
+
+  // Current active stage index
+  const currentStageIndex = useMemo(() => {
+    for (let i = 0; i < syncStages.length; i++) {
+      if (syncSeconds < syncStages[i].doneAt) return i;
+    }
+    return syncStages.length - 1;
+  }, [syncSeconds, syncStages]);
+
+  // Live status ticker message
+  const liveStatusText = useMemo(() => {
+    if (bgStepMessage) return bgStepMessage;
+    if (syncSeconds < 3) return `Connecting to OLT management socket at ${device?.managementIp || 'OLT'}...`;
+    if (syncSeconds < 7) return `Reading hardware health & ${totalPonPorts} SFP transceivers...`;
+    if (syncSeconds < 16) return 'Scanning registered ONUs and link status tables...';
+    if (syncSeconds < 28) return 'Measuring optical laser Rx/Tx power levels (DDM dBm)...';
+    if (syncSeconds < 40) return 'Querying subscriber router MAC tables and VLAN tags...';
+    if (syncSeconds < 55) return 'Ingesting telemetry & matching PPPoE user accounts...';
+    return 'Finalizing database sync & reconciling decommissioned ONUs...';
+  }, [bgStepMessage, syncSeconds, totalPonPorts, device?.managementIp]);
 
   // Filtered ONUs
   const filteredOnus = useMemo(() => {
@@ -511,17 +660,62 @@ export default function OltDetailPage() {
               <span>{isPinging ? 'Testing...' : 'Ping Test'}</span>
             </button>
             <button
-              onClick={handleSyncNow}
-              disabled={isSyncing}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs sm:text-sm rounded-lg transition-all shadow-sm active:scale-95 disabled:opacity-50"
-              title="Force sync telemetry and ONUs now"
+              onClick={() => {
+                if (isSyncing && isSyncMinimized) {
+                  setIsSyncMinimized(false);
+                } else if (!isSyncing) {
+                  handleSyncNow();
+                }
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs sm:text-sm rounded-lg transition-all shadow-sm active:scale-95"
+              title={isSyncing ? "Sync running in background - click to view modal" : "Sync with physical OLT (auto-cleans any ONUs that were deleted on the OLT)"}
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>{isSyncing ? 'Synchronizing...' : 'Sync Now'}</span>
+              <span>{isSyncing ? (isSyncMinimized ? `Syncing (${progressPercent}%)...` : 'Synchronizing...') : 'Sync & Reconcile'}</span>
             </button>
           </div>
         }
       />
+
+      {/* Floating Background Sync Bar when Minimized */}
+      {isSyncing && isSyncMinimized && (
+        <div className="p-4 bg-gradient-to-r from-blue-900/90 via-indigo-900/90 to-slate-900/90 border border-blue-500/40 rounded-2xl shadow-xl shadow-blue-900/30 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in slide-in-from-top-4 duration-300 backdrop-blur-md">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="relative w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-400/40 flex items-center justify-center shrink-0">
+              <RefreshCw className="w-5 h-5 text-blue-400 animate-spin" />
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/30 text-blue-300 border border-blue-400/30 uppercase tracking-wider">
+                  Syncing in Background
+                </span>
+                <span className="text-xs font-mono font-bold text-cyan-300">{progressPercent}%</span>
+                <span className="text-xs text-slate-400">•</span>
+                <span className="text-xs font-mono text-slate-300">{syncSeconds}s elapsed</span>
+              </div>
+              <p className="text-xs text-slate-200 font-medium truncate mt-0.5">
+                {liveStatusText}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5 self-end sm:self-center shrink-0">
+            <div className="w-28 bg-slate-800 rounded-full h-2 overflow-hidden border border-slate-700 hidden md:block">
+              <div
+                className="h-full bg-gradient-to-r from-blue-500 via-indigo-400 to-cyan-400 rounded-full transition-all duration-500"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+            <button
+              onClick={() => setIsSyncMinimized(false)}
+              className="px-3.5 py-1.5 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5 active:scale-95 cursor-pointer"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+              <span>View Modal</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Hardware Sync Error Banner */}
       {telemetry?.syncError && (
@@ -1065,34 +1259,37 @@ export default function OltDetailPage() {
                 <th className="px-4 py-3.5 font-bold" style={{ width: '15%' }}>
                   ONU MAC
                 </th>
-                <th className="px-4 py-3.5 font-bold" style={{ width: '14%' }}>
+                <th className="px-4 py-3.5 font-bold" style={{ width: '13%' }}>
                   Optical Rx Power
                 </th>
-                <th className="px-4 py-3.5 font-bold" style={{ width: '9%' }}>
+                <th className="px-4 py-3.5 font-bold" style={{ width: '8%' }}>
                   Status
                 </th>
-                <th className="px-4 py-3.5 font-bold" style={{ width: '15%' }}>
+                <th className="px-4 py-3.5 font-bold" style={{ width: '14%' }}>
                   Router MAC
                 </th>
-                <th className="px-4 py-3.5 font-bold" style={{ width: '23%' }}>
+                <th className="px-4 py-3.5 font-bold" style={{ width: '22%' }}>
                   PPPoE
                 </th>
-                <th className="px-4 py-3.5 font-bold" style={{ width: '12%' }}>
+                <th className="px-4 py-3.5 font-bold" style={{ width: '10%' }}>
                   Uptime
+                </th>
+                <th className="px-3 py-3.5 font-bold text-right" style={{ width: '6%' }}>
+                  Action
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60 bg-white dark:bg-slate-800">
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-16 text-slate-400">
+                  <td colSpan={8} className="text-center py-16 text-slate-400">
                     <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-500" />
                     <span className="font-medium text-xs">Loading device records...</span>
                   </td>
                 </tr>
               ) : filteredOnus.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-16 text-slate-400">
+                  <td colSpan={8} className="text-center py-16 text-slate-400">
                     <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto mb-2">
                       {statusFilter === 'offline' ? (
                         <CheckCircle2 className="w-5 h-5 text-emerald-500" />
@@ -1250,6 +1447,19 @@ export default function OltDetailPage() {
                       <td className="px-4 py-3 font-mono text-xs whitespace-nowrap">
                         {formatOnuUptime(onu.uptime, onu.status)}
                       </td>
+
+                      {/* Action */}
+                      <td className="px-3 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteOnu(onu)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors inline-flex items-center justify-center"
+                          title="Delete ONU from server (use if removed/broken on OLT)"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-slate-400 hover:text-rose-600" />
+                          <span className="sr-only">Delete</span>
+                        </button>
+                      </td>
                     </tr>
                   );
                 })
@@ -1279,8 +1489,8 @@ export default function OltDetailPage() {
       </div>
 
       {/* Full Screen Sync Loading Modal */}
-      {isSyncing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-200">
+      {isSyncing && !isSyncMinimized && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-md animate-in fade-in duration-200">
           <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             
             {/* Top Animated Gradient Accent Bar */}
@@ -1288,47 +1498,90 @@ export default function OltDetailPage() {
 
             {/* Modal Header */}
             <div className="p-5 sm:p-6 pb-4 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-start gap-3.5">
-                <div className="relative flex items-center justify-center w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800/60 shrink-0">
-                  <span className="absolute inset-0 rounded-2xl bg-blue-500/20 animate-ping" />
-                  <RefreshCw className="w-6 h-6 text-blue-600 dark:text-blue-400 animate-spin" style={{ animationDuration: '2.5s' }} />
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3.5 min-w-0">
+                  <div className="relative flex items-center justify-center w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800/60 shrink-0">
+                    <span className="absolute inset-0 rounded-2xl bg-blue-500/20 animate-ping" />
+                    <RefreshCw className="w-6 h-6 text-blue-600 dark:text-blue-400 animate-spin" style={{ animationDuration: '2.5s' }} />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 truncate">
+                        Hardware Synchronizing
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-800">
+                        LIVE DDM
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                      {device?.deviceName || 'OLT'} • {device?.vendor?.toUpperCase() || 'VSOL'} {telemetry?.model || device?.model || ''} ({totalPonPorts} PON Ports)
+                    </p>
+                    <div className="flex items-center gap-3 mt-1.5 text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                      <span className="flex items-center gap-1">
+                        <Radio className="w-3.5 h-3.5 text-emerald-500" />
+                        {device?.managementIp}:{device?.webPort || 80}
+                      </span>
+                      <span>•</span>
+                      <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-semibold">
+                        <Clock className="w-3.5 h-3.5" />
+                        {syncSeconds}s elapsed
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 truncate">
-                      Hardware Synchronizing
-                    </h3>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-800">
-                      LIVE
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-                    {device?.deviceName || 'OLT'} • {device?.vendor?.toUpperCase() || 'VSOL'} {telemetry?.model || device?.model || ''} ({totalPonPorts} PON Ports)
-                  </p>
-                  <div className="flex items-center gap-3 mt-1.5 text-[11px] text-slate-500 dark:text-slate-400 font-mono">
-                    <span className="flex items-center gap-1">
-                      <Radio className="w-3.5 h-3.5 text-emerald-500" />
-                      {device?.managementIp}:{device?.webPort || 80}
-                    </span>
-                    <span>•</span>
-                    <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-semibold">
-                      <Clock className="w-3.5 h-3.5" />
-                      {syncSeconds}s elapsed
-                    </span>
-                  </div>
+                {/* Minimize & Close Action Controls */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={() => setIsSyncMinimized(true)}
+                    className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                    title="Minimize to Background (ব্যাকগ্রাউন্ডে চালান)"
+                  >
+                    <Minimize2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setIsSyncMinimized(true)}
+                    className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                    title="Close Dialog (continues in background)"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
 
-              {/* Progress Bar */}
-              <div className="mt-5">
+              {/* Live Status Ticker & Diagnostics Box */}
+              <div className="mt-4 p-3 rounded-2xl bg-slate-900 dark:bg-slate-950 border border-slate-800 text-white shadow-inner">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium mb-1">
+                  <span className="flex items-center gap-1.5 text-cyan-400 font-semibold">
+                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping inline-block" />
+                    Active Pipeline Activity
+                  </span>
+                  <span className="font-mono text-slate-300">
+                    Step {currentStageIndex + 1} of {syncStages.length}
+                  </span>
+                </div>
+                <p className="text-xs font-semibold text-slate-100 truncate">
+                  {liveStatusText}
+                </p>
+                <div className="flex items-center gap-3 mt-2 pt-2 border-t border-slate-800/80 text-[10px] text-slate-400 font-mono">
+                  <span>Target: <strong className="text-slate-200">{device?.managementIp}</strong></span>
+                  <span>•</span>
+                  <span>PON Ports: <strong className="text-slate-200">{totalPonPorts}</strong></span>
+                  <span>•</span>
+                  <span>Known ONUs: <strong className="text-slate-200">{onus.length}</strong></span>
+                </div>
+              </div>
+
+              {/* Progress Bar with Asymptotic Flow */}
+              <div className="mt-4">
                 <div className="flex items-center justify-between text-xs mb-1.5 font-medium">
-                  <span className="text-slate-700 dark:text-slate-300">Live Ingestion Progress</span>
+                  <span className="text-slate-700 dark:text-slate-300 font-semibold">Telemetry Ingestion Progress</span>
                   <span className="font-mono font-bold text-blue-600 dark:text-blue-400">{progressPercent}%</span>
                 </div>
                 <div className="h-2.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-200/50 dark:border-slate-700/50">
                   <div
-                    className="h-full bg-gradient-to-r from-blue-600 via-indigo-500 to-cyan-400 rounded-full transition-all duration-700"
+                    className="h-full bg-gradient-to-r from-blue-600 via-indigo-500 to-cyan-400 rounded-full transition-all duration-700 shadow-sm"
                     style={{ width: `${progressPercent}%` }}
                   />
                 </div>
@@ -1336,7 +1589,7 @@ export default function OltDetailPage() {
             </div>
 
             {/* Diagnostic Stages List */}
-            <div className="p-5 sm:p-6 pt-3 space-y-2.5 bg-slate-50/60 dark:bg-slate-900/40">
+            <div className="p-5 sm:p-6 pt-3 space-y-2 bg-slate-50/60 dark:bg-slate-900/40 max-h-[300px] overflow-y-auto">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 block">
                 Ingestion Workflow Stages
               </span>
@@ -1351,7 +1604,7 @@ export default function OltDetailPage() {
                       key={idx}
                       className={`flex items-start gap-3 p-2.5 rounded-xl transition-all ${
                         isCurrent
-                          ? 'bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/60 shadow-xs'
+                          ? 'bg-blue-50/90 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800/80 shadow-xs'
                           : isDone
                           ? 'bg-white/80 dark:bg-slate-800/40 border border-slate-200/50 dark:border-slate-800/50'
                           : 'opacity-40'
@@ -1401,15 +1654,20 @@ export default function OltDetailPage() {
               </div>
             </div>
 
-            {/* Footer Notice */}
+            {/* Footer with Run in Background Button */}
             <div className="p-3.5 px-6 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
               <span className="flex items-center gap-1.5 text-[11px]">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                 Live socket stream active
               </span>
-              <span className="text-[11px] text-slate-400">
-                Please wait until sync completes
-              </span>
+              <button
+                type="button"
+                onClick={() => setIsSyncMinimized(true)}
+                className="px-3.5 py-1.5 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl font-bold text-xs transition flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+              >
+                <Minimize2 className="w-3.5 h-3.5" />
+                <span>Run in Background (ব্যাকগ্রাউন্ডে পাঠান)</span>
+              </button>
             </div>
 
           </div>

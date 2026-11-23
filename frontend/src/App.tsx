@@ -12,6 +12,8 @@ import SaaSDashboard from './pages/SaaSDashboard';
 import SaaSPackagesPage from './pages/SaaSPackagesPage';
 import SaaSPlatformBillingPage from './pages/SaaSPlatformBillingPage';
 import SaaSSettingsPage from './pages/SaaSSettingsPage';
+import GlobalCustomersPage from './pages/GlobalCustomersPage';
+import GlobalNetworkPage from './pages/GlobalNetworkPage';
 import TenantDashboard from './pages/TenantDashboard';
 import CustomersPage from './pages/CustomersPage';
 import CustomerDetailPage from './pages/CustomerDetailPage';
@@ -204,8 +206,8 @@ function AppContent() {
               <Route path="tenants/:tenantId" element={<ISPProfilePage />} />
               <Route path="packages" element={<SaaSPackagesPage />} />
               <Route path="billing" element={<SaaSPlatformBillingPage />} />
-              <Route path="customers" element={<PlaceholderPage title="Global Customers" description="View and manage customer accounts across all ISP tenants." />} />
-              <Route path="network" element={<PlaceholderPage title="Network Infrastructure" description="Global network telemetry, router nodes, and cloud server health." />} />
+              <Route path="customers" element={<GlobalCustomersPage />} />
+              <Route path="network" element={<GlobalNetworkPage />} />
               <Route path="settings" element={<SaaSSettingsPage />} />
               <Route index element={<Navigate to="/saas/dashboard" replace />} />
             </Route>
@@ -253,11 +255,11 @@ function AppContent() {
               <Route path="report/area-wise-customers" element={<AreaWiseCustomersPage />} />
               <Route path="report/server-wise-customers" element={<AdminOnlyGuard><ServerWiseCustomersPage /></AdminOnlyGuard>} />
               <Route path="report/btrc" element={<AdminOnlyGuard><BtrcReportPage /></AdminOnlyGuard>} />
-              <Route path="report/ledger" element={<FinancialLedgerPage />} />
-              <Route path="report/financial-ledger" element={<FinancialLedgerPage />} />
-              <Route path="report/reconciliation" element={<ReconciliationReportPage />} />
-              <Route path="report/online-transactions" element={<OnlineTransactionsPage />} />
-              <Route path="report/merchant-payments" element={<MerchantPaymentsPage />} />
+              <Route path="report/ledger" element={<AdminOnlyGuard><FinancialLedgerPage /></AdminOnlyGuard>} />
+              <Route path="report/financial-ledger" element={<AdminOnlyGuard><FinancialLedgerPage /></AdminOnlyGuard>} />
+              <Route path="report/reconciliation" element={<AdminOnlyGuard><ReconciliationReportPage /></AdminOnlyGuard>} />
+              <Route path="report/online-transactions" element={<AdminOnlyGuard><OnlineTransactionsPage /></AdminOnlyGuard>} />
+              <Route path="report/merchant-payments" element={<AdminOnlyGuard><MerchantPaymentsPage /></AdminOnlyGuard>} />
               <Route path="report/customer-payments" element={<CustomerPaymentsPage />} />
               <Route path="report/recharge-history" element={<RechargeHistoryPage />} />
               <Route path="report/invoices" element={<InvoicesReportPage />} />

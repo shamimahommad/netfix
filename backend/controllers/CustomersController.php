@@ -2409,5 +2409,157 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             'data' => $result,
         ]);
     }
+
+    /**
+     * SaaS Super Admin Global Customers Query
+     * Allows searching and filtering customers across all ISP tenants or a specific tenant.
+     */
+    public static function saasIndex(): void {
+        $user = AuthMiddleware::requireAuth();
+        if (($user['role'] ?? '') !== 'saas_admin' && ($user['user_type'] ?? '') !== 'saas') {
+            Response::error('Access restricted to SaaS Super Administrator', 403);
+            return;
+        }
+
+        $db = Database::getConnection();
+
+        $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
+        $limit = isset($_GET['limit']) ? max(1, min(1000, (int)$_GET['limit'])) : 25;
+        $offset = ($page - 1) * $limit;
+
+        $where = [];
+        $params = [];
+
+        // Tenant filter
+        if (!empty($_GET['tenant_id']) && $_GET['tenant_id'] !== 'all') {
+            $where[] = "c.tenant_id = :tenant_id";
+            $params['tenant_id'] = (int)$_GET['tenant_id'];
+        }
+
+        // Status filter
+        if (!empty($_GET['status']) && $_GET['status'] !== 'all') {
+            $status = trim($_GET['status']);
+            if (strcasecmp($status, 'active') === 0) {
+                $where[] = "c.status = 'active'";
+            } elseif (strcasecmp($status, 'suspended') === 0) {
+                $where[] = "c.status = 'suspended'";
+            } elseif (strcasecmp($status, 'expired') === 0) {
+                $where[] = "(c.billing_status = 'Expired' OR (cs.expires_at IS NOT NULL AND cs.expires_at < NOW()))";
+            } else {
+                $where[] = "c.status = :status";
+                $params['status'] = $status;
+            }
+        }
+
+        // Search filter
+        if (!empty($_GET['search'])) {
+            $s = '%' . trim($_GET['search']) . '%';
+            $where[] = "(c.customer_code LIKE :s OR c.full_name LIKE :s OR c.phone LIKE :s OR c.email LIKE :s OR na.username LIKE :s OR na.current_ip LIKE :s OR t.tenant_name LIKE :s OR t.tenant_code LIKE :s)";
+            $params['s'] = $s;
+        }
+
+        $whereSql = !empty($where) ? "WHERE " . implode(' AND ', $where) : "";
+
+        // Platform-wide Metrics (always across all or filtered tenant)
+        $metricWhere = !empty($_GET['tenant_id']) && $_GET['tenant_id'] !== 'all' ? "WHERE c.tenant_id = " . (int)$_GET['tenant_id'] : "";
+        $metricsStmt = $db->query("SELECT 
+            COUNT(c.customer_id) as total_customers,
+            SUM(CASE WHEN c.status = 'active' THEN 1 ELSE 0 END) as active_customers,
+            SUM(CASE WHEN c.status = 'suspended' THEN 1 ELSE 0 END) as suspended_customers,
+            SUM(CASE WHEN c.billing_status = 'Expired' OR c.status = 'terminated' THEN 1 ELSE 0 END) as expired_customers,
+            SUM(CASE WHEN c.created_at >= DATE_FORMAT(NOW(), '%Y-%m-01') THEN 1 ELSE 0 END) as new_this_month
+            FROM customers c {$metricWhere}");
+        $metrics = $metricsStmt->fetch() ?: [];
+
+        // Count total matching
+        $countStmt = $db->prepare("SELECT COUNT(DISTINCT c.customer_id) as total 
+            FROM customers c 
+            LEFT JOIN tenants t ON t.tenant_id = c.tenant_id
+            LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
+            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status != 'cancelled'
+            {$whereSql}");
+        $countStmt->execute($params);
+        $total = (int)$countStmt->fetchColumn();
+
+        // Query customers list
+        $query = "SELECT 
+            c.customer_id,
+            c.tenant_id,
+            c.customer_code,
+            c.customer_type,
+            c.full_name,
+            c.phone,
+            c.email,
+            c.status,
+            c.billing_status,
+            c.installation_address,
+            c.created_at,
+            t.tenant_name,
+            t.tenant_code,
+            na.username,
+            na.current_ip as ip_address,
+            na.mac_address,
+            na.is_online,
+            COALESCE(ap.profile_name, 'Standard') as package_name,
+            COALESCE(ap.price, 0) as package_price,
+            cs.expires_at as expiry_date
+            FROM customers c
+            LEFT JOIN tenants t ON t.tenant_id = c.tenant_id
+            LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
+            LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status != 'cancelled'
+            LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
+            {$whereSql}
+            ORDER BY c.customer_id DESC
+            LIMIT :limit OFFSET :offset";
+
+        $stmt = $db->prepare($query);
+        foreach ($params as $k => $v) {
+            $stmt->bindValue(':' . $k, $v);
+        }
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->execute();
+        $rows = $stmt->fetchAll();
+
+        $customers = array_map(function($r) {
+            return [
+                'customerId' => (string)$r['customer_id'],
+                'tenantId' => (string)$r['tenant_id'],
+                'tenantName' => $r['tenant_name'] ?? 'Unknown Tenant',
+                'tenantCode' => $r['tenant_code'] ?? 'N/A',
+                'customerCode' => $r['customer_code'],
+                'customerType' => $r['customer_type'] ?? 'individual',
+                'fullName' => $r['full_name'],
+                'phone' => $r['phone'],
+                'email' => $r['email'],
+                'status' => $r['status'],
+                'billingStatus' => $r['billing_status'],
+                'installationAddress' => $r['installation_address'],
+                'username' => $r['username'],
+                'ipAddress' => $r['ip_address'],
+                'macAddress' => $r['mac_address'],
+                'isOnline' => (bool)($r['is_online'] ?? false),
+                'packageName' => $r['package_name'],
+                'packagePrice' => (float)$r['package_price'],
+                'expiryDate' => $r['expiry_date'],
+                'createdAt' => $r['created_at'],
+            ];
+        }, $rows);
+
+        Response::json([
+            'success' => true,
+            'customers' => $customers,
+            'total' => $total,
+            'page' => $page,
+            'limit' => $limit,
+            'metrics' => [
+                'totalCustomers' => (int)($metrics['total_customers'] ?? 0),
+                'activeCustomers' => (int)($metrics['active_customers'] ?? 0),
+                'suspendedCustomers' => (int)($metrics['suspended_customers'] ?? 0),
+                'expiredCustomers' => (int)($metrics['expired_customers'] ?? 0),
+                'newThisMonth' => (int)($metrics['new_this_month'] ?? 0),
+            ]
+        ]);
+    }
 }
 

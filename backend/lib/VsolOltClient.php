@@ -462,10 +462,11 @@ class VsolOltClient {
             $diagPost['select'] = (string)$targetPon;
         }
 
-        // Give up to 45s for 8-port/16-port OLTs with 500+ ONUs
-        $diagHtml = $this->request('onuopmdiag.html', $diagPost, true, 45);
+        // Optimized timeout: 18s for POST, with rapid 8s fallback if needed
+        // Ensures VSOL OLT sync never blocks for 65+ seconds if optical laser diag is slow
+        $diagHtml = $this->request('onuopmdiag.html', $diagPost, true, 18);
         if (!$diagHtml) {
-            $diagHtml = $this->request('onuopmdiag.html', [], false, 20);
+            $diagHtml = $this->request('onuopmdiag.html', [], false, 8);
         }
 
         $diagData = [];
@@ -585,9 +586,9 @@ class VsolOltClient {
      */
     public function getMacTable(?int $targetPon = null): array {
         // Fast GET to macinfo.html (defaults to macport=0 / ALL ports across the entire OLT in < 400ms)
-        $html = $this->request('macinfo.html', [], false, 15);
+        $html = $this->request('macinfo.html', [], false, 8);
         if (!$html) {
-            $html = $this->request('macinfo.html', ['macport' => '0', 'who' => '100'], true, 15);
+            $html = $this->request('macinfo.html', ['macport' => '0', 'who' => '100'], true, 8);
         }
         if (!$html) {
             return [];

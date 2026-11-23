@@ -49,6 +49,15 @@ try {
     $isAllAccounts = ($requestedUserIdRaw === 'all');
     $isIspAdmin = HierarchySecurityService::isIspAdmin($authUser);
 
+    if (!$isIspAdmin) {
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'message' => 'Forbidden: Only administrators can view financial ledger statements.'
+        ]);
+        exit;
+    }
+
     $startDate = !empty($_GET['start_date']) ? trim($_GET['start_date']) : null;
     $endDate = !empty($_GET['end_date']) ? trim($_GET['end_date']) : null;
     $purpose = !empty($_GET['purpose']) ? trim($_GET['purpose']) : null;

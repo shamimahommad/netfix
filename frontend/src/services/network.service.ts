@@ -167,9 +167,32 @@ export const networkService = {
     return response.data;
   },
 
-  async syncOlt(deviceId: string): Promise<{ success: boolean; message: string; data: any }> {
-    const response = await api.post<{ success: boolean; message: string; data: any }>(
+  async syncOlt(deviceId: string): Promise<{ success: boolean; message: string; data: any; status?: string; isBackground?: boolean }> {
+    const response = await api.post<{ success: boolean; message: string; data: any; status?: string; isBackground?: boolean }>(
       `/network/devices/${deviceId}/sync-olt`,
+      {},
+      { timeout: 30000 }
+    );
+    return response.data;
+  },
+
+  async getSyncStatus(deviceId: string): Promise<{ success: boolean; data: any }> {
+    const response = await api.get<{ success: boolean; data: any }>(
+      `/network/devices/${deviceId}/sync-status`
+    );
+    return response.data;
+  },
+
+  async deleteOltOnu(deviceId: string, onuRecordIdOrMac: string): Promise<{ success: boolean; message: string }> {
+    const response = await api.delete<{ success: boolean; message: string }>(
+      `/network/devices/${deviceId}/onus/${onuRecordIdOrMac}`
+    );
+    return response.data;
+  },
+
+  async pruneDeletedOnus(deviceId: string): Promise<{ success: boolean; message: string; data: any }> {
+    const response = await api.post<{ success: boolean; message: string; data: any }>(
+      `/network/devices/${deviceId}/prune-onus`,
       {},
       { timeout: 120000 }
     );

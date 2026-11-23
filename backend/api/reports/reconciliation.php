@@ -52,6 +52,15 @@ try {
     $accessibleUserIds = [];
     $isIspAdmin = in_array(strtolower($userRole), ['isp_admin', 'admin', 'manager', 'saas_admin'], true);
 
+    if (!$isIspAdmin) {
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'message' => 'Forbidden: Only administrators can view financial reconciliation audit.'
+        ]);
+        exit;
+    }
+
     if ($isIspAdmin) {
         $stmtAll = $db->prepare("SELECT user_id FROM users WHERE tenant_id = :tid");
         $stmtAll->execute(['tid' => $tenantId]);

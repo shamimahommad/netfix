@@ -344,6 +344,25 @@ export default function CustomerTicketPage() {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    Problem Type (সমস্যার ধরন নির্বাচন করুন)
+                  </label>
+                  <select
+                    onChange={(e) => {
+                      if (e.target.value) setCreateTitle(e.target.value);
+                    }}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all mb-3"
+                  >
+                    <option value="">-- Choose issue preset --</option>
+                    <option value="🔴 Optical Red LOS Light / Fiber Cut (লাল বাতি জ্বলছে / তার কাটা)">🔴 Optical Red LOS Light / Fiber Cut (লাল বাতি জ্বলছে / তার কাটা)</option>
+                    <option value="🟡 Slow Speed & High Latency (ইন্টারনেট স্লো / বাফারিং)">🟡 Slow Speed & High Latency (ইন্টারনেট স্লো / বাফারিং)</option>
+                    <option value="🔵 Router WiFi & Configuration (ওয়াইফাই পাসওয়ার্ড / রাউটার সমস্যা)">🔵 Router WiFi & Configuration (ওয়াইফাই পাসওয়ার্ড / রাউটার সমস্যা)</option>
+                    <option value="🟢 Billing & Payment Verification (বিল বা পেমেন্ট যাচাই)">🟢 Billing & Payment Verification (বিল বা পেমেন্ট যাচাই)</option>
+                    <option value="⚪ Frequent Connection Drops (সংযোগ বারবার ডিসকানেক্ট হচ্ছে)">⚪ Frequent Connection Drops (সংযোগ বারবার ডিসকানেক্ট হচ্ছে)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                     Subject / Issue Title (সমস্যার শিরোনাম) <span className="text-rose-500">*</span>
                   </label>
                   <input

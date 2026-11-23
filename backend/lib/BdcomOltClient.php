@@ -524,7 +524,7 @@ class BdcomOltClient {
             $scanPorts = ($targetPon !== null) ? [$targetPon] : range(1, $totalPon);
 
             foreach ($scanPorts as $p) {
-                $optDiagOut = $this->execCommand("show epon optical-transceiver-diagnosis interface epon 0/{$p}", 15);
+                $optDiagOut = $this->execCommand("show epon optical-transceiver-diagnosis interface epon 0/{$p}", 5);
                 $diagLines = explode("\n", $optDiagOut);
                 foreach ($diagLines as $dl) {
                     // Matches: epon0/1:1    -23.0

@@ -48,6 +48,7 @@ require_once __DIR__ . '/controllers/BillingCronController.php';
 require_once __DIR__ . '/controllers/OltCronController.php';
 require_once __DIR__ . '/controllers/FtthController.php';
 require_once __DIR__ . '/controllers/BtrcReportController.php';
+require_once __DIR__ . '/controllers/TicketController.php';
 
 // Parse Request Path and Method
 $rawUri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
@@ -156,6 +157,12 @@ if ($method === 'POST' && $uri === '/saas/billing/extend-trial') {
 }
 if ($method === 'POST' && $uri === '/saas/billing/generate-invoice') {
     SaaSPlatformBillingController::generateInvoice();
+}
+if ($method === 'GET' && ($uri === '/saas/customers' || $uri === '/api/saas/customers')) {
+    CustomersController::saasIndex();
+}
+if ($method === 'GET' && ($uri === '/saas/network' || $uri === '/api/saas/network')) {
+    NetworkController::saasIndex();
 }
 if ($method === 'GET' && $uri === '/dashboard/stats') {
     DashboardController::stats();
@@ -266,6 +273,9 @@ if ($method === 'GET' && $uri === '/billing/accounts') {
 }
 if ($method === 'POST' && ($uri === '/billing/renew' || $uri === '/api/renew.php' || $uri === '/api/renew')) {
     BillingController::renew();
+}
+if ($method === 'POST' && ($uri === '/billing/bulk-renew' || $uri === '/api/billing/bulk-renew')) {
+    BillingController::bulkRenew();
 }
 if ($method === 'POST' && $uri === '/billing/change-package') {
     BillingController::changePackage();
@@ -580,8 +590,20 @@ if ($method === 'GET' && preg_match('#^/network/devices/([^/]+)/olt-status$#', $
 if ($method === 'GET' && preg_match('#^/network/devices/([^/]+)/onus$#', $uri, $m)) {
     NetworkController::oltOnus($m[1]);
 }
+if ($method === 'DELETE' && preg_match('#^/network/devices/([^/]+)/onus/([^/]+)$#', $uri, $m)) {
+    NetworkController::deleteOnu($m[2]);
+}
+if ($method === 'DELETE' && preg_match('#^/network/onus/([^/]+)$#', $uri, $m)) {
+    NetworkController::deleteOnu($m[1]);
+}
+if ($method === 'POST' && preg_match('#^/network/devices/([^/]+)/prune-onus$#', $uri, $m)) {
+    NetworkController::pruneStaleOnus($m[1]);
+}
 if ($method === 'POST' && preg_match('#^/network/devices/([^/]+)/sync-olt$#', $uri, $m)) {
     NetworkController::syncOlt($m[1]);
+}
+if ($method === 'GET' && preg_match('#^/network/devices/([^/]+)/sync-status$#', $uri, $m)) {
+    NetworkController::syncStatus($m[1]);
 }
 if ($method === 'POST' && preg_match('#^/network/devices/([^/]+)/action$#', $uri, $m)) {
     NetworkController::executeAction($m[1]);
@@ -878,6 +900,25 @@ if ($method === 'GET' && $uri === '/customer/tickets') {
 }
 if ($method === 'POST' && $uri === '/customer/tickets') {
     CustomerPortalController::createTicket();
+}
+
+// ---------------------------------------------------------------------
+// SUPPORT & TICKET MANAGEMENT (ISP ADMIN / STAFF)
+// ---------------------------------------------------------------------
+if ($method === 'GET' && ($uri === '/support/tickets' || $uri === '/api/support/tickets')) {
+    TicketController::index();
+}
+if ($method === 'POST' && ($uri === '/support/tickets' || $uri === '/api/support/tickets')) {
+    TicketController::create();
+}
+if (($method === 'POST' || $method === 'PUT') && preg_match('#^/support/tickets/([^/]+)/status$#', $uri, $m)) {
+    TicketController::updateStatus($m[1]);
+}
+if ($method === 'GET' && ($uri === '/support/numbers' || $uri === '/api/support/numbers')) {
+    TicketController::getSupportNumbers();
+}
+if (($method === 'POST' || $method === 'PUT') && ($uri === '/support/numbers' || $uri === '/api/support/numbers')) {
+    TicketController::saveSupportNumbers();
 }
 
 // ---------------------------------------------------------------------

@@ -22,6 +22,7 @@ class OltSyncService {
     public static function sync(PDO $db, array $oltDev, bool $force = false, ?int $intervalSeconds = null): array {
         @set_time_limit(300);
         @ini_set('max_execution_time', '300');
+        $syncStartTimestamp = microtime(true);
 
         $deviceId = (int)$oltDev['network_device_id'];
         $tenantId = (int)$oltDev['tenant_id'];
@@ -231,6 +232,7 @@ class OltSyncService {
         ]);
 
         // Upsert ONUs into olt_onus table with Router MAC and VLAN ID from Option 2
+        $syncStartTime = date('Y-m-d H:i:s');
         if (!empty($onus)) {
             // Pre-load customer accounts to resolve PPPoE username by Router MAC
             $custMap = [];
@@ -334,12 +336,45 @@ class OltSyncService {
             }
         }
 
+        // Auto-reconciliation: Purge any ONUs from the database that were removed/deleted on the physical OLT
+        if (is_array($onus)) {
+            try {
+                $pruneStmt = $db->prepare("DELETE FROM olt_onus 
+                    WHERE network_device_id = :did 
+                      AND (last_sync_at < :syncStart OR last_sync_at IS NULL)");
+                $pruneStmt->execute([
+                    'did' => $deviceId,
+                    'syncStart' => $syncStartTime,
+                ]);
+                $prunedCount = $pruneStmt->rowCount();
+                if ($prunedCount > 0) {
+                    error_log("[OLT RECONCILIATION] Auto-pruned {$prunedCount} deleted/deregistered ONU(s) from OLT ID {$deviceId}");
+                }
+            } catch (\Throwable $pe) {
+                error_log("[OLT RECONCILIATION] Prune stale ONUs warning: " . $pe->getMessage());
+            }
+        }
+
+        $totalDuration = round(microtime(true) - $syncStartTimestamp, 2);
+        error_log("[OLT SYNC] Device #{$deviceId} ({$vendor}) sync finished in {$totalDuration}s. ONUs: " . count($onus) . ", Pruned: " . ($prunedCount ?? 0));
+
+        // Update telemetry with execution duration
+        $telemetry['syncDurationSeconds'] = $totalDuration;
+        $telemetry['prunedOnus'] = $prunedCount ?? 0;
+        try {
+            $db->prepare("UPDATE network_devices SET telemetry = :telemetry WHERE network_device_id = :did")
+                ->execute(['telemetry' => json_encode($telemetry), 'did' => $deviceId]);
+        } catch (\Throwable $e) {}
+
         // Refresh device row and return local data
         $refStmt = $db->prepare("SELECT * FROM network_devices WHERE network_device_id = :did");
         $refStmt->execute(['did' => $deviceId]);
         $freshDev = $refStmt->fetch() ?: $oltDev;
 
-        return self::getLocalData($db, $tenantId, $deviceId, $freshDev);
+        $localData = self::getLocalData($db, $tenantId, $deviceId, $freshDev);
+        $localData['syncDurationSeconds'] = $totalDuration;
+        $localData['prunedOnus'] = $prunedCount ?? 0;
+        return $localData;
     }
 
     /**

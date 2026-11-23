@@ -115,6 +115,28 @@ export default function TenantLayout() {
         ],
       },
       {
+        label: 'Report',
+        icon: <ReportIcon />,
+        submenu: [
+          { label: getResellerWiseReportLabel(user?.role_code), path: '/dashboard/report/reseller-wise-customers' },
+          { label: 'Area Wise Customers', path: '/dashboard/report/area-wise-customers' },
+          ...(canSeeAdminTabs
+            ? [
+                { label: 'Server Wise Customers', path: '/dashboard/report/server-wise-customers' },
+                { label: 'BTRC Monthly Return', path: '/dashboard/report/btrc' },
+                { label: 'Financial Ledger', path: '/dashboard/report/ledger' },
+                { label: 'Reconciliation Audit', path: '/dashboard/report/reconciliation' },
+                { label: 'Online Transactions', path: '/dashboard/report/online-transactions' },
+                { label: 'Merchant Payments', path: '/dashboard/report/merchant-payments' },
+              ]
+            : []),
+          { label: 'Customer Payments', path: '/dashboard/report/customer-payments' },
+          { label: 'Recharge History', path: '/dashboard/report/recharge-history' },
+          ...(canViewInvoice ? [{ label: 'Invoices', path: '/dashboard/report/invoices' }] : []),
+          { label: 'Activity Logs', path: '/dashboard/activity-logs' },
+        ],
+      },
+      {
         label: 'My Packages',
         icon: <CardIcon />,
         path: '/dashboard/my-packages',
@@ -150,28 +172,6 @@ export default function TenantLayout() {
         label: 'Topup Balance',
         icon: <CardIcon />,
         path: '/dashboard/topup-balance',
-      },
-      {
-        label: 'Report',
-        icon: <ReportIcon />,
-        submenu: [
-          { label: getResellerWiseReportLabel(user?.role_code), path: '/dashboard/report/reseller-wise-customers' },
-          { label: 'Area Wise Customers', path: '/dashboard/report/area-wise-customers' },
-          ...(canSeeAdminTabs
-            ? [
-                { label: 'Server Wise Customers', path: '/dashboard/report/server-wise-customers' },
-                { label: 'BTRC Monthly Return', path: '/dashboard/report/btrc' },
-              ]
-            : []),
-          { label: 'Financial Ledger', path: '/dashboard/report/ledger' },
-          { label: 'Reconciliation Audit', path: '/dashboard/report/reconciliation' },
-          { label: 'Online Transactions', path: '/dashboard/report/online-transactions' },
-          { label: 'Merchant Payments', path: '/dashboard/report/merchant-payments' },
-          { label: 'Customer Payments', path: '/dashboard/report/customer-payments' },
-          { label: 'Recharge History', path: '/dashboard/report/recharge-history' },
-          ...(canViewInvoice ? [{ label: 'Invoices', path: '/dashboard/report/invoices' }] : []),
-          { label: 'Activity Logs', path: '/dashboard/activity-logs' },
-        ],
       },
     );
 
@@ -209,9 +209,8 @@ export default function TenantLayout() {
       icon: <SupportIcon />,
       submenu: [
         { label: 'Open Support Ticket', path: '/dashboard/support/ticket' },
+        { label: 'Assigned to You', path: '/dashboard/support/assigned' },
         { label: 'Support Numbers', path: '/dashboard/support/numbers' },
-        { label: 'Package Change', path: '/dashboard/support/package-change' },
-        { label: 'Activity Logs', path: '/dashboard/activity-logs' },
       ],
     });
 

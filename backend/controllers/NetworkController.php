@@ -1616,6 +1616,7 @@ class NetworkController {
             }
 
             $onus[] = [
+                'onuRecordId' => (string)$r['onu_record_id'],
                 'ponPort' => (int)$r['pon_port'],
                 'ponPortName' => $r['pon_port_name'],
                 'onuId' => $r['onu_id'],
@@ -1671,25 +1672,163 @@ class NetworkController {
             Response::error('OLT device not found', 404);
         }
 
-        @set_time_limit(300);
-        @ini_set('max_execution_time', '300');
-        require_once __DIR__ . '/../lib/OltSyncService.php';
-        $data = OltSyncService::sync($db, $device, true);
+        $realDeviceId = (int)$device['network_device_id'];
+        $cacheDir = __DIR__ . '/../cache';
+        if (!is_dir($cacheDir)) {
+            @mkdir($cacheDir, 0777, true);
+        }
+        $statusFile = $cacheDir . '/olt_sync_status_' . $realDeviceId . '.json';
 
-        if (!empty($data['syncError'])) {
+        // Check if an existing sync job is already actively running (within 180s)
+        if (file_exists($statusFile)) {
+            $existing = json_decode(@file_get_contents($statusFile), true) ?: [];
+            if (($existing['status'] ?? '') === 'running' && (time() - ($existing['startedAt'] ?? 0)) < 180) {
+                Response::json([
+                    'success' => true,
+                    'status' => 'running',
+                    'isBackground' => true,
+                    'message' => 'OLT synchronization is already actively running in the background.',
+                    'data' => $existing,
+                ]);
+                return;
+            }
+        }
+
+        // Write initial running state
+        $initialData = [
+            'deviceId' => $realDeviceId,
+            'status' => 'running',
+            'step' => 'Starting background hardware telemetry sync...',
+            'startedAt' => time(),
+            'updatedAt' => time(),
+            'durationSeconds' => 0,
+            'deviceName' => $device['device_name'],
+            'ip' => $device['management_ip'],
+        ];
+        @file_put_contents($statusFile, json_encode($initialData, JSON_PRETTY_PRINT));
+
+        // Spawn non-blocking background CLI worker process
+        // This ensures the main HTTP server thread is FREED in < 50ms and NEVER blocks other requests
+        $workerScript = str_replace('\\', '/', realpath(__DIR__ . '/../cron/sync_single_device.php'));
+        $phpBinary = PHP_BINARY ?: 'php';
+
+        if (PHP_OS_FAMILY === 'Windows') {
+            $cmd = 'cmd /c start /B "" ' . escapeshellarg($phpBinary) . ' ' . escapeshellarg($workerScript) . ' ' . $realDeviceId;
+            pclose(popen($cmd, 'r'));
+        } else {
+            $cmd = escapeshellcmd($phpBinary) . ' ' . escapeshellarg($workerScript) . ' ' . $realDeviceId . ' > /dev/null 2>&1 &';
+            exec($cmd);
+        }
+
+        Response::json([
+            'success' => true,
+            'status' => 'running',
+            'isBackground' => true,
+            'message' => 'OLT hardware synchronization started in background.',
+            'data' => $initialData,
+        ]);
+    }
+
+    /**
+     * GET /network/devices/{deviceId}/sync-status
+     * Ultra-fast (< 2ms) non-blocking check of background sync progress
+     */
+    public static function syncStatus(string $deviceId): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $db = Database::getConnection();
+
+        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+            $stmt = $db->prepare("SELECT network_device_id, last_sync_at, telemetry FROM network_devices WHERE (network_device_id = :id OR device_code = :code) AND tenant_id = :tid LIMIT 1");
+            $stmt->execute(['id' => $deviceId, 'code' => $deviceId, 'tid' => $tenantId]);
+            $device = $stmt->fetch();
+        } else {
+            $stmt = $db->prepare("SELECT network_device_id, last_sync_at, telemetry FROM network_devices WHERE network_device_id = :id OR device_code = :code LIMIT 1");
+            $stmt->execute(['id' => $deviceId, 'code' => $deviceId]);
+            $device = $stmt->fetch();
+        }
+
+        if (!$device) {
+            Response::error('OLT device not found', 404);
+        }
+
+        $realDeviceId = (int)$device['network_device_id'];
+        $statusFile = __DIR__ . '/../cache/olt_sync_status_' . $realDeviceId . '.json';
+
+        if (file_exists($statusFile)) {
+            $statusData = json_decode(@file_get_contents($statusFile), true) ?: [];
+            // If running for more than 240s, treat as timed out
+            if (($statusData['status'] ?? '') === 'running' && (time() - ($statusData['startedAt'] ?? 0)) > 240) {
+                $statusData['status'] = 'failed';
+                $statusData['error'] = 'Hardware sync timed out.';
+                @file_put_contents($statusFile, json_encode($statusData, JSON_PRETTY_PRINT));
+            }
             Response::json([
-                'success' => false,
-                'message' => $data['syncError'],
-                'data' => $data,
+                'success' => true,
+                'data' => $statusData,
             ]);
             return;
         }
 
         Response::json([
             'success' => true,
-            'message' => 'OLT telemetry and ONUs synchronized successfully with hardware',
-            'data' => $data,
+            'data' => [
+                'deviceId' => $realDeviceId,
+                'status' => 'idle',
+                'lastSyncAt' => $device['last_sync_at'],
+            ],
         ]);
+    }
+
+    /**
+     * DELETE /network/devices/{deviceId}/onus/{onuRecordId}
+     * or DELETE /network/onus/{onuRecordId}
+     * Remove an ONU from server database (e.g. when removed/deleted from physical OLT)
+     */
+    public static function deleteOnu(string $onuIdOrMac): void {
+        $user = AuthMiddleware::requireAuth();
+        self::requireAdminOrCompanyRole($user);
+        $db = Database::getConnection();
+
+        $stmt = null;
+        if (is_numeric($onuIdOrMac)) {
+            $stmt = $db->prepare("SELECT * FROM olt_onus WHERE onu_record_id = :id LIMIT 1");
+            $stmt->execute(['id' => (int)$onuIdOrMac]);
+        } else {
+            $stmt = $db->prepare("SELECT * FROM olt_onus WHERE mac_address = :mac LIMIT 1");
+            $stmt->execute(['mac' => $onuIdOrMac]);
+        }
+        $onu = $stmt ? $stmt->fetch() : null;
+
+        if (!$onu) {
+            Response::error('ONU record not found', 404);
+        }
+
+        $delStmt = $db->prepare("DELETE FROM olt_onus WHERE onu_record_id = :id");
+        $delStmt->execute(['id' => $onu['onu_record_id']]);
+
+        // Update device telemetry count
+        $devId = (int)$onu['network_device_id'];
+        $remainingTotal = (int)$db->query("SELECT COUNT(*) FROM olt_onus WHERE network_device_id = {$devId}")->fetchColumn();
+        $remainingOnline = (int)$db->query("SELECT COUNT(*) FROM olt_onus WHERE network_device_id = {$devId} AND status = 'online'")->fetchColumn();
+
+        Response::json([
+            'success' => true,
+            'message' => 'ONU record successfully removed from server',
+            'data' => [
+                'deleted_mac' => $onu['mac_address'],
+                'remaining_total' => $remainingTotal,
+                'remaining_online' => $remainingOnline,
+            ]
+        ]);
+    }
+
+    /**
+     * POST /network/devices/{deviceId}/prune-onus
+     * Force synchronization with physical OLT and prune any deleted ONUs
+     */
+    public static function pruneStaleOnus(string $deviceId): void {
+        self::syncOlt($deviceId);
     }
 
     /**
@@ -2870,6 +3009,120 @@ class NetworkController {
             $db->rollBack();
             Response::error('Failed to import MikroTik users: ' . $e->getMessage(), 500);
         }
+    }
+
+    /**
+     * SaaS Super Admin Network Infrastructure & Fleet Telemetry
+     */
+    public static function saasIndex(): void {
+        $user = AuthMiddleware::requireAuth();
+        if (($user['role'] ?? '') !== 'saas_admin' && ($user['user_type'] ?? '') !== 'saas') {
+            Response::error('Access restricted to SaaS Super Administrator', 403);
+            return;
+        }
+
+        $db = Database::getConnection();
+
+        $where = [];
+        $params = [];
+
+        if (!empty($_GET['tenant_id']) && $_GET['tenant_id'] !== 'all') {
+            $where[] = "nd.tenant_id = :tenant_id";
+            $params['tenant_id'] = (int)$_GET['tenant_id'];
+        }
+
+        if (!empty($_GET['type']) && $_GET['type'] !== 'all') {
+            $type = strtolower(trim($_GET['type']));
+            if ($type === 'router') {
+                $where[] = "(nd.device_type = 'router' OR nd.vendor = 'mikrotik')";
+            } elseif ($type === 'olt') {
+                $where[] = "nd.device_type = 'olt'";
+            } else {
+                $where[] = "nd.device_type = :dtype";
+                $params['dtype'] = $type;
+            }
+        }
+
+        if (!empty($_GET['status']) && $_GET['status'] !== 'all') {
+            $where[] = "nd.status = :status";
+            $params['status'] = trim($_GET['status']);
+        }
+
+        if (!empty($_GET['search'])) {
+            $s = '%' . trim($_GET['search']) . '%';
+            $where[] = "(nd.device_name LIKE :s OR nd.device_code LIKE :s OR nd.management_ip LIKE :s OR t.tenant_name LIKE :s OR t.tenant_code LIKE :s)";
+            $params['s'] = $s;
+        }
+
+        $whereSql = !empty($where) ? "WHERE " . implode(' AND ', $where) : "";
+
+        // Query devices
+        $stmt = $db->prepare("SELECT nd.*, t.tenant_name, t.tenant_code,
+                              (SELECT COUNT(*) FROM customer_services cs WHERE cs.network_device_id = nd.network_device_id AND cs.status != 'cancelled') as subscriber_count
+                              FROM network_devices nd 
+                              LEFT JOIN tenants t ON t.tenant_id = nd.tenant_id 
+                              {$whereSql} 
+                              ORDER BY nd.network_device_id DESC");
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+
+        $devices = array_map(function($r) {
+            $devId = (string)$r['network_device_id'];
+            return [
+                'networkDeviceId' => $devId,
+                'deviceId' => $devId,
+                'tenantId' => (string)$r['tenant_id'],
+                'tenantName' => $r['tenant_name'] ?? 'Unknown Tenant',
+                'tenantCode' => $r['tenant_code'] ?? 'N/A',
+                'deviceCode' => $r['device_code'],
+                'deviceName' => $r['device_name'],
+                'deviceType' => $r['device_type'],
+                'vendor' => $r['vendor'],
+                'status' => $r['status'],
+                'managementIp' => $r['management_ip'],
+                'managementPort' => (int)$r['management_port'],
+                'winboxPort' => $r['winbox_port'] ? (int)$r['winbox_port'] : null,
+                'webPort' => $r['web_port'] ? (int)$r['web_port'] : null,
+                'apiUsername' => $r['api_username'],
+                'isProduction' => (bool)$r['is_production'],
+                'customPingInterval' => (int)($r['custom_ping_interval'] ?? 10),
+                'snmpCommunity' => $r['snmp_community'] ?? 'public',
+                'snmpPort' => (int)($r['snmp_port'] ?? 161),
+                'ponType' => $r['pon_type'] ?? 'gpon',
+                'totalPonPorts' => (int)($r['total_pon_ports'] ?? 8),
+                'subscriberCount' => (int)($r['subscriber_count'] ?? 0),
+                'lastSyncAt' => $r['last_sync_at'],
+                'createdAt' => $r['created_at'],
+            ];
+        }, $rows);
+
+        // Platform-wide Metrics
+        $metricWhere = !empty($_GET['tenant_id']) && $_GET['tenant_id'] !== 'all' ? "WHERE tenant_id = " . (int)$_GET['tenant_id'] : "";
+        $mStmt = $db->query("SELECT 
+            COUNT(*) as total_devices,
+            SUM(CASE WHEN device_type = 'router' OR vendor = 'mikrotik' THEN 1 ELSE 0 END) as total_routers,
+            SUM(CASE WHEN device_type = 'olt' THEN 1 ELSE 0 END) as total_olts,
+            SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_devices,
+            SUM(CASE WHEN status = 'offline' OR status = 'inactive' THEN 1 ELSE 0 END) as offline_devices
+            FROM network_devices {$metricWhere}");
+        $m = $mStmt->fetch() ?: [];
+
+        // Server Diagnostics Telemetry
+        require_once __DIR__ . '/HealthController.php';
+        $diagnostics = HealthController::getDetailedDiagnostics();
+
+        Response::json([
+            'success' => true,
+            'devices' => $devices,
+            'metrics' => [
+                'totalDevices' => (int)($m['total_devices'] ?? 0),
+                'totalRouters' => (int)($m['total_routers'] ?? 0),
+                'totalOlts' => (int)($m['total_olts'] ?? 0),
+                'activeDevices' => (int)($m['active_devices'] ?? 0),
+                'offlineDevices' => (int)($m['offline_devices'] ?? 0),
+            ],
+            'diagnostics' => $diagnostics,
+        ]);
     }
 }
 

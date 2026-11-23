@@ -78,6 +78,31 @@ export const billingService = {
     return response.data;
   },
 
+  async bulkRenewServices(payload: {
+    customer_ids: string[];
+    billing_cycle?: 'Monthly' | 'Day-based';
+    no_of_month?: number;
+    selected_days?: number;
+    send_sms?: boolean;
+    renew_as_reseller?: boolean;
+  }): Promise<{
+    success: boolean;
+    total: number;
+    successful: number;
+    failed: number;
+    message: string;
+    results: Array<{
+      customerId: string;
+      success: boolean;
+      message: string;
+      expiryDate?: string;
+      amount?: number;
+    }>;
+  }> {
+    const response = await api.post('/billing/bulk-renew', payload);
+    return response.data;
+  },
+
   async changePackage(payload: {
     customer_id: string;
     plan_id: string;

@@ -501,6 +501,8 @@ export default function CustomerDashboardPage() {
               className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
                 d.billingStatus === 'Paid'
                   ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                  : d.billingStatus === 'Expired'
+                  ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
                   : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
               }`}
             >

@@ -143,6 +143,11 @@ class PaymentsController {
         $role = strtolower($user['role'] ?? '');
         $isLevel0 = (HierarchySecurityService::getHierarchyLevel($role) === 0 || $role === 'saas_admin');
 
+        if (!$isLevel0) {
+            Response::error('Access denied: Administrator permissions required', 403);
+            return;
+        }
+
         $page = max(1, (int)($_GET['page'] ?? 1));
         $limit = max(1, min(100, (int)($_GET['limit'] ?? 25)));
         $offset = ($page - 1) * $limit;

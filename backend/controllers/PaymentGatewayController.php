@@ -186,6 +186,9 @@ class PaymentGatewayController {
     public static function customerInitiatePayment(): void {
         $user = AuthMiddleware::requireAuth();
         $customerId = self::getCustomerIdFromUser($user);
+        if ($customerId <= 0) {
+            Response::error('Customer profile not found for this account', 404);
+        }
         $tenantId = (int)AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
@@ -209,7 +212,7 @@ class PaymentGatewayController {
             $customerId,
             $invoiceId,
             $callbackUrl,
-            ['flow' => 'customer_portal_pay', 'user_id' => $user['user_id']]
+            ['flow' => 'customer_portal_pay', 'user_id' => $user['user_id'] ?? $customerId]
         );
 
         if (!$res['success']) {
@@ -232,6 +235,9 @@ class PaymentGatewayController {
     public static function customerInitiateRenewPayment(): void {
         $user = AuthMiddleware::requireAuth();
         $customerId = self::getCustomerIdFromUser($user);
+        if ($customerId <= 0) {
+            Response::error('Customer profile not found for this account', 404);
+        }
         $tenantId = (int)AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
@@ -241,16 +247,17 @@ class PaymentGatewayController {
 
         $db = Database::getConnection();
 
-        // Calculate amount from plan price
-        $stmtPlan = $db->prepare("SELECT ap.price, c.billing_status 
+        // Calculate amount from plan price & validity
+        $stmtPlan = $db->prepare("SELECT ap.price, ap.validity_days, c.billing_status 
             FROM customers c
             LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id
             LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
-            WHERE c.customer_id = :cid LIMIT 1");
+            WHERE c.customer_id = :cid ORDER BY cs.customer_service_id DESC LIMIT 1");
         $stmtPlan->execute(['cid' => $customerId]);
         $plan = $stmtPlan->fetch();
 
         $planPrice = (float)($plan['price'] ?? 500);
+        $validityDays = max(1, (int)($plan['validity_days'] ?? 30));
         $amount = round($planPrice * $months);
 
         // Include due invoice balance if any
@@ -271,7 +278,12 @@ class PaymentGatewayController {
             $customerId,
             null,
             $callbackUrl,
-            ['flow' => 'customer_portal_renew', 'months' => $months, 'user_id' => $user['user_id']]
+            [
+                'flow' => 'customer_portal_renew',
+                'months' => $months,
+                'validity_days' => $validityDays,
+                'user_id' => $user['user_id'] ?? $customerId
+            ]
         );
 
         if (!$res['success']) {
@@ -333,7 +345,10 @@ class PaymentGatewayController {
 
         $gateway = $intent['gateway'];
         $amount = (float)$intent['amount'];
-        $cid = $intent['customer_id'] ? (int)$intent['customer_id'] : $customerId;
+        $cid = (!empty($intent['customer_id'])) ? (int)$intent['customer_id'] : $customerId;
+        if ((empty($cid) || $cid <= 0) && !empty($customerId)) {
+            $cid = $customerId;
+        }
         $invId = $intent['invoice_id'] ? (int)$intent['invoice_id'] : null;
 
         $settings = PaymentGatewayService::getGatewaySettings($db, $tenantId, $gateway);
@@ -781,17 +796,38 @@ class PaymentGatewayController {
     }
 
     private static function getCustomerIdFromUser(array $user): int {
-        $db = Database::getConnection();
-        $stmt = $db->prepare("SELECT customer_id FROM customers WHERE login_user_id = :uid LIMIT 1");
-        $stmt->execute(['uid' => $user['user_id']]);
-        $cid = $stmt->fetchColumn();
-        if ($cid) return (int)$cid;
+        // 1. Direct customer_id from AuthMiddleware token
+        if (!empty($user['customer_id'])) {
+            return (int)$user['customer_id'];
+        }
+        if (!empty($user['user_type']) && $user['user_type'] === 'customer' && !empty($user['user_id'])) {
+            return (int)$user['user_id'];
+        }
 
-        // Try customer_network_accounts
-        $stmt = $db->prepare("SELECT customer_id FROM customer_network_accounts WHERE username = :un LIMIT 1");
-        $stmt->execute(['un' => $user['username']]);
-        $cid = $stmt->fetchColumn();
-        return $cid ? (int)$cid : 3;
+        $db = Database::getConnection();
+
+        // 2. Direct match with customers table by customer_id or login_user_id
+        if (!empty($user['user_id'])) {
+            $stmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :cid OR login_user_id = :uid LIMIT 1");
+            $stmt->execute(['cid' => $user['user_id'], 'uid' => $user['user_id']]);
+            $cid = $stmt->fetchColumn();
+            if ($cid) return (int)$cid;
+        }
+
+        // 3. Match by username (customer_code or PPPoE username)
+        if (!empty($user['username'])) {
+            $stmt = $db->prepare("SELECT customer_id FROM customer_network_accounts WHERE username = :un LIMIT 1");
+            $stmt->execute(['un' => $user['username']]);
+            $cid = $stmt->fetchColumn();
+            if ($cid) return (int)$cid;
+
+            $stmtCust = $db->prepare("SELECT customer_id FROM customers WHERE customer_code = :cc LIMIT 1");
+            $stmtCust->execute(['cc' => $user['username']]);
+            $cid = $stmtCust->fetchColumn();
+            if ($cid) return (int)$cid;
+        }
+
+        return 0;
     }
 }
 

@@ -226,6 +226,243 @@ class BillingController {
         ]);
     }
 
+    /**
+     * Internal Core Renewal Engine
+     * Executes the DB state changes, invoice creation, wallet margin splits, and returns renewal payload.
+     */
+    public static function executeRenewalProcess(PDO $db, array $user, ?string $tenantId, array $data): array {
+        $customerId = $data['customer_id'] ?? null;
+        if (!$customerId) {
+            throw new InvalidArgumentException('Customer ID is required');
+        }
+
+        $billingCycle = $data['billing_cycle'] ?? (isset($data['selected_days']) && (int)$data['selected_days'] < 30 ? 'Day-based' : 'Monthly');
+        $isDayBased = ($billingCycle === 'Day-based' || (isset($data['selected_days']) && (int)$data['selected_days'] > 0 && empty($data['no_of_month'])));
+
+        $callerUserId = (int)($user['user_id'] ?? 0);
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+
+        // Permission check 1: General recharge permission
+        if (!HierarchySecurityService::hasPermission($callerUserId, 'can_recharge')) {
+            throw new DomainException('You do not have permission to recharge or renew customer services');
+        }
+
+        // Permission check 2: Partial renewal (Day-based)
+        if ($isDayBased && !HierarchySecurityService::hasPermission($callerUserId, 'can_partial_renew')) {
+            throw new DomainException('Partial (day-based) renewal is not permitted for your account. You can only renew full month(s).');
+        }
+
+        $months = max(1, (int)($data['billing_cycle_months'] ?? $data['no_of_month'] ?? 1));
+        $days = isset($data['selected_days']) && (int)$data['selected_days'] > 0 ? (int)$data['selected_days'] : ($months * 30);
+
+        // Fetch current customer service to get plan if not explicitly supplied
+        $stmtCs = $db->prepare("SELECT * FROM customer_services WHERE customer_id = :cid ORDER BY customer_service_id DESC LIMIT 1");
+        $stmtCs->execute(['cid' => $customerId]);
+        $currentService = $stmtCs->fetch();
+
+        $planId = $data['package_id'] ?? $data['plan_id'] ?? ($currentService['access_profile_id'] ?? 1);
+
+        // Fetch plan price
+        $stmtPkg = $db->prepare("SELECT * FROM access_profiles WHERE access_profile_id = :pid");
+        $stmtPkg->execute(['pid' => $planId]);
+        $package = $stmtPkg->fetch();
+        if (!$package) {
+            throw new DomainException("Package #{$planId} not found");
+        }
+
+        $callerLevel = HierarchySecurityService::getHierarchyLevel($user['role'] ?? '');
+        if ($callerLevel > 0) {
+            $allowedPkg = (int)$db->query("SELECT (
+                (SELECT COUNT(*) FROM tier_packages WHERE user_id = " . (int)$user['user_id'] . " AND package_id = " . (int)$planId . " AND is_allowed = 1) +
+                (SELECT COUNT(*) FROM reseller_plan_permission WHERE user_id = " . (int)$user['user_id'] . " AND access_profile_id = " . (int)$planId . " AND is_allowed = 1)
+            )")->fetchColumn();
+            if ($allowedPkg <= 0) {
+                throw new DomainException('Access Denied: The selected package has not been assigned to your account.');
+            }
+        }
+        $monthlyPrice = (float)($data['plan_price'] ?? $package['price'] ?? 500);
+
+        if ($isDayBased) {
+            if (isset($data['bill_amount']) && (float)$data['bill_amount'] > 0) {
+                $totalAmount = (float)$data['bill_amount'];
+            } else {
+                $calc = ($monthlyPrice / 30) * $days;
+                $totalAmount = (float)round($calc);
+                if ($totalAmount < 1) {
+                    $totalAmount = round($calc, 2);
+                }
+            }
+            $renewDaysParam = $days;
+            $renewMonthsParam = 1;
+            $renewNotes = "Day-based Renewal: {$days} Day(s) (Package: " . ($package['profile_name'] ?? 'Plan') . ")";
+            $renewMode = 'DAY_RENEW';
+            $bCycleDb = 'custom';
+        } else {
+            $totalAmount = round($monthlyPrice * $months, 2);
+            $renewDaysParam = null;
+            $renewMonthsParam = $months;
+            $renewNotes = "Monthly Renewal: {$months} Month(s) (Package: " . ($package['profile_name'] ?? 'Plan') . ")";
+            $renewMode = 'RENEW';
+            $bCycleDb = 'monthly';
+        }
+
+        // Calculate new expiry date
+        $baseTime = time();
+        if ($currentService && strtotime($currentService['expires_at']) > time()) {
+            $baseTime = strtotime($currentService['expires_at']);
+        }
+        $newExpireTimestamp = strtotime("+{$days} days", $baseTime);
+        $newExpireDate = date('Y-m-d H:i:s', $newExpireTimestamp);
+
+        // Update or insert customer service
+        if ($currentService) {
+            $stmtUpdate = $db->prepare("UPDATE customer_services SET expires_at = :exp, status = 'active', access_profile_id = :pid, billing_cycle = :bc WHERE customer_service_id = :sid");
+            $stmtUpdate->execute([
+                'exp' => $newExpireDate,
+                'pid' => $planId,
+                'bc' => $bCycleDb,
+                'sid' => $currentService['customer_service_id'],
+            ]);
+        }
+
+        // Update customer status
+        $stmtCust = $db->prepare("UPDATE customers SET status = 'active', billing_status = 'Paid' WHERE customer_id = :cid");
+        $stmtCust->execute(['cid' => $customerId]);
+
+        // Create paid invoice with pure numeric globally unique sequence starting from 1000
+        $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 4);
+
+        require_once __DIR__ . '/../lib/WalletLedgerService.php';
+
+        $callerRole = strtolower($user['role'] ?? '');
+        $renewAsReseller = !empty($data['renew_as_reseller']);
+
+        $targetChargedUserId = (int)$user['user_id'];
+        $targetResellerUser = null;
+
+        if ($callerLevel > 0) {
+            $targetChargedUserId = (int)$user['user_id'];
+            $targetResellerUser = $user;
+        } elseif ($renewAsReseller) {
+            $stmtCustOwner = $db->prepare("SELECT customer_id, owner_id, owner_role, owner_path, created_by FROM customers WHERE customer_id = :cid LIMIT 1");
+            $stmtCustOwner->execute(['cid' => $customerId]);
+            $cOwner = $stmtCustOwner->fetch(PDO::FETCH_ASSOC);
+
+            $resellerId = null;
+            $cOwnerId = !empty($cOwner['owner_id']) ? (int)$cOwner['owner_id'] : null;
+            if ($cOwnerId) {
+                $uCheck = HierarchySecurityService::getUser($cOwnerId);
+                if ($uCheck && in_array(strtolower($uCheck['role'] ?? ''), ['agent', 'dealer', 'sub_reseller', 'reseller'], true)) {
+                    $resellerId = $cOwnerId;
+                    $targetResellerUser = $uCheck;
+                }
+            }
+
+            if (!$resellerId && !empty($cOwner['owner_path'])) {
+                $pathIds = array_filter(array_map('intval', explode('/', trim($cOwner['owner_path'], '/'))));
+                foreach (array_reverse($pathIds) as $pUid) {
+                    $uCheck = HierarchySecurityService::getUser($pUid);
+                    if ($uCheck && in_array(strtolower($uCheck['role'] ?? ''), ['agent', 'dealer', 'sub_reseller', 'reseller'], true)) {
+                        $resellerId = $pUid;
+                        $targetResellerUser = $uCheck;
+                        break;
+                    }
+                }
+            }
+
+            if (!$resellerId && !empty($cOwner['created_by'])) {
+                $uCheck = HierarchySecurityService::getUser((int)$cOwner['created_by']);
+                if ($uCheck && in_array(strtolower($uCheck['role'] ?? ''), ['agent', 'dealer', 'sub_reseller', 'reseller'], true)) {
+                    $resellerId = (int)$cOwner['created_by'];
+                    $targetResellerUser = $uCheck;
+                }
+            }
+
+            if (!$resellerId || !$targetResellerUser) {
+                throw new DomainException('This customer does not belong to any reseller panel. Cannot renew as reseller.');
+            }
+
+            $targetChargedUserId = $resellerId;
+        }
+
+        $rechargeRef = null;
+        $actorDeduction = $totalAmount;
+        if ($targetResellerUser && HierarchySecurityService::getHierarchyLevel($targetResellerUser['role'] ?? '') > 0) {
+            $rechargeResult = WalletLedgerService::rechargeWithMarginCascade(
+                (int)$targetChargedUserId,
+                (int)$customerId,
+                (int)$planId,
+                $invNumber,
+                $tenantId ? (int)$tenantId : null,
+                $renewMonthsParam,
+                $renewDaysParam
+            );
+            $rechargeRef = $rechargeResult['recharge_ref'] ?? null;
+            $actorDeduction = (float)($rechargeResult['actor_deduction'] ?? $totalAmount);
+            $renewMode = 'RESELLER';
+        }
+
+        $finalNotes = $rechargeRef ? "{$renewNotes} • Ref: {$rechargeRef}" : $renewNotes;
+        if ($renewAsReseller && $targetResellerUser && $callerLevel === 0) {
+            $resellerLabel = !empty($targetResellerUser['username']) ? $targetResellerUser['username'] : "Reseller #{$targetChargedUserId}";
+            $finalNotes .= " (Renewed as Reseller: {$resellerLabel})";
+        }
+
+        $stmtInv = $db->prepare("INSERT INTO invoices 
+            (tenant_id, customer_id, customer_service_id, invoice_number, invoice_no, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, collected_by, charged_user_id, renew_mode, notes, previous_expire_date, created_by)
+            VALUES (:tid, :cid, :sid, :inv_num, :inv_no, CURDATE(), CURDATE(), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :coll, :chg, :renew_mode, :notes, :prev_exp, :uid)");
+        $stmtInv->execute([
+            'tid' => $tenantId,
+            'cid' => $customerId,
+            'sid' => $currentService['customer_service_id'] ?? null,
+            'inv_num' => $invNumber,
+            'inv_no' => $invNumber,
+            'sub' => $totalAmount,
+            'tot' => $totalAmount,
+            'paid' => $totalAmount,
+            'base' => $actorDeduction,
+            'sell' => $totalAmount,
+            'coll' => $user['user_id'],
+            'chg' => $targetChargedUserId,
+            'renew_mode' => $renewMode,
+            'notes' => $finalNotes,
+            'prev_exp' => $currentService['expires_at'] ?? null,
+            'uid' => $user['user_id'],
+        ]);
+
+        $trxRef = 'TRX-RENEW-' . strtoupper(bin2hex(random_bytes(4)));
+        $trxDescr = ($renewAsReseller && $targetResellerUser && $callerLevel === 0)
+            ? "Customer renewal debited from reseller {$targetResellerUser['username']} (#{$targetChargedUserId})"
+            : ($isDayBased ? "Customer subscription renewal ({$days} Days)" : "Customer subscription renewal ({$months} Months)");
+
+        $stmtTrx = $db->prepare("INSERT INTO transactions 
+            (tenant_id, customer_id, transaction_ref, transaction_type, amount, method, initiator_user_id, initiator_role, collector_user_id, description)
+            VALUES (:tid, :cid, :ref, 'RENEW_DEBIT', :amt, 'cash', :uid, :role, :coll, :descr)");
+        $stmtTrx->execute([
+            'tid' => $tenantId,
+            'cid' => $customerId,
+            'ref' => $trxRef,
+            'amt' => $actorDeduction,
+            'uid' => $targetChargedUserId,
+            'role' => $targetResellerUser ? ($targetResellerUser['role'] ?? 'reseller') : $user['role'],
+            'coll' => $user['user_id'],
+            'descr' => $trxDescr,
+        ]);
+
+        return [
+            'customerId' => $customerId,
+            'planId' => $planId,
+            'totalAmount' => $totalAmount,
+            'actorDeduction' => $actorDeduction,
+            'newExpireDate' => $newExpireDate,
+            'renewNotes' => $renewNotes,
+            'targetChargedUserId' => $targetChargedUserId,
+            'targetResellerUser' => $targetResellerUser,
+            'renewMode' => $renewMode,
+            'renewAsReseller' => $renewAsReseller,
+        ];
+    }
+
     public static function renew(): void {
         $user = AuthMiddleware::requireAuth();
         $tenantId = AuthMiddleware::getTenantId();
@@ -234,253 +471,21 @@ class BillingController {
         $customerId = $data['customer_id'] ?? null;
         if (!$customerId) {
             Response::error('Customer ID is required', 400);
+            return;
         }
 
         $db = Database::getConnection();
         $db->beginTransaction();
 
         try {
-            $billingCycle = $data['billing_cycle'] ?? (isset($data['selected_days']) && (int)$data['selected_days'] < 30 ? 'Day-based' : 'Monthly');
-            $isDayBased = ($billingCycle === 'Day-based' || (isset($data['selected_days']) && (int)$data['selected_days'] > 0 && empty($data['no_of_month'])));
-
-            $callerUserId = (int)($user['user_id'] ?? 0);
-            require_once __DIR__ . '/../lib/HierarchySecurityService.php';
-
-            // Permission check 1: General recharge permission
-            if (!HierarchySecurityService::hasPermission($callerUserId, 'can_recharge')) {
-                $db->rollBack();
-                Response::error('You do not have permission to recharge or renew customer services', 403);
-                return;
-            }
-
-            // Permission check 2: Partial renewal (Day-based)
-            if ($isDayBased && !HierarchySecurityService::hasPermission($callerUserId, 'can_partial_renew')) {
-                $db->rollBack();
-                Response::error('Partial (day-based) renewal is not permitted for your account. You can only renew full month(s).', 403);
-                return;
-            }
-
-            $months = max(1, (int)($data['billing_cycle_months'] ?? $data['no_of_month'] ?? 1));
-            $days = isset($data['selected_days']) && (int)$data['selected_days'] > 0 ? (int)$data['selected_days'] : ($months * 30);
-            $planId = $data['package_id'] ?? $data['plan_id'] ?? 1;
-
-            // Fetch plan price
-            $stmtPkg = $db->prepare("SELECT * FROM access_profiles WHERE access_profile_id = :pid");
-            $stmtPkg->execute(['pid' => $planId]);
-            $package = $stmtPkg->fetch();
-            if (!$package) {
-                $db->rollBack();
-                Response::error('Package not found', 404);
-                return;
-            }
-
-            require_once __DIR__ . '/../lib/HierarchySecurityService.php';
-            $callerLevel = HierarchySecurityService::getHierarchyLevel($user['role'] ?? '');
-            if ($callerLevel > 0) {
-                $allowedPkg = (int)$db->query("SELECT (
-                    (SELECT COUNT(*) FROM tier_packages WHERE user_id = " . (int)$user['user_id'] . " AND package_id = " . (int)$planId . " AND is_allowed = 1) +
-                    (SELECT COUNT(*) FROM reseller_plan_permission WHERE user_id = " . (int)$user['user_id'] . " AND access_profile_id = " . (int)$planId . " AND is_allowed = 1)
-                )")->fetchColumn();
-                if ($allowedPkg <= 0) {
-                    $db->rollBack();
-                    Response::error('Access Denied: The selected package has not been assigned to your account.', 403);
-                    return;
-                }
-            }
-            $monthlyPrice = (float)($data['plan_price'] ?? $package['price'] ?? 500);
-
-            if ($isDayBased) {
-                // Pro-rated day-based price: respect explicit bill_amount from frontend, or calculate (monthlyPrice / 30) * days
-                if (isset($data['bill_amount']) && (float)$data['bill_amount'] > 0) {
-                    $totalAmount = (float)$data['bill_amount'];
-                } else {
-                    $calc = ($monthlyPrice / 30) * $days;
-                    $totalAmount = (float)round($calc);
-                    if ($totalAmount < 1) {
-                        $totalAmount = round($calc, 2);
-                    }
-                }
-                $renewDaysParam = $days;
-                $renewMonthsParam = 1;
-                $renewNotes = "Day-based Renewal: {$days} Day(s) (Package: " . ($package['profile_name'] ?? 'Plan') . ")";
-                $renewMode = 'DAY_RENEW';
-                $bCycleDb = 'custom';
-            } else {
-                $totalAmount = round($monthlyPrice * $months, 2);
-                $renewDaysParam = null;
-                $renewMonthsParam = $months;
-                $renewNotes = "Monthly Renewal: {$months} Month(s) (Package: " . ($package['profile_name'] ?? 'Plan') . ")";
-                $renewMode = 'RENEW';
-                $bCycleDb = 'monthly';
-            }
-
-            // Calculate new expiry date
-            $stmtCs = $db->prepare("SELECT * FROM customer_services WHERE customer_id = :cid ORDER BY customer_service_id DESC LIMIT 1");
-            $stmtCs->execute(['cid' => $customerId]);
-            $currentService = $stmtCs->fetch();
-
-            $baseTime = time();
-            if ($currentService && strtotime($currentService['expires_at']) > time()) {
-                $baseTime = strtotime($currentService['expires_at']);
-            }
-            $newExpireTimestamp = strtotime("+{$days} days", $baseTime);
-            $newExpireDate = date('Y-m-d H:i:s', $newExpireTimestamp);
-
-            // Update or insert customer service
-            if ($currentService) {
-                $stmtUpdate = $db->prepare("UPDATE customer_services SET expires_at = :exp, status = 'active', access_profile_id = :pid, billing_cycle = :bc WHERE customer_service_id = :sid");
-                $stmtUpdate->execute([
-                    'exp' => $newExpireDate,
-                    'pid' => $planId,
-                    'bc' => $bCycleDb,
-                    'sid' => $currentService['customer_service_id'],
-                ]);
-            }
-
-            // Update customer status
-            $stmtCust = $db->prepare("UPDATE customers SET status = 'active', billing_status = 'Paid' WHERE customer_id = :cid");
-            $stmtCust->execute(['cid' => $customerId]);
-
-            // Create paid invoice with pure numeric globally unique sequence starting from 1000
-            $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 4);
-
-            // Strict Pre-Flight Balance & Credit Limit Enforcement for Reseller, Sub-Reseller, Dealer, Agent
-            require_once __DIR__ . '/../lib/HierarchySecurityService.php';
-            require_once __DIR__ . '/../lib/WalletLedgerService.php';
-
-            $callerRole = strtolower($user['role'] ?? '');
-            $callerLevel = HierarchySecurityService::getHierarchyLevel($callerRole);
-            $renewAsReseller = !empty($data['renew_as_reseller']);
-
-            $targetChargedUserId = (int)$user['user_id'];
-            $targetResellerUser = null;
-
-            if ($callerLevel > 0) {
-                // Initiator is directly a reseller/agent/dealer: charge their own wallet
-                $targetChargedUserId = (int)$user['user_id'];
-                $targetResellerUser = $user;
-            } elseif ($renewAsReseller) {
-                // Admin checked "Renew as Reseller": identify the customer's owner/reseller
-                $stmtCustOwner = $db->prepare("SELECT customer_id, owner_id, owner_role, owner_path, created_by FROM customers WHERE customer_id = :cid LIMIT 1");
-                $stmtCustOwner->execute(['cid' => $customerId]);
-                $cOwner = $stmtCustOwner->fetch(PDO::FETCH_ASSOC);
-
-                $resellerId = null;
-
-                // 1. Direct owner_id
-                $cOwnerId = !empty($cOwner['owner_id']) ? (int)$cOwner['owner_id'] : null;
-                if ($cOwnerId) {
-                    $uCheck = HierarchySecurityService::getUser($cOwnerId);
-                    if ($uCheck && in_array(strtolower($uCheck['role'] ?? ''), ['agent', 'dealer', 'sub_reseller', 'reseller'], true)) {
-                        $resellerId = $cOwnerId;
-                        $targetResellerUser = $uCheck;
-                    }
-                }
-
-                // 2. Leaf/deepest reseller in owner_path
-                if (!$resellerId && !empty($cOwner['owner_path'])) {
-                    $pathIds = array_filter(array_map('intval', explode('/', trim($cOwner['owner_path'], '/'))));
-                    foreach (array_reverse($pathIds) as $pUid) {
-                        $uCheck = HierarchySecurityService::getUser($pUid);
-                        if ($uCheck && in_array(strtolower($uCheck['role'] ?? ''), ['agent', 'dealer', 'sub_reseller', 'reseller'], true)) {
-                            $resellerId = $pUid;
-                            $targetResellerUser = $uCheck;
-                            break;
-                        }
-                    }
-                }
-
-                // 3. Fallback to created_by
-                if (!$resellerId && !empty($cOwner['created_by'])) {
-                    $uCheck = HierarchySecurityService::getUser((int)$cOwner['created_by']);
-                    if ($uCheck && in_array(strtolower($uCheck['role'] ?? ''), ['agent', 'dealer', 'sub_reseller', 'reseller'], true)) {
-                        $resellerId = (int)$cOwner['created_by'];
-                        $targetResellerUser = $uCheck;
-                    }
-                }
-
-                if (!$resellerId || !$targetResellerUser) {
-                    $db->rollBack();
-                    Response::error('This customer does not belong to any reseller panel. Cannot renew as reseller.', 400);
-                    return;
-                }
-
-                $targetChargedUserId = $resellerId;
-            }
-
-            $rechargeRef = null;
-            $actorDeduction = $totalAmount;
-            if ($targetResellerUser && HierarchySecurityService::getHierarchyLevel($targetResellerUser['role'] ?? '') > 0) {
-                // Deduct cost from the reseller's wallet and cascade margin to upstream
-                $rechargeResult = WalletLedgerService::rechargeWithMarginCascade(
-                    (int)$targetChargedUserId,
-                    (int)$customerId,
-                    (int)$planId,
-                    $invNumber,
-                    $tenantId ? (int)$tenantId : null,
-                    $renewMonthsParam,
-                    $renewDaysParam
-                );
-                $rechargeRef = $rechargeResult['recharge_ref'] ?? null;
-                $actorDeduction = (float)($rechargeResult['actor_deduction'] ?? $totalAmount);
-                $renewMode = 'RESELLER';
-            }
-
-            $finalNotes = $rechargeRef ? "{$renewNotes} • Ref: {$rechargeRef}" : $renewNotes;
-            if ($renewAsReseller && $targetResellerUser && $callerLevel === 0) {
-                $resellerLabel = !empty($targetResellerUser['username']) ? $targetResellerUser['username'] : "Reseller #{$targetChargedUserId}";
-                $finalNotes .= " (Renewed as Reseller: {$resellerLabel})";
-            }
-
-            $stmtInv = $db->prepare("INSERT INTO invoices 
-                (tenant_id, customer_id, customer_service_id, invoice_number, invoice_no, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, collected_by, charged_user_id, renew_mode, notes, previous_expire_date, created_by)
-                VALUES (:tid, :cid, :sid, :inv_num, :inv_no, CURDATE(), CURDATE(), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :coll, :chg, :renew_mode, :notes, :prev_exp, :uid)");
-            $stmtInv->execute([
-                'tid' => $tenantId,
-                'cid' => $customerId,
-                'sid' => $currentService['customer_service_id'] ?? null,
-                'inv_num' => $invNumber,
-                'inv_no' => $invNumber,
-                'sub' => $totalAmount,
-                'tot' => $totalAmount,
-                'paid' => $totalAmount,
-                'base' => $actorDeduction,
-                'sell' => $totalAmount,
-                'coll' => $user['user_id'],
-                'chg' => $targetChargedUserId,
-                'renew_mode' => $renewMode,
-                'notes' => $finalNotes,
-                'prev_exp' => $currentService['expires_at'] ?? null,
-                'uid' => $user['user_id'],
-            ]);
-
-            // Record transaction matching actual initiator wallet deduction
-            $trxRef = 'TRX-RENEW-' . strtoupper(bin2hex(random_bytes(4)));
-            $trxDescr = ($renewAsReseller && $targetResellerUser && $callerLevel === 0)
-                ? "Customer renewal debited from reseller {$targetResellerUser['username']} (#{$targetChargedUserId})"
-                : ($isDayBased ? "Customer subscription renewal ({$days} Days)" : "Customer subscription renewal ({$months} Months)");
-
-            $stmtTrx = $db->prepare("INSERT INTO transactions 
-                (tenant_id, customer_id, transaction_ref, transaction_type, amount, method, initiator_user_id, initiator_role, collector_user_id, description)
-                VALUES (:tid, :cid, :ref, 'RENEW_DEBIT', :amt, 'cash', :uid, :role, :coll, :descr)");
-            $stmtTrx->execute([
-                'tid' => $tenantId,
-                'cid' => $customerId,
-                'ref' => $trxRef,
-                'amt' => $actorDeduction,
-                'uid' => $targetChargedUserId,
-                'role' => $targetResellerUser ? ($targetResellerUser['role'] ?? 'reseller') : $user['role'],
-                'coll' => $user['user_id'],
-                'descr' => $trxDescr,
-            ]);
-
+            $res = self::executeRenewalProcess($db, $user, $tenantId, $data);
             $db->commit();
 
             // Real-time synchronization with MikroTik Router
             $mtMsg = '';
             try {
                 require_once __DIR__ . '/../lib/MikrotikSyncService.php';
-                $mtRes = MikrotikSyncService::renewCustomer($db, $customerId, (int)$planId);
+                $mtRes = MikrotikSyncService::renewCustomer($db, $customerId, (int)$res['planId']);
                 if (!empty($mtRes['message'])) {
                     $mtMsg = ' • ' . $mtRes['message'];
                 }
@@ -490,9 +495,9 @@ class BillingController {
 
             try {
                 require_once __DIR__ . '/../lib/ActivityLogger.php';
-                $logDescr = "Renewed customer subscription #{$customerId}: {$renewNotes} (৳{$totalAmount})";
-                if ($renewAsReseller && $targetResellerUser && $callerLevel === 0) {
-                    $logDescr .= " [Debited from Reseller #{$targetChargedUserId} ({$targetResellerUser['username']})]";
+                $logDescr = "Renewed customer subscription #{$customerId}: {$res['renewNotes']} (৳{$res['totalAmount']})";
+                if ($res['renewAsReseller'] && $res['targetResellerUser']) {
+                    $logDescr .= " [Debited from Reseller #{$res['targetChargedUserId']} ({$res['targetResellerUser']['username']})]";
                 }
                 ActivityLogger::log([
                     'tenant_id' => $tenantId,
@@ -505,32 +510,32 @@ class BillingController {
                     'description' => $logDescr,
                     'metadata' => [
                         'customer_id' => $customerId,
-                        'new_expire_date' => $newExpireDate,
-                        'amount' => $totalAmount,
-                        'charged_user_id' => $targetChargedUserId,
-                        'deducted_amount' => $actorDeduction,
-                        'mode' => $renewMode,
+                        'new_expire_date' => $res['newExpireDate'],
+                        'amount' => $res['totalAmount'],
+                        'charged_user_id' => $res['targetChargedUserId'],
+                        'deducted_amount' => $res['actorDeduction'],
+                        'mode' => $res['renewMode'],
                     ],
                 ]);
             } catch (\Throwable $actErr) {}
 
             $successMsg = 'Service renewed and secret synchronized';
-            if ($renewAsReseller && $targetResellerUser && $callerLevel === 0) {
-                $successMsg = "Service renewed successfully. Debited ৳" . number_format($actorDeduction, 2) . " from Reseller '{$targetResellerUser['username']}' account.";
+            if ($res['renewAsReseller'] && $res['targetResellerUser']) {
+                $successMsg = "Service renewed successfully. Debited ৳" . number_format($res['actorDeduction'], 2) . " from Reseller '{$res['targetResellerUser']['username']}' account.";
             }
             $successMsg .= $mtMsg;
 
             Response::json([
                 'success' => true,
                 'message' => $successMsg,
-                'expire_at' => $newExpireDate,
+                'expire_at' => $res['newExpireDate'],
                 'data' => [
-                    'new_expire_date' => $newExpireDate,
-                    'expire_at' => $newExpireDate,
-                    'bill_amount' => $totalAmount,
-                    'charged_user_id' => $targetChargedUserId,
-                    'charged_username' => $targetResellerUser['username'] ?? null,
-                    'deducted_amount' => $actorDeduction,
+                    'new_expire_date' => $res['newExpireDate'],
+                    'expire_at' => $res['newExpireDate'],
+                    'bill_amount' => $res['totalAmount'],
+                    'charged_user_id' => $res['targetChargedUserId'],
+                    'charged_username' => $res['targetResellerUser']['username'] ?? null,
+                    'deducted_amount' => $res['actorDeduction'],
                 ],
             ]);
         } catch (DomainException $de) {
@@ -544,6 +549,97 @@ class BillingController {
             }
             Response::error('Failed to renew service: ' . $e->getMessage(), 500);
         }
+    }
+
+    /**
+     * Batch / Bulk Renewal for multiple customers in one transaction-safe batch
+     */
+    public static function bulkRenew(): void {
+        $user = AuthMiddleware::requireAuth();
+        $tenantId = AuthMiddleware::getTenantId();
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+
+        $customerIds = $data['customer_ids'] ?? [];
+        if (!is_array($customerIds) || empty($customerIds)) {
+            Response::error('customer_ids must be a non-empty array', 400);
+            return;
+        }
+
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        $callerUserId = (int)($user['user_id'] ?? 0);
+        if (!HierarchySecurityService::hasPermission($callerUserId, 'can_recharge')) {
+            Response::error('You do not have permission to recharge or renew customer services', 403);
+            return;
+        }
+
+        $db = Database::getConnection();
+        $results = [];
+        $successCount = 0;
+        $failCount = 0;
+
+        foreach ($customerIds as $cId) {
+            $db->beginTransaction();
+            try {
+                $singleData = $data;
+                $singleData['customer_id'] = $cId;
+                $res = self::executeRenewalProcess($db, $user, $tenantId, $singleData);
+                $db->commit();
+
+                // MikroTik sync
+                try {
+                    require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+                    MikrotikSyncService::renewCustomer($db, $cId, (int)$res['planId']);
+                } catch (\Throwable $mtErr) {}
+
+                // Activity Log
+                try {
+                    require_once __DIR__ . '/../lib/ActivityLogger.php';
+                    ActivityLogger::log([
+                        'tenant_id' => $tenantId,
+                        'user_id' => $user['user_id'] ?? null,
+                        'log_type' => 'client_task',
+                        'action' => 'client_renew',
+                        'module' => 'billing',
+                        'target_id' => (string)$cId,
+                        'target_type' => 'customer',
+                        'description' => "Bulk renewed customer subscription #{$cId} (৳{$res['totalAmount']})",
+                        'metadata' => [
+                            'customer_id' => $cId,
+                            'new_expire_date' => $res['newExpireDate'],
+                            'amount' => $res['totalAmount'],
+                        ],
+                    ]);
+                } catch (\Throwable $actErr) {}
+
+                $results[] = [
+                    'customerId' => $cId,
+                    'success' => true,
+                    'message' => 'Renewed successfully',
+                    'expiryDate' => $res['newExpireDate'],
+                    'amount' => $res['totalAmount'],
+                ];
+                $successCount++;
+            } catch (\Throwable $e) {
+                if ($db->inTransaction()) {
+                    $db->rollBack();
+                }
+                $results[] = [
+                    'customerId' => $cId,
+                    'success' => false,
+                    'message' => $e->getMessage(),
+                ];
+                $failCount++;
+            }
+        }
+
+        Response::json([
+            'success' => $successCount > 0,
+            'total' => count($customerIds),
+            'successful' => $successCount,
+            'failed' => $failCount,
+            'message' => "Successfully renewed {$successCount} customer(s)" . ($failCount > 0 ? " ({$failCount} failed)" : ""),
+            'results' => $results,
+        ]);
     }
 
     public static function changePackage(): void {

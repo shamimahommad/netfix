@@ -912,19 +912,44 @@ class PaymentGatewayService {
                     $stmtInv->execute(['cid' => $customerId, 'tid' => $tenantId]);
                 }
 
-                // Extend customer service by 30 days
-                $stmtCs = $db->prepare("UPDATE customer_services 
-                    SET expires_at = DATE_ADD(GREATEST(COALESCE(expires_at, NOW()), NOW()), INTERVAL 30 DAY),
-                        status = 'active',
-                        updated_at = NOW()
-                    WHERE customer_id = :cid AND tenant_id = :tid");
-                $stmtCs->execute(['cid' => $customerId, 'tid' => $tenantId]);
+                // Resolve extension days from intent metadata
+                $flowMonths = max(1, (int)($intentMeta['months'] ?? 1));
+                $flowValidityDays = max(1, (int)($intentMeta['validity_days'] ?? 30));
+                $extensionDays = $flowValidityDays * $flowMonths;
+
+                // Check existing service
+                $stmtCheckCs = $db->prepare("SELECT customer_service_id, access_profile_id FROM customer_services WHERE customer_id = :cid ORDER BY customer_service_id DESC LIMIT 1");
+                $stmtCheckCs->execute(['cid' => $customerId]);
+                $existingCs = $stmtCheckCs->fetch();
+
+                if ($existingCs) {
+                    $stmtCs = $db->prepare("UPDATE customer_services 
+                        SET expires_at = DATE_ADD(GREATEST(COALESCE(expires_at, NOW()), NOW()), INTERVAL :days DAY),
+                            status = 'active',
+                            updated_at = NOW()
+                        WHERE customer_id = :cid");
+                    $stmtCs->execute(['days' => $extensionDays, 'cid' => $customerId]);
+                } else {
+                    $stmtDefPlan = $db->prepare("SELECT access_profile_id FROM access_profiles WHERE tenant_id = :tid ORDER BY price ASC LIMIT 1");
+                    $stmtDefPlan->execute(['tid' => $tenantId]);
+                    $defPlanId = $stmtDefPlan->fetchColumn() ?: 1;
+
+                    $stmtInsCs = $db->prepare("INSERT INTO customer_services 
+                        (tenant_id, customer_id, access_profile_id, network_device_id, protocol, billing_cycle, status, starts_at, expires_at)
+                        VALUES (:tid, :cid, :pid, 1, 'pppoe', 'monthly', 'active', NOW(), DATE_ADD(NOW(), INTERVAL :days DAY))");
+                    $stmtInsCs->execute([
+                        'tid' => $tenantId,
+                        'cid' => $customerId,
+                        'pid' => $defPlanId,
+                        'days' => $extensionDays,
+                    ]);
+                }
 
                 // Update customer table
                 $stmtCust = $db->prepare("UPDATE customers 
                     SET status = 'active', billing_status = 'Paid', updated_at = NOW() 
-                    WHERE customer_id = :cid AND tenant_id = :tid");
-                $stmtCust->execute(['cid' => $customerId, 'tid' => $tenantId]);
+                    WHERE customer_id = :cid");
+                $stmtCust->execute(['cid' => $customerId]);
 
                 // Instant MikroTik unblock & profile restoration
                 try {

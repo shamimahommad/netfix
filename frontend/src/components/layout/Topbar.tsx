@@ -50,6 +50,8 @@ const getPageTitle = (pathname: string): string => {
     'dashboard/map': 'Network Coverage Map',
     'dashboard/map/ftth': 'FTTH Splitter & Box Network Map',
     'dashboard/support/ticket': 'Support Tickets',
+    'dashboard/support/assigned': 'Tickets Assigned to You',
+    'dashboard/support/numbers': 'Support Numbers',
     'dashboard/support': 'Customer Support',
     'dashboard/network/mikrotik': 'MikroTik Routers',
     'dashboard/network/package-copy': 'Package Synchronizer',

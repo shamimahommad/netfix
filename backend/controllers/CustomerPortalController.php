@@ -252,6 +252,30 @@ class CustomerPortalController {
         $stmtDue->execute(['cid' => $customerId]);
         $due = (float)$stmtDue->fetchColumn();
 
+        // 10. Dynamic billing status resolution & Auto-healing
+        $nowTs = time();
+        $expiresAtTs = !empty($cs['expires_at']) ? strtotime($cs['expires_at']) : null;
+        $isPastExpiry = ($expiresAtTs !== null && $expiresAtTs < $nowTs);
+        $isFutureExpiry = ($expiresAtTs !== null && $expiresAtTs >= $nowTs);
+
+        $dbBillingStatus = $customer['billing_status'] ?: 'Paid';
+        $effectiveBillingStatus = $dbBillingStatus;
+
+        if ($isPastExpiry) {
+            $effectiveBillingStatus = 'Expired';
+            if ($dbBillingStatus !== 'Expired' && $dbBillingStatus !== 'Left' && $customer['status'] !== 'suspended') {
+                $db->prepare("UPDATE customers SET billing_status = 'Expired', updated_at = NOW() WHERE customer_id = :cid")
+                   ->execute(['cid' => $customerId]);
+            }
+        } elseif ($isFutureExpiry) {
+            // Customer has renewed with valid future validity
+            if ($dbBillingStatus === 'Expired') {
+                $effectiveBillingStatus = ($due > 0) ? 'Due' : 'Paid';
+                $db->prepare("UPDATE customers SET billing_status = :bs, status = 'active', updated_at = NOW() WHERE customer_id = :cid")
+                   ->execute(['bs' => $effectiveBillingStatus, 'cid' => $customerId]);
+            }
+        }
+
         Response::json([
             'success' => true,
             'data' => [
@@ -268,7 +292,7 @@ class CustomerPortalController {
                 ],
                 'packageName' => $cs['profile_name'] ?? 'Broadband Standard',
                 'expiryDate' => $cs['expires_at'] ?? null,
-                'billingStatus' => $customer['billing_status'] ?: 'Paid',
+                'billingStatus' => $effectiveBillingStatus,
                 'balance' => $due,
                 'planPrice' => (float)($cs['price'] ?? 500),
                 'billingSummary' => ['totalDue' => $due],
@@ -717,15 +741,45 @@ class CustomerPortalController {
         }
 
         $validityDays = ((int)($plan['validity_days'] ?? 30)) * $months;
-        $newExpiry = date('Y-m-d H:i:s', strtotime("+{$validityDays} days"));
 
-        // Update customer service
-        $upCs = $db->prepare("UPDATE customer_services SET expires_at = :exp, status = 'active' WHERE customer_id = :cid");
-        $upCs->execute(['exp' => $newExpiry, 'cid' => $customerId]);
+        // Fetch existing customer service to calculate proper forward extension
+        $stmtCs = $db->prepare("SELECT customer_service_id, expires_at, access_profile_id FROM customer_services WHERE customer_id = :cid ORDER BY customer_service_id DESC LIMIT 1");
+        $stmtCs->execute(['cid' => $customerId]);
+        $existingCs = $stmtCs->fetch();
+
+        $baseTime = (!empty($existingCs['expires_at']) && strtotime($existingCs['expires_at']) > time()) 
+            ? strtotime($existingCs['expires_at']) 
+            : time();
+        $newExpiry = date('Y-m-d H:i:s', strtotime("+{$validityDays} days", $baseTime));
+
+        if ($existingCs) {
+            $upCs = $db->prepare("UPDATE customer_services SET expires_at = :exp, status = 'active', updated_at = NOW() WHERE customer_id = :cid");
+            $upCs->execute(['exp' => $newExpiry, 'cid' => $customerId]);
+        } else {
+            $insCs = $db->prepare("INSERT INTO customer_services 
+                (tenant_id, customer_id, access_profile_id, network_device_id, protocol, billing_cycle, status, starts_at, expires_at)
+                VALUES (:tid, :cid, :pid, 1, 'pppoe', 'monthly', 'active', NOW(), :exp)");
+            $insCs->execute([
+                'tid' => $tenantId,
+                'cid' => $customerId,
+                'pid' => $plan['access_profile_id'] ?? 1,
+                'exp' => $newExpiry,
+            ]);
+        }
 
         // Update customer billing status
-        $upCust = $db->prepare("UPDATE customers SET billing_status = 'Paid', status = 'active' WHERE customer_id = :cid");
+        $upCust = $db->prepare("UPDATE customers SET billing_status = 'Paid', status = 'active', updated_at = NOW() WHERE customer_id = :cid");
         $upCust->execute(['cid' => $customerId]);
+
+        // Settle pending/overdue invoices
+        $db->prepare("UPDATE invoices SET paid_amount = total_amount, balance_due = 0, status = 'paid', updated_at = NOW() WHERE customer_id = :cid AND status IN ('pending', 'partially_paid', 'overdue')")
+           ->execute(['cid' => $customerId]);
+
+        // Synchronize and unblock on MikroTik
+        try {
+            require_once __DIR__ . '/../lib/MikrotikSyncService.php';
+            MikrotikSyncService::renewCustomer($db, (int)$customerId);
+        } catch (\Throwable $ignored) {}
 
         Response::json([
             'success' => true,
@@ -971,15 +1025,35 @@ class CustomerPortalController {
         }
 
         $db = Database::getConnection();
+
+        // 1. Resolve Customer ownership & auto-routing
+        $stmtCust = $db->prepare("SELECT customer_id, owner_id, created_by FROM customers WHERE customer_id = :cid LIMIT 1");
+        $stmtCust->execute(['cid' => $customerId]);
+        $cust = $stmtCust->fetch(PDO::FETCH_ASSOC);
+
+        // Auto-route: Automatically assign to the Reseller/Agent who owns this customer
+        $assignedTo = !empty($cust['owner_id']) ? (int)$cust['owner_id'] : (!empty($cust['created_by']) ? (int)$cust['created_by'] : null);
+
+        // Auto-detect priority based on issue subject
+        $priority = 'medium';
+        $lowerTitle = strtolower($title);
+        if (str_contains($lowerTitle, 'red') || str_contains($lowerTitle, 'los') || str_contains($lowerTitle, 'fiber') || str_contains($lowerTitle, 'লাল') || str_contains($lowerTitle, 'কাটা')) {
+            $priority = 'critical';
+        } elseif (str_contains($lowerTitle, 'slow') || str_contains($lowerTitle, 'ping') || str_contains($lowerTitle, 'পিং') || str_contains($lowerTitle, 'বাফারিং') || str_contains($lowerTitle, 'drop')) {
+            $priority = 'high';
+        }
+
         $ticketNum = 'TKT-' . strtoupper(substr(md5(uniqid()), 0, 8));
-        $stmt = $db->prepare("INSERT INTO customer_tickets (tenant_id, customer_id, ticket_number, title, description, status, priority, created_at)
-            VALUES (:tid, :cid, :tnum, :title, :desc, 'open', 'medium', NOW())");
+        $stmt = $db->prepare("INSERT INTO customer_tickets (tenant_id, customer_id, ticket_number, title, description, status, priority, assigned_to, created_at)
+            VALUES (:tid, :cid, :tnum, :title, :desc, 'open', :priority, :assigned_to, NOW())");
         $stmt->execute([
             'tid' => $tenantId,
             'cid' => $customerId,
             'tnum' => $ticketNum,
             'title' => $title,
             'desc' => $desc,
+            'priority' => $priority,
+            'assigned_to' => $assignedTo,
         ]);
 
         $ticketId = $db->lastInsertId();
@@ -993,6 +1067,8 @@ class CustomerPortalController {
                 'title' => $title,
                 'description' => $desc,
                 'status' => 'open',
+                'priority' => $priority,
+                'assigned_to' => $assignedTo,
                 'created_at' => date('Y-m-d H:i:s'),
             ]
         ], 201);
