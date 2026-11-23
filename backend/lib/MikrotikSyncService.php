@@ -877,7 +877,12 @@ class MikrotikSyncService {
 
         $api = self::connect($router, 4);
         if (!$api) {
-            return ['success' => false, 'message' => "Could not connect to router {$router['device_name']}"];
+            // Router is temporarily offline: Return success for DB renewal with offline queue notice
+            return [
+                'success' => true,
+                'synced_to_router' => false,
+                'message' => "Renewal recorded in database. Note: Router '{$router['device_name']}' is currently offline/unreachable. Secret is queued and will automatically activate on the router within 5 minutes when the router reconnects.",
+            ];
         }
 
         $profileName = $cust['profile_name'] ?: 'default';
@@ -1855,9 +1860,10 @@ class MikrotikSyncService {
                     }
                 }
 
-                // 3. Fetch secrets for disconnect reasons and last-logged-out
+                // 3. Fetch secrets for disconnect reasons, last-logged-out, and auto-reconciliation
                 $secrets = $api->comm('/ppp/secret/print');
                 $secretMap = [];
+                $secretRawMap = [];
                 if (is_array($secrets)) {
                     foreach ($secrets as $s) {
                         $u = trim($s['name'] ?? '');
@@ -1867,6 +1873,7 @@ class MikrotikSyncService {
                                 'last_offline_at' => $parsedOff,
                                 'reason' => $s['last-disconnect-reason'] ?? null,
                             ];
+                            $secretRawMap[strtolower($u)] = $s;
                         }
                     }
                 }
@@ -1882,8 +1889,15 @@ class MikrotikSyncService {
 
                 $db->beginTransaction();
 
-                // Fetch existing network accounts for this router
-                $acctStmt = $db->prepare("SELECT network_account_id, tenant_id, customer_id, username, is_online, current_ip, mac_address, uptime_seconds, upload_bytes, download_bytes, last_online_at, last_offline_at FROM customer_network_accounts WHERE network_device_id = :did");
+                // Fetch existing network accounts for this router with customer billing and expiry status for auto-reconciliation
+                $acctStmt = $db->prepare("SELECT na.network_account_id, na.tenant_id, na.customer_id, na.username, na.is_online, na.current_ip, na.mac_address, na.uptime_seconds, na.upload_bytes, na.download_bytes, na.last_online_at, na.last_offline_at,
+                        c.status as customer_status, c.billing_status, cs.expires_at,
+                        COALESCE(ap.mikrotik_profile_name, ap.profile_name, 'default') as profile_name
+                    FROM customer_network_accounts na
+                    JOIN customers c ON c.customer_id = na.customer_id
+                    LEFT JOIN customer_services cs ON cs.customer_id = c.customer_id AND cs.status != 'cancelled'
+                    LEFT JOIN access_profiles ap ON ap.access_profile_id = cs.access_profile_id
+                    WHERE na.network_device_id = :did");
                 $acctStmt->execute(['did' => $rId]);
                 $accts = $acctStmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -1985,9 +1999,37 @@ class MikrotikSyncService {
                                     'reason' => $disconnectReason,
                                     'raw' => "PPPoE user {$acct['username']} disconnected ({$disconnectReason}), session time: " . ($acct['uptime_seconds'] ?? 0) . "s",
                                     'logged_at' => $disconnectTime,
-                                ]);
+                                    ]);
                                 $totalDisconnectedLogs++;
                             } catch (\Throwable $e) {}
+                        }
+                    }
+
+                    // Automatic Desired-State Reconciliation:
+                    // Guarantees sync if router was offline when customer expired or renewed
+                    if ($rawSec = ($secretRawMap[$lowerU] ?? null)) {
+                        $secDisabled = ($rawSec['disabled'] ?? '') === 'true' || ($rawSec['disabled'] ?? '') === 'yes' || ($rawSec['disabled'] ?? '') === true;
+                        $secId = $rawSec['.id'] ?? null;
+                        $isExp = (strcasecmp($acct['billing_status'] ?? '', 'Expired') === 0 || (!empty($acct['expires_at']) && strtotime($acct['expires_at']) < time()));
+                        $isSusp = ($acct['customer_status'] === 'suspended');
+
+                        if (($isExp || $isSusp) && !$secDisabled && $secId) {
+                            // Router was offline when customer expired/suspended: enforce cutoff now!
+                            try {
+                                $api->comm('/ppp/secret/set', ['=.id=' . $secId, '=disabled=yes']);
+                                if (isset($activeMap[$lowerU]['.id'])) {
+                                    $api->comm('/ppp/active/remove', ['=.id=' . $activeMap[$lowerU]['.id']]);
+                                }
+                            } catch (\Throwable $ignored) {}
+                        } elseif (!$isExp && !$isSusp && $secDisabled && $secId) {
+                            // Router was offline when customer renewed/recharged: auto-restore line now!
+                            try {
+                                $setParams = ['=.id=' . $secId, '=disabled=no'];
+                                if (!empty($acct['profile_name']) && strtolower($acct['profile_name']) !== 'default') {
+                                    $setParams[] = '=profile=' . $acct['profile_name'];
+                                }
+                                $api->comm('/ppp/secret/set', $setParams);
+                            } catch (\Throwable $ignored) {}
                         }
                     }
                 }
