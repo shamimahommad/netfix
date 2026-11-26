@@ -11,6 +11,9 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
 class PaymentsController {
     public static function create(): void {
         $user = AuthMiddleware::requireAuth();
+        if (($user['role'] ?? '') === 'customer' || ($user['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden', 403);
+        }
         $tenantId = AuthMiddleware::getTenantId();
 
         require_once __DIR__ . '/../lib/HierarchySecurityService.php';
@@ -26,6 +29,8 @@ class PaymentsController {
         if (!$customerId || $amount <= 0) {
             Response::error('Customer ID and positive amount are required', 400);
         }
+
+        HierarchySecurityService::canViewCustomer((int)$user['user_id'], (int)$customerId, $tenantId ? (int)$tenantId : null);
 
         $db = Database::getConnection();
         $db->beginTransaction();
@@ -78,8 +83,13 @@ class PaymentsController {
                 ]);
 
                 if ($newDue <= 0) {
-                    $stmtCust = $db->prepare("UPDATE customers SET billing_status = 'Paid' WHERE customer_id = :cid");
-                    $stmtCust->execute(['cid' => $customerId]);
+                    $stmtDues = $db->prepare("SELECT COUNT(*) FROM invoices WHERE customer_id = :cid AND status IN ('pending', 'partially_paid') AND invoice_id != :inv_id AND balance_due > 0");
+                    $stmtDues->execute(['cid' => (int)$customerId, 'inv_id' => (int)$inv['invoice_id']]);
+                    $hasOtherDues = (int)$stmtDues->fetchColumn();
+                    if ($hasOtherDues === 0) {
+                        $stmtCust = $db->prepare("UPDATE customers SET billing_status = 'Paid' WHERE customer_id = :cid AND tenant_id = :tid");
+                        $stmtCust->execute(['cid' => $customerId, 'tid' => $tenantId]);
+                    }
                 }
 
                 $invoiceData = [
@@ -298,8 +308,13 @@ class PaymentsController {
             LEFT JOIN transactions tr ON (tr.transaction_ref = pi.transaction_ref OR tr.transaction_ref = pi.gateway_payment_id)
             WHERE {$whereSql}
             ORDER BY pi.id DESC
-            LIMIT {$limit} OFFSET {$offset}");
-        $stmt->execute($params);
+            LIMIT :lim OFFSET :off");
+        foreach ($params as $k => $v) {
+            $stmt->bindValue(str_starts_with((string)$k, ':') ? $k : (':' . $k), $v);
+        }
+        $stmt->bindValue(':lim', (int)$limit, PDO::PARAM_INT);
+        $stmt->bindValue(':off', (int)$offset, PDO::PARAM_INT);
+        $stmt->execute();
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Overall Summary
@@ -525,8 +540,13 @@ class PaymentsController {
             LEFT JOIN users u_coll ON u_coll.user_id = t.collector_user_id
             WHERE {$whereSql}
             ORDER BY t.transaction_id DESC
-            LIMIT {$limit} OFFSET {$offset}");
-        $dataStmt->execute($params);
+            LIMIT :lim OFFSET :off");
+        foreach ($params as $k => $v) {
+            $dataStmt->bindValue(str_starts_with((string)$k, ':') ? $k : (':' . $k), $v);
+        }
+        $dataStmt->bindValue(':lim', (int)$limit, PDO::PARAM_INT);
+        $dataStmt->bindValue(':off', (int)$offset, PDO::PARAM_INT);
+        $dataStmt->execute();
         $rows = $dataStmt->fetchAll();
 
         $dataRows = [];
@@ -766,8 +786,13 @@ class PaymentsController {
             LEFT JOIN invoices inv ON inv.invoice_id = wl.invoice_id
             WHERE {$whereSql}
             ORDER BY wt.transaction_id DESC
-            LIMIT {$limit} OFFSET {$offset}");
-        $stmt->execute($params);
+            LIMIT :lim OFFSET :off");
+        foreach ($params as $k => $v) {
+            $stmt->bindValue(str_starts_with((string)$k, ':') ? $k : (':' . $k), $v);
+        }
+        $stmt->bindValue(':lim', (int)$limit, PDO::PARAM_INT);
+        $stmt->bindValue(':off', (int)$offset, PDO::PARAM_INT);
+        $stmt->execute();
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Fallback for customer IDs mentioned in description but not in wallet_ledger
@@ -1001,6 +1026,12 @@ class PaymentsController {
      */
     public static function unmatchedPayments(): void {
         $user = AuthMiddleware::requireAuth();
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        $callerRole = strtolower((string)($user['role'] ?? ''));
+        $isLevel0 = (HierarchySecurityService::getHierarchyLevel($callerRole) === 0 || $callerRole === 'saas_admin');
+        if (!$isLevel0 || $callerRole === 'customer' || ($user['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden: Admin access required', 403);
+        }
         $tenantId = (int)AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
@@ -1051,6 +1082,12 @@ class PaymentsController {
      */
     public static function assignUnmatched(): void {
         $user = AuthMiddleware::requireAuth();
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        $callerRole = strtolower((string)($user['role'] ?? ''));
+        $isLevel0 = (HierarchySecurityService::getHierarchyLevel($callerRole) === 0 || $callerRole === 'saas_admin');
+        if (!$isLevel0 || $callerRole === 'customer' || ($user['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden: Admin access required', 403);
+        }
         $tenantId = (int)AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
@@ -1222,7 +1259,7 @@ class PaymentsController {
         } catch (\Throwable $e) {
             $db->rollBack();
             error_log("Assign Payment DB Error: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
-            Response::error('Failed to assign payment: ' . $e->getMessage(), 500);
+            Response::error('Failed to assign payment. Please try again later.', 500);
             return;
         }
 

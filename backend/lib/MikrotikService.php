@@ -49,7 +49,7 @@ class MikrotikService {
     public function syncSecret(array $router, array $userData): array {
         if (!$this->connect($router)) {
             $ip = $router['management_ip'] ?? $router['ip_address'] ?? 'unknown';
-            throw new Exception("MikroTik রাউটারে কানেক্ট করা যায়নি: {$ip}");
+            throw new Exception("Failed to connect to MikroTik router: {$ip}");
         }
 
         try {

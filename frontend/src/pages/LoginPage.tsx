@@ -51,26 +51,14 @@ export default function LoginPage() {
   // UI helpers
   const [showHelpModal, setShowHelpModal] = useState(false);
 
-  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-
-  // Clear stale persisted auth state if access token is missing
-  useEffect(() => {
-    if (!token && (isAuthenticated || user)) {
-      setUser(null);
-    }
-  }, [token, isAuthenticated, user, setUser]);
-
-  // Load remembered email and tenants on mount
+  // Load remembered email on mount
   useEffect(() => {
     const savedEmail = localStorage.getItem('netfix_remembered_email');
     if (savedEmail) {
       setEmail(savedEmail);
       setRememberMe(true);
     }
-    if (!isAuthenticated) {
-      loadTenants();
-    }
-  }, [isAuthenticated]);
+  }, []);
 
   const loadTenants = async () => {
     setIsLoadingTenants(true);
@@ -151,11 +139,11 @@ export default function LoginPage() {
     setShowTenants(false);
     setError(null);
     setEmail(tenant.businessEmail);
-    setPassword('Star@1122');
+    setPassword('');
   };
 
 
-  if (token && isAuthenticated && user) {
+  if (isAuthenticated && user) {
     const target =
       user.user_type === 'saas'
         ? '/saas/dashboard'
@@ -231,13 +219,13 @@ export default function LoginPage() {
               className="space-y-4"
             >
               <h1 className="text-4xl xl:text-5xl font-black tracking-tight text-white leading-[1.15]">
-                Manage customers, routers & auto-billing in{' '}
+                Manage customers, routers & billing in{' '}
                 <span className="bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400">
-                  one unified cloud.
+                  one platform.
                 </span>
               </h1>
               <p className="text-base xl:text-lg text-slate-400 max-w-xl leading-relaxed">
-                Automated MikroTik RouterOS 7.x sync, real-time EPON/GPON OLT telemetry, instant bKash/Nagad billing, and resilient multi-tenant data isolation.
+                MikroTik RouterOS management, OLT monitoring, automated bKash/Nagad billing, and multi-tenant ISP operations.
               </p>
             </motion.div>
 
@@ -719,7 +707,7 @@ export default function LoginPage() {
                 <div className="space-y-2">
                   <h4 className="font-semibold text-white">Forgot Password or Blocked?</h4>
                   <p className="text-slate-400 leading-relaxed">
-                    If your account is locked or you forgot your credentials, contact your ISP Super-Administrator or reset the password hash via the backend database console.
+                    If your account is locked or you forgot your password, please contact your system administrator to restore access or reset your password.
                   </p>
                 </div>
 

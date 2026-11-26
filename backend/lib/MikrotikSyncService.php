@@ -1910,7 +1910,7 @@ class MikrotikSyncService {
                         download_bytes = :down,
                         last_offline_at = COALESCE(:off, last_offline_at),
                         last_disconnect_reason = COALESCE(:reason, last_disconnect_reason),
-                        last_online_at = COALESCE(last_online_at, NOW()) 
+                        last_online_at = CASE WHEN is_online = 0 THEN :conn_at ELSE COALESCE(last_online_at, :conn_at2) END
                     WHERE network_account_id = :nid");
 
                 $upOffline = $db->prepare("UPDATE customer_network_accounts 
@@ -1920,6 +1920,19 @@ class MikrotikSyncService {
                         last_disconnect_reason = COALESCE(:reason, last_disconnect_reason)
                     WHERE network_account_id = :nid");
 
+                $findOpenSession = $db->prepare("SELECT id, event_type, logged_at 
+                    FROM pppoe_connection_logs 
+                    WHERE tenant_id = :tid AND username = :uname 
+                    ORDER BY id DESC LIMIT 1");
+
+                $updateOpenSession = $db->prepare("UPDATE pppoe_connection_logs 
+                    SET assigned_ip = COALESCE(:ip, assigned_ip),
+                        caller_mac = COALESCE(:mac, caller_mac),
+                        session_time_seconds = :stime,
+                        bytes_uploaded = :up,
+                        bytes_downloaded = :down
+                    WHERE id = :id");
+
                 $now = date('Y-m-d H:i:s');
 
                 foreach ($accts as $acct) {
@@ -1928,6 +1941,7 @@ class MikrotikSyncService {
                     $lastOff = $secData['last_offline_at'] ?? null;
                     $reason = $secData['reason'] ?? null;
                     $wasOnline = (int)($acct['is_online'] ?? 0) === 1;
+                    $acctTid = (int)($acct['tenant_id'] ?: $rTenantId);
 
                     if (isset($activeMap[$lowerU])) {
                         // User is ACTIVE in MikroTik
@@ -1936,6 +1950,7 @@ class MikrotikSyncService {
                         $mac = $act['caller-id'] ?? null;
                         $uptime = self::parseUptime($act['uptime'] ?? '');
                         $tf = $trafficMap[$lowerU] ?? ['rx' => 0, 'tx' => 0, 'name' => "<pppoe-{$act['name']}>"];
+                        $connectTime = date('Y-m-d H:i:s', time() - $uptime);
 
                         $upOnline->execute([
                             'ip' => $ip,
@@ -1945,16 +1960,32 @@ class MikrotikSyncService {
                             'down' => $tf['tx'],
                             'off' => $lastOff,
                             'reason' => $reason,
+                            'conn_at' => $connectTime,
+                            'conn_at2' => $connectTime,
                             'nid' => $acct['network_account_id'],
                         ]);
                         $totalOnlineUpdated++;
 
-                        // If user transitioned from offline to online, record 'connected' log
-                        if (!$wasOnline) {
-                            try {
-                                $connectTime = date('Y-m-d H:i:s', max(time() - $uptime, strtotime('-1 day')));
+                        // Upsert active session row instead of creating duplicate 'connected' snapshots
+                        try {
+                            $findOpenSession->execute(['tid' => $acctTid, 'uname' => $acct['username']]);
+                            $latestLog = $findOpenSession->fetch(PDO::FETCH_ASSOC);
+                            $isSameOpenSession = $latestLog
+                                && ($latestLog['event_type'] ?? '') === 'connected'
+                                && abs(strtotime((string)$latestLog['logged_at']) - strtotime($connectTime)) <= 300;
+
+                            if ($isSameOpenSession) {
+                                $updateOpenSession->execute([
+                                    'ip' => $ip,
+                                    'mac' => $mac,
+                                    'stime' => $uptime,
+                                    'up' => $tf['rx'],
+                                    'down' => $tf['tx'],
+                                    'id' => $latestLog['id'],
+                                ]);
+                            } elseif (!$wasOnline || !$latestLog || ($latestLog['event_type'] ?? '') !== 'connected') {
                                 $insertLog->execute([
-                                    'tid' => $acct['tenant_id'] ?: $rTenantId,
+                                    'tid' => $acctTid,
                                     'rid' => $rId,
                                     'uname' => $acct['username'],
                                     'event' => 'connected',
@@ -1969,8 +2000,8 @@ class MikrotikSyncService {
                                     'logged_at' => $connectTime,
                                 ]);
                                 $totalConnectedLogs++;
-                            } catch (\Throwable $e) {}
-                        }
+                            }
+                        } catch (\Throwable $e) {}
                     } else {
                         // User is NOT active in MikroTik
                         $upOffline->execute([

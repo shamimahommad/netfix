@@ -110,6 +110,66 @@ try {
     if (!$tenantId) {
         $tenantId = 2; // Default fallback
     }
+
+    // Security Gate: Cryptographic HMAC signature verification OR server-to-server gateway verification
+    $webhookSecret = trim((string)(getenv('WEBHOOK_SECRET') ?: ($_ENV['WEBHOOK_SECRET'] ?? '')));
+    $providedSig = trim((string)($_SERVER['HTTP_X_WEBHOOK_SIGNATURE'] ?? ''));
+    $hmacVerified = false;
+    if ($webhookSecret !== '' && $providedSig !== '') {
+        $expectedSig = hash_hmac('sha256', (string)$rawInput, $webhookSecret);
+        $hmacVerified = hash_equals($expectedSig, $providedSig);
+    }
+
+    $gatewayVerified = false;
+    $valId = trim((string)($payload['val_id'] ?? ($payload['valId'] ?? '')));
+    $expectedAmt = $intent ? (float)$intent['amount'] : $amount;
+
+    if (!$hmacVerified) {
+        $settings = PaymentGatewayService::getGatewaySettings($db, (int)$tenantId, $gateway ?: 'bkash');
+        if ($settings) {
+            if ($gateway === 'bkash' && !empty($paymentId) && !empty($settings['app_key'])) {
+                $vRes = PaymentGatewayService::bkashExecutePayment($settings, $paymentId);
+                if (!empty($vRes['success']) && !empty($vRes['trxID'])) {
+                    $vAmt = (float)($vRes['amount'] ?? 0);
+                    if ($expectedAmt <= 0 || $vAmt <= 0 || abs($vAmt - $expectedAmt) <= 0.01) {
+                        $gatewayVerified = true;
+                        $trxId = (string)$vRes['trxID'];
+                        if ($vAmt > 0) $amount = $vAmt;
+                    }
+                }
+            } elseif ($gateway === 'surjopay' && !empty($paymentId)) {
+                $vRes = PaymentGatewayService::surjopayVerifyOrder($settings, $paymentId);
+                if (!empty($vRes['success']) && !empty($vRes['trxID'])) {
+                    $vAmt = (float)($vRes['amount'] ?? 0);
+                    if ($expectedAmt <= 0 || $vAmt <= 0 || abs($vAmt - $expectedAmt) <= 0.01) {
+                        $gatewayVerified = true;
+                        $trxId = (string)$vRes['trxID'];
+                        if ($vAmt > 0) $amount = $vAmt;
+                    }
+                }
+            } elseif ($gateway === 'ssl' && $valId !== '') {
+                $vRes = PaymentGatewayService::sslValidatePayment($settings, $valId, $paymentId, $expectedAmt);
+                if (!empty($vRes['success']) && !empty($vRes['trxID'])) {
+                    $vAmt = (float)($vRes['amount'] ?? 0);
+                    if ($expectedAmt <= 0 || $vAmt <= 0 || abs($vAmt - $expectedAmt) <= 0.01) {
+                        $gatewayVerified = true;
+                        $trxId = (string)$vRes['trxID'];
+                        if ($vAmt > 0) $amount = $vAmt;
+                    }
+                }
+            }
+        }
+    }
+
+    if (!$hmacVerified && !$gatewayVerified) {
+        http_response_code(401);
+        echo json_encode([
+            'success' => false,
+            'message' => 'Webhook verification failed: invalid signature or unverified gateway transaction.',
+        ]);
+        exit;
+    }
+
     $customerId = $intent && $intent['customer_id'] ? (int)$intent['customer_id'] : null;
     $resolvedInvoiceId = $intent && $intent['invoice_id'] ? (int)$intent['invoice_id'] : null;
 
@@ -313,10 +373,11 @@ try {
         'mikrotik' => $mikrotikResult,
     ]);
 } catch (Throwable $e) {
+    error_log('Webhook processing failed: ' . $e->getMessage());
     http_response_code(500);
     echo json_encode([
         'success' => false,
-        'message' => 'Webhook processing failed: ' . $e->getMessage(),
+        'message' => 'Webhook processing failed.',
     ]);
 }
 

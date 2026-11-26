@@ -181,6 +181,18 @@ export const showLoading = (title: string = 'Please wait...', message?: string) 
 };
 
 /**
+ * Escape HTML special characters before interpolating dynamic strings into HTML alerts.
+ */
+export const escapeHtml = (value: unknown): string => {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+
+/**
  * Show a modal with a colorful animated progress bar (e.g. for PPP MAC Bind/Unbind All).
  * Close with closeAlert() when done, then show success/error as needed.
  */
@@ -188,7 +200,7 @@ export const showProgressBar = (title: string, message?: string) => {
   Swal.fire({
     title,
     html: `
-      <p class="swal-progress-message">${message || 'Please wait...'}</p>
+      <p class="swal-progress-message">${escapeHtml(message || 'Please wait...')}</p>
       <div class="swal-progress-track">
         <div class="swal-progress-fill"></div>
       </div>

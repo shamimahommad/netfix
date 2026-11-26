@@ -335,7 +335,13 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
     }
   }, [selectedResultIndex]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      const { authService } = await import('@/services/auth.service');
+      await authService.logout();
+    } catch {
+      // Fallback cleanup continues below
+    }
     logout();
     clearSelectedTenant();
     localStorage.removeItem('access_token');
@@ -346,12 +352,6 @@ export default function Topbar({ onMenuClick, userType }: TopbarProps) {
   };
 
   // Load balance on mount and on refresh for reseller-type (isp) users
-  useEffect(() => {
-    if (user && (userType === 'isp' || userType === 'tenant')) {
-      refreshMe();
-    }
-  }, [user?.user_id, userType, refreshMe]);
-
   // Load SMS balance for dashboard header (isp/tenant)
   useEffect(() => {
     if (!user || (userType !== 'isp' && userType !== 'tenant' && userType !== 'saas')) return;

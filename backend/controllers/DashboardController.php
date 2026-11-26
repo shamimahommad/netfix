@@ -81,6 +81,17 @@ class DashboardController {
         $stmt->execute($txParams);
         $t = $stmt->fetch() ?: [];
 
+        // 3. Due metrics scoped downward to user's customers
+        $dueStmt = $db->prepare("SELECT 
+            COUNT(DISTINCT c.customer_id) as due_customers,
+            COALESCE(SUM(i.balance_due), 0) as total_due_amount
+            FROM invoices i
+            INNER JOIN customers c ON c.customer_id = i.customer_id
+            LEFT JOIN users u ON u.user_id = c.owner_id
+            {$custWhere} AND i.status = 'pending' AND i.balance_due > 0");
+        $dueStmt->execute($custParams);
+        $dueData = $dueStmt->fetch() ?: [];
+
         $hideSales = HierarchySecurityService::hasPermission($callerId, 'hide_dashboard_sales');
 
         Response::json([
@@ -93,6 +104,8 @@ class DashboardController {
             'expiredCustomers' => (int)($c['expired_customers'] ?? 0),
             'suspendedCustomers' => (int)($c['suspended_customers'] ?? 0),
             'leftCustomers' => (int)($c['left_customers'] ?? 0),
+            'dueCustomers' => (int)($dueData['due_customers'] ?? 0),
+            'totalDueAmount' => (float)($dueData['total_due_amount'] ?? 0),
             'todayCollection' => $hideSales ? 0.0 : (float)($t['today_collection'] ?? 0),
             'thisMonthCollection' => $hideSales ? 0.0 : (float)($t['this_month_collection'] ?? 0),
             'lastMonthCollection' => $hideSales ? 0.0 : (float)($t['last_month_collection'] ?? 0),

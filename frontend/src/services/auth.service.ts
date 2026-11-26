@@ -69,11 +69,7 @@ export const authService = {
           ? { login: credentials.login, password: credentials.password }
           : { email: credentials.email, password: credentials.password };
     const response = await api.post<LoginResponse & { redirect_url?: string }>('/auth/login', body);
-    const data = response.data;
-    if (data.access_token) {
-      localStorage.setItem('access_token', data.access_token);
-    }
-    return data;
+    return response.data;
   },
 
   /** Customer portal: login = Email or Customer ID, phone = Phone/Mobile (used as password). */
@@ -82,11 +78,7 @@ export const authService = {
       login: login.trim(),
       phone: phone.trim(),
     });
-    const data = response.data;
-    if (data.access_token) {
-      localStorage.setItem('access_token', data.access_token);
-    }
-    return data;
+    return response.data;
   },
 
   async getMe(): Promise<MeResponse> {
@@ -108,32 +100,35 @@ export const authService = {
     return response.data?.allowed ?? {};
   },
 
-  /** Start impersonation. Store delegated token in localStorage and redirect to dashboard. */
+  /** Start impersonation using HttpOnly session cookie rotation and redirect to dashboard. */
   async impersonate(targetUserId: string): Promise<ImpersonateResponse> {
     const response = await api.post<ImpersonateResponse>(`/auth/impersonate/${targetUserId}`);
-    if (response.data?.access_token) {
-      localStorage.setItem('access_token', response.data.access_token);
-      localStorage.removeItem('auth_user');
-    }
+    localStorage.removeItem('auth_user');
     return response.data;
   },
 
-  /** Exit impersonation. Restore original user token in localStorage and redirect. */
+  /** Exit impersonation using HttpOnly session cookie rotation and redirect. */
   async exitImpersonation(): Promise<ImpersonateResponse> {
     const response = await api.post<ImpersonateResponse>('/auth/impersonate/exit');
-    if (response.data?.access_token) {
-      localStorage.setItem('access_token', response.data.access_token);
-      localStorage.removeItem('auth_user');
-    }
+    localStorage.removeItem('auth_user');
+    return response.data;
+  },
+
+  async refreshToken(): Promise<{ success: boolean; authenticated: boolean }> {
+    const response = await api.post<{ success: boolean; authenticated: boolean }>('/auth/refresh');
     return response.data;
   },
 
   async logout(): Promise<void> {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      // Proceed with local cleanup even if cookie is already invalid
+    }
     localStorage.removeItem('access_token');
     localStorage.removeItem('auth_user');
     localStorage.removeItem('auth-storage');
     sessionStorage.clear();
-    return Promise.resolve();
   },
 
   /** Change password for current user (dashboard). Requires current_password and new_password. */

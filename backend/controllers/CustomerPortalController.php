@@ -204,28 +204,50 @@ class CustomerPortalController {
             'lastDisconnectReason' => $net['last_disconnect_reason'] ?? null,
         ];
 
-        // 7. Monthly Bandwidth Usage ("saramas a koto gb use korce")
+        // 7. Monthly Bandwidth Usage (reconstructed from paired sessions + live account)
         $startOfMonth = date('Y-m-01 00:00:00');
-        $stmtUsage = $db->prepare("SELECT 
-            COALESCE(SUM(bytes_downloaded), 0) as log_download,
-            COALESCE(SUM(bytes_uploaded), 0) as log_upload,
-            COUNT(CASE WHEN event_type = 'disconnected' THEN 1 END) as disconnect_count
-        FROM pppoe_connection_logs 
-        WHERE tenant_id = :tid 
-          AND LOWER(username) = LOWER(:uname) 
-          AND logged_at >= :start");
+        $startOfMonthTs = strtotime($startOfMonth);
+        $stmtUsage = $db->prepare("SELECT id, username, event_type, assigned_ip, caller_mac, session_time_seconds, bytes_uploaded, bytes_downloaded, disconnect_reason, logged_at, created_at
+            FROM pppoe_connection_logs
+            WHERE tenant_id = :tid
+              AND LOWER(username) = LOWER(:uname)
+              AND event_type IN ('connected', 'disconnected')
+            ORDER BY id DESC
+            LIMIT 1000");
         $stmtUsage->execute([
-            'tid' => $tenantId, 
-            'uname' => $targetUsername, 
-            'start' => $startOfMonth
+            'tid' => $tenantId,
+            'uname' => $targetUsername,
         ]);
-        $usageStats = $stmtUsage->fetch();
+        $usageRows = $stmtUsage->fetchAll(PDO::FETCH_ASSOC);
 
+        require_once __DIR__ . '/../lib/SessionLogHelper.php';
         $activeDownBytes = (int)($net['download_bytes'] ?? 0);
         $activeUpBytes = (int)($net['upload_bytes'] ?? 0);
+        $monthSessions = SessionLogHelper::reconstructSessions($usageRows, [
+            'username' => $targetUsername,
+            'is_online' => !empty($net['is_online']),
+            'uptime_seconds' => (int)($net['uptime_seconds'] ?? 0),
+            'upload_bytes' => (float)$activeUpBytes,
+            'download_bytes' => (float)$activeDownBytes,
+            'current_ip' => $net['current_ip'] ?? '',
+            'mac_address' => $net['mac_address'] ?? '',
+            'last_online_at' => $net['last_online_at'] ?? null,
+            'last_offline_at' => $net['last_offline_at'] ?? null,
+        ]);
 
-        $monthDownBytes = (int)($usageStats['log_download'] ?? 0) + $activeDownBytes;
-        $monthUpBytes = (int)($usageStats['log_upload'] ?? 0) + $activeUpBytes;
+        $monthDownBytes = 0.0;
+        $monthUpBytes = 0.0;
+        $monthDisconnects = 0;
+        foreach ($monthSessions as $ms) {
+            $refTs = $ms['isOngoing'] ? time() : ((int)($ms['endTs'] ?: $ms['startTs']));
+            if ($refTs >= $startOfMonthTs) {
+                $monthDownBytes += (float)$ms['downloadBytes'];
+                $monthUpBytes += (float)$ms['uploadBytes'];
+                if (!$ms['isOngoing']) {
+                    $monthDisconnects++;
+                }
+            }
+        }
         $totalMonthBytes = $monthDownBytes + $monthUpBytes;
 
         $monthlyUsage = [
@@ -236,7 +258,7 @@ class CustomerPortalController {
             'uploadGB' => round($monthUpBytes / 1073741824, 2),
             'totalGB' => round($totalMonthBytes / 1073741824, 2),
             'monthName' => date('F Y'),
-            'disconnectCount' => (int)($usageStats['disconnect_count'] ?? 0),
+            'disconnectCount' => $monthDisconnects,
             'quotaGB' => !empty($cs['data_volume_gb']) ? (float)$cs['data_volume_gb'] : null,
             'isUnlimited' => empty($cs['data_volume_gb']) || ($cs['data_volume_type'] ?? 'unlimited') === 'unlimited',
         ];
@@ -335,7 +357,7 @@ class CustomerPortalController {
         $db = Database::getConnection();
 
         // Customer & Network info
-        $stmt = $db->prepare("SELECT c.tenant_id, na.username, na.is_online, na.uptime_seconds, na.upload_bytes, na.download_bytes, na.last_online_at, na.current_ip, na.mac_address 
+        $stmt = $db->prepare("SELECT c.tenant_id, na.username, na.is_online, na.uptime_seconds, na.upload_bytes, na.download_bytes, na.last_online_at, na.last_offline_at, na.current_ip, na.mac_address 
             FROM customers c 
             JOIN customer_network_accounts na ON na.customer_id = c.customer_id 
             WHERE c.customer_id = :cid LIMIT 1");
@@ -408,224 +430,154 @@ class CustomerPortalController {
                 break;
         }
 
-        // Build SQL WHERE clause
-        $whereSql = "tenant_id = :tid AND LOWER(username) = LOWER(:u) AND event_type IN ('disconnected', 'connected')";
-        $params = ['tid' => $tenantId, 'u' => $username];
-
-        if ($rangeStart !== null && $rangeEnd !== null) {
-            $whereSql .= " AND logged_at >= :rstart AND logged_at <= :rend";
-            $params['rstart'] = $rangeStart;
-            $params['rend'] = $rangeEnd;
-        } elseif ($rangeStart !== null) {
-            $whereSql .= " AND logged_at >= :rstart";
-            $params['rstart'] = $rangeStart;
-        } elseif ($rangeEnd !== null) {
-            $whereSql .= " AND logged_at <= :rend";
-            $params['rend'] = $rangeEnd;
-        }
-
-        // Count matching historical logs
-        $countStmt = $db->prepare("SELECT COUNT(*) FROM pppoe_connection_logs WHERE {$whereSql}");
-        $countStmt->execute($params);
-        $totalLogs = (int)$countStmt->fetchColumn();
-
-        // Range aggregated stats
-        $statStmt = $db->prepare("SELECT 
-            COUNT(CASE WHEN event_type = 'disconnected' THEN 1 END) as total_disconnects,
-            COALESCE(SUM(bytes_downloaded), 0) as total_download,
-            COALESCE(SUM(bytes_uploaded), 0) as total_upload,
-            COALESCE(SUM(session_time_seconds), 0) as total_uptime_seconds,
-            AVG(CASE WHEN event_type = 'disconnected' AND session_time_seconds > 0 THEN session_time_seconds END) as avg_seconds,
-            MAX(CASE WHEN event_type = 'disconnected' THEN logged_at END) as last_disconnect_time
-            FROM pppoe_connection_logs 
-            WHERE {$whereSql}");
-        $statStmt->execute($params);
-        $stats = $statStmt->fetch() ?: [];
-
-        // Distinct assigned IPs during this period
-        $ipStmt = $db->prepare("SELECT DISTINCT assigned_ip 
-            FROM pppoe_connection_logs 
-            WHERE {$whereSql} AND assigned_ip IS NOT NULL AND assigned_ip != '' AND assigned_ip != '0.0.0.0'
-            ORDER BY logged_at DESC");
-        $ipStmt->execute($params);
-        $distinctIps = $ipStmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
-
-        // Daily breakdown ("kon din koto gb use ba koto time online chilo kon ip peyechilo")
-        $dailyStmt = $db->prepare("SELECT 
-            DATE(logged_at) as log_date,
-            COALESCE(SUM(bytes_downloaded), 0) as download_bytes,
-            COALESCE(SUM(bytes_uploaded), 0) as upload_bytes,
-            COALESCE(SUM(session_time_seconds), 0) as uptime_seconds,
-            COUNT(*) as session_count,
-            COUNT(CASE WHEN event_type = 'disconnected' THEN 1 END) as disconnect_count,
-            GROUP_CONCAT(DISTINCT assigned_ip SEPARATOR ', ') as ips_used
-            FROM pppoe_connection_logs
-            WHERE {$whereSql}
-            GROUP BY DATE(logged_at)
-            ORDER BY log_date DESC");
-        $dailyStmt->execute($params);
-        $dailyRaw = $dailyStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-
-        // Check if currently active live session should be incorporated
-        $isLiveOnline = !empty($cust['is_online']);
         $nowTs = time();
+        $isLiveOnline = !empty($cust['is_online']);
         $includesLiveNow = $isLiveOnline && ($rangeEnd === null || strtotime($rangeEnd) >= $nowTs) && ($rangeStart === null || strtotime($rangeStart) <= $nowTs);
 
-        $liveUptime = (int)($cust['uptime_seconds'] ?? 0);
-        $liveDown = (int)($cust['download_bytes'] ?? 0);
-        $liveUp = (int)($cust['upload_bytes'] ?? 0);
-        $liveIp = trim($cust['current_ip'] ?? '');
+        // Fetch recent event logs and reconstruct paired, deduplicated sessions
+        $logStmt = $db->prepare("SELECT id, username, event_type, assigned_ip, caller_mac, session_time_seconds, bytes_uploaded, bytes_downloaded, disconnect_reason, logged_at, created_at
+            FROM pppoe_connection_logs
+            WHERE tenant_id = :tid AND LOWER(username) = LOWER(:u) AND event_type IN ('disconnected', 'connected')
+            ORDER BY id DESC
+            LIMIT 1000");
+        $logStmt->execute(['tid' => $tenantId, 'u' => $username]);
+        $rawRows = $logStmt->fetchAll(PDO::FETCH_ASSOC);
 
-        if ($includesLiveNow && $liveIp && !in_array($liveIp, $distinctIps, true)) {
-            array_unshift($distinctIps, $liveIp);
-        }
+        require_once __DIR__ . '/../lib/SessionLogHelper.php';
+        $allSessions = SessionLogHelper::reconstructSessions($rawRows, [
+            'username' => $username,
+            'is_online' => $isLiveOnline,
+            'include_live' => $includesLiveNow,
+            'uptime_seconds' => (int)($cust['uptime_seconds'] ?? 0),
+            'upload_bytes' => (float)($cust['upload_bytes'] ?? 0),
+            'download_bytes' => (float)($cust['download_bytes'] ?? 0),
+            'current_ip' => $cust['current_ip'] ?? '',
+            'mac_address' => $cust['mac_address'] ?? '',
+            'last_online_at' => $cust['last_online_at'] ?? null,
+            'last_offline_at' => $cust['last_offline_at'] ?? null,
+        ]);
 
-        // Add live usage to range aggregates if live now
-        $totalDownBytes = (float)($stats['total_download'] ?? 0) + ($includesLiveNow ? $liveDown : 0);
-        $totalUpBytes = (float)($stats['total_upload'] ?? 0) + ($includesLiveNow ? $liveUp : 0);
-        $totalUsageBytes = $totalDownBytes + $totalUpBytes;
-        $totalUptimeSec = (int)($stats['total_uptime_seconds'] ?? 0) + ($includesLiveNow ? $liveUptime : 0);
+        $rangeStartTs = $rangeStart !== null ? strtotime($rangeStart) : null;
+        $rangeEndTs = $rangeEnd !== null ? strtotime($rangeEnd) : null;
 
-        // Format daily breakdown array
-        $dailyBreakdown = [];
-        $todayDate = date('Y-m-d');
-        $hasTodayInDaily = false;
+        $filteredSessions = [];
+        $totalDownBytes = 0.0;
+        $totalUpBytes = 0.0;
+        $totalUptimeSec = 0;
+        $totalDisconnects = 0;
+        $closedDurations = [];
+        $lastDisconnectedAt = null;
+        $distinctIps = [];
+        $dailyMap = [];
 
-        foreach ($dailyRaw as $d) {
-            $dDate = $d['log_date'];
-            $dDown = (float)$d['download_bytes'];
-            $dUp = (float)$d['upload_bytes'];
-            $dUptime = (int)$d['uptime_seconds'];
-            $ips = array_filter(array_map('trim', explode(',', $d['ips_used'] ?? '')));
-
-            // If this is today and customer is online, merge live numbers
-            if ($dDate === $todayDate && $includesLiveNow) {
-                $hasTodayInDaily = true;
-                $dDown += $liveDown;
-                $dUp += $liveUp;
-                $dUptime += $liveUptime;
-                if ($liveIp && !in_array($liveIp, $ips, true)) {
-                    array_unshift($ips, $liveIp);
-                }
+        foreach ($allSessions as $s) {
+            $sessionEndCheck = $s['isOngoing'] ? $nowTs : ((int)($s['endTs'] ?: $s['startTs']));
+            if ($rangeStartTs !== null && $sessionEndCheck < $rangeStartTs) {
+                continue;
+            }
+            if ($rangeEndTs !== null && (int)$s['startTs'] > $rangeEndTs) {
+                continue;
             }
 
+            $filteredSessions[] = $s;
+            $down = (float)$s['downloadBytes'];
+            $up = (float)$s['uploadBytes'];
+            $dur = (int)$s['durationSeconds'];
+            $ip = trim((string)$s['ip']);
+
+            $totalDownBytes += $down;
+            $totalUpBytes += $up;
+            $totalUptimeSec += $dur;
+            if (!$s['isOngoing']) {
+                $totalDisconnects++;
+                if ($dur > 0) {
+                    $closedDurations[] = $dur;
+                }
+                if ($lastDisconnectedAt === null && !empty($s['end']) && $s['end'] !== '—') {
+                    $lastDisconnectedAt = $s['end'];
+                }
+            }
+            if ($ip !== '' && $ip !== '0.0.0.0' && !in_array($ip, $distinctIps, true)) {
+                $distinctIps[] = $ip;
+            }
+
+            $refTs = $s['isOngoing'] ? $nowTs : ((int)($s['endTs'] ?: $s['startTs']));
+            $dDate = date('Y-m-d', $refTs);
+            if (!isset($dailyMap[$dDate])) {
+                $dailyMap[$dDate] = [
+                    'date' => $dDate,
+                    'downloadBytes' => 0.0,
+                    'uploadBytes' => 0.0,
+                    'uptimeSeconds' => 0,
+                    'sessionCount' => 0,
+                    'disconnectCount' => 0,
+                    'assignedIps' => [],
+                ];
+            }
+            $dailyMap[$dDate]['downloadBytes'] += $down;
+            $dailyMap[$dDate]['uploadBytes'] += $up;
+            $dailyMap[$dDate]['uptimeSeconds'] += $dur;
+            $dailyMap[$dDate]['sessionCount'] += 1;
+            if (!$s['isOngoing']) {
+                $dailyMap[$dDate]['disconnectCount'] += 1;
+            }
+            if ($ip !== '' && !in_array($ip, $dailyMap[$dDate]['assignedIps'], true)) {
+                $dailyMap[$dDate]['assignedIps'][] = $ip;
+            }
+        }
+
+        $totalUsageBytes = $totalDownBytes + $totalUpBytes;
+        $avgSeconds = !empty($closedDurations) ? (array_sum($closedDurations) / count($closedDurations)) : 0;
+
+        $dailyBreakdown = [];
+        foreach ($dailyMap as $d) {
             $dailyBreakdown[] = [
-                'date' => $dDate,
-                'downloadBytes' => $dDown,
-                'uploadBytes' => $dUp,
-                'totalBytes' => $dDown + $dUp,
-                'downloadGb' => round($dDown / (1024 * 1024 * 1024), 2),
-                'uploadGb' => round($dUp / (1024 * 1024 * 1024), 2),
-                'totalGb' => round(($dDown + $dUp) / (1024 * 1024 * 1024), 2),
-                'uptimeSeconds' => $dUptime,
-                'uptimeFormatted' => self::formatDuration($dUptime),
-                'sessionCount' => (int)$d['session_count'] + (($dDate === $todayDate && $includesLiveNow) ? 1 : 0),
-                'disconnectCount' => (int)$d['disconnect_count'],
-                'assignedIps' => array_values(array_unique($ips)),
+                'date' => $d['date'],
+                'downloadBytes' => $d['downloadBytes'],
+                'uploadBytes' => $d['uploadBytes'],
+                'totalBytes' => $d['downloadBytes'] + $d['uploadBytes'],
+                'downloadGb' => round($d['downloadBytes'] / (1024 * 1024 * 1024), 2),
+                'uploadGb' => round($d['uploadBytes'] / (1024 * 1024 * 1024), 2),
+                'totalGb' => round(($d['downloadBytes'] + $d['uploadBytes']) / (1024 * 1024 * 1024), 2),
+                'uptimeSeconds' => $d['uptimeSeconds'],
+                'uptimeFormatted' => self::formatDuration($d['uptimeSeconds']),
+                'sessionCount' => $d['sessionCount'],
+                'disconnectCount' => $d['disconnectCount'],
+                'assignedIps' => $d['assignedIps'],
             ];
         }
 
-        // If today had no previous disconnected logs but is active now, create today entry
-        if (!$hasTodayInDaily && $includesLiveNow) {
-            array_unshift($dailyBreakdown, [
-                'date' => $todayDate,
-                'downloadBytes' => $liveDown,
-                'uploadBytes' => $liveUp,
-                'totalBytes' => $liveDown + $liveUp,
-                'downloadGb' => round($liveDown / (1024 * 1024 * 1024), 2),
-                'uploadGb' => round($liveUp / (1024 * 1024 * 1024), 2),
-                'totalGb' => round(($liveDown + $liveUp) / (1024 * 1024 * 1024), 2),
-                'uptimeSeconds' => $liveUptime,
-                'uptimeFormatted' => self::formatDuration($liveUptime),
-                'sessionCount' => 1,
-                'disconnectCount' => 0,
-                'assignedIps' => $liveIp ? [$liveIp] : [],
-            ]);
-        }
-
-        // Query session logs for list table
-        $logSql = "SELECT id, username, event_type, assigned_ip, caller_mac, session_time_seconds, bytes_uploaded, bytes_downloaded, disconnect_reason, logged_at 
-            FROM pppoe_connection_logs 
-            WHERE {$whereSql}
-            ORDER BY logged_at DESC 
-            LIMIT :lim OFFSET :off";
-
-        $logStmt = $db->prepare($logSql);
-        foreach ($params as $k => $v) {
-            if ($k === 'tid') $logStmt->bindValue(":{$k}", $v, PDO::PARAM_INT);
-            else $logStmt->bindValue(":{$k}", $v, PDO::PARAM_STR);
-        }
-        $logStmt->bindValue(':lim', $limit, PDO::PARAM_INT);
-        $logStmt->bindValue(':off', $offset, PDO::PARAM_INT);
-        $logStmt->execute();
-        $rows = $logStmt->fetchAll(PDO::FETCH_ASSOC);
+        $totalCount = count($filteredSessions);
+        $pagedSessions = array_slice($filteredSessions, $offset, $limit);
 
         $sessions = [];
-
-        // If on page 1 and user is online and filter window includes now, prepend active live session!
-        if ($page === 1 && $includesLiveNow) {
-            $connTime = !empty($cust['last_online_at']) 
-                ? $cust['last_online_at'] 
-                : date('Y-m-d H:i:s', time() - $liveUptime);
-
+        foreach ($pagedSessions as $s) {
+            $stime = (int)$s['durationSeconds'];
+            $reason = $s['reason'] ?: ($s['isOngoing'] ? 'Active Session (Online Now)' : 'Session Terminated');
             $sessions[] = [
-                'session_id' => 'active_live',
-                'id' => 'active_live',
-                'username' => $username,
-                'connection_date' => $connTime,
-                'connectedAt' => $connTime,
-                'disconnection_date' => null, // Active!
-                'disconnectedAt' => null,
-                'upload' => $liveUp,
-                'uploadBytes' => $liveUp,
-                'download' => $liveDown,
-                'downloadBytes' => $liveDown,
-                'session_time' => $liveUptime,
-                'durationSeconds' => $liveUptime,
-                'session_time_formatted' => self::formatDuration($liveUptime),
-                'disconnect_reason' => 'Active Session (Online Now)',
-                'terminateCause' => 'Active Session (Online Now)',
-                'caller_mac' => $cust['mac_address'],
-                'callerMac' => $cust['mac_address'],
-                'assigned_ip' => $liveIp,
-                'framedIp' => $liveIp,
-                'status' => 'active',
-            ];
-        }
-
-        foreach ($rows as $r) {
-            $stime = (int)($r['session_time_seconds'] ?? 0);
-            $discTime = $r['logged_at'];
-            $connTime = ($stime > 0) ? date('Y-m-d H:i:s', strtotime($discTime) - $stime) : $discTime;
-            $isConn = $r['event_type'] === 'connected';
-            $reason = $r['disconnect_reason'] ?: ($isConn ? 'Connected' : 'Session Terminated');
-
-            $sessions[] = [
-                'session_id' => (string)$r['id'],
-                'id' => (string)$r['id'],
-                'username' => $r['username'],
-                'connection_date' => $isConn ? $r['logged_at'] : $connTime,
-                'connectedAt' => $isConn ? $r['logged_at'] : $connTime,
-                'disconnection_date' => $isConn ? null : $discTime,
-                'disconnectedAt' => $isConn ? null : $discTime,
-                'upload' => (int)($r['bytes_uploaded'] ?? 0),
-                'uploadBytes' => (int)($r['bytes_uploaded'] ?? 0),
-                'download' => (int)($r['bytes_downloaded'] ?? 0),
-                'downloadBytes' => (int)($r['bytes_downloaded'] ?? 0),
+                'session_id' => (string)$s['id'],
+                'id' => (string)$s['id'],
+                'username' => $s['username'] ?: $username,
+                'connection_date' => $s['start'],
+                'connectedAt' => $s['start'],
+                'disconnection_date' => $s['isOngoing'] ? null : $s['end'],
+                'disconnectedAt' => $s['isOngoing'] ? null : $s['end'],
+                'upload' => (int)$s['uploadBytes'],
+                'uploadBytes' => (int)$s['uploadBytes'],
+                'download' => (int)$s['downloadBytes'],
+                'downloadBytes' => (int)$s['downloadBytes'],
                 'session_time' => $stime,
                 'durationSeconds' => $stime,
                 'session_time_formatted' => self::formatDuration($stime),
                 'disconnect_reason' => $reason,
                 'terminateCause' => $reason,
-                'caller_mac' => $r['caller_mac'],
-                'callerMac' => $r['caller_mac'],
-                'assigned_ip' => $r['assigned_ip'],
-                'framedIp' => $r['assigned_ip'],
-                'status' => $isConn ? 'connected' : 'disconnected',
+                'caller_mac' => $s['mac'] ?: $cust['mac_address'],
+                'callerMac' => $s['mac'] ?: $cust['mac_address'],
+                'assigned_ip' => $s['ip'] ?: $cust['current_ip'],
+                'framedIp' => $s['ip'] ?: $cust['current_ip'],
+                'status' => $s['isOngoing'] ? 'active' : 'disconnected',
             ];
         }
-
-        $totalCount = $totalLogs + ($includesLiveNow ? 1 : 0);
 
         Response::json([
             'success' => true,
@@ -635,7 +587,7 @@ class CustomerPortalController {
                 'startDate' => $rangeStart ? date('Y-m-d', strtotime($rangeStart)) : null,
                 'endDate' => $rangeEnd ? date('Y-m-d', strtotime($rangeEnd)) : null,
                 'totalSessions' => $totalCount,
-                'totalDisconnects' => (int)($stats['total_disconnects'] ?? 0),
+                'totalDisconnects' => $totalDisconnects,
                 'totalDownloadBytes' => $totalDownBytes,
                 'totalDownloadGb' => round($totalDownBytes / (1024 * 1024 * 1024), 2),
                 'totalUploadBytes' => $totalUpBytes,
@@ -645,10 +597,10 @@ class CustomerPortalController {
                 'totalUptimeSeconds' => $totalUptimeSec,
                 'totalUptimeFormatted' => self::formatDuration($totalUptimeSec),
                 'assignedIps' => array_values(array_unique(array_filter($distinctIps))),
-                'averageSessionMinutes' => round(((float)($stats['avg_seconds'] ?? 0)) / 60, 1),
-                'averageSessionFormatted' => self::formatDuration((int)($stats['avg_seconds'] ?? 0)),
-                'lastDisconnectedAt' => $stats['last_disconnect_time'] ?? null,
-                'currentOnline' => (bool)($cust['is_online'] ?? false),
+                'averageSessionMinutes' => round($avgSeconds / 60, 1),
+                'averageSessionFormatted' => self::formatDuration((int)$avgSeconds),
+                'lastDisconnectedAt' => $lastDisconnectedAt,
+                'currentOnline' => $isLiveOnline,
                 'dailyBreakdown' => $dailyBreakdown,
             ],
             'meta' => [
@@ -718,77 +670,11 @@ class CustomerPortalController {
 
     /**
      * POST /customer/renew
-     * Self-care package renewal / extension request
+     * Disabled: Direct unpaid renewal is not allowed. Customers must initiate and verify payment via PaymentGatewayController.
      */
     public static function renew(): void {
-        $customerId = self::getCustomerId();
-        $user = AuthMiddleware::requireAuth();
-        $tenantId = AuthMiddleware::getTenantId();
-        $db = Database::getConnection();
-
-        $input = json_decode(file_get_contents('php://input'), true) ?: [];
-        $planId = $input['plan_id'] ?? null;
-        $months = max(1, (int)($input['no_of_month'] ?? 1));
-
-        $stmtPlan = $db->prepare("SELECT * FROM access_profiles WHERE (access_profile_id = :pid OR profile_code = :pcode) AND tenant_id = :tid LIMIT 1");
-        $stmtPlan->execute(['pid' => $planId, 'pcode' => $planId, 'tid' => $tenantId]);
-        $plan = $stmtPlan->fetch();
-
-        if (!$plan) {
-            $stmtDef = $db->prepare("SELECT * FROM access_profiles WHERE tenant_id = :tid ORDER BY price ASC LIMIT 1");
-            $stmtDef->execute(['tid' => $tenantId]);
-            $plan = $stmtDef->fetch();
-        }
-
-        $validityDays = ((int)($plan['validity_days'] ?? 30)) * $months;
-
-        // Fetch existing customer service to calculate proper forward extension
-        $stmtCs = $db->prepare("SELECT customer_service_id, expires_at, access_profile_id FROM customer_services WHERE customer_id = :cid ORDER BY customer_service_id DESC LIMIT 1");
-        $stmtCs->execute(['cid' => $customerId]);
-        $existingCs = $stmtCs->fetch();
-
-        $baseTime = (!empty($existingCs['expires_at']) && strtotime($existingCs['expires_at']) > time()) 
-            ? strtotime($existingCs['expires_at']) 
-            : time();
-        $newExpiry = date('Y-m-d H:i:s', strtotime("+{$validityDays} days", $baseTime));
-
-        if ($existingCs) {
-            $upCs = $db->prepare("UPDATE customer_services SET expires_at = :exp, status = 'active', updated_at = NOW() WHERE customer_id = :cid");
-            $upCs->execute(['exp' => $newExpiry, 'cid' => $customerId]);
-        } else {
-            $insCs = $db->prepare("INSERT INTO customer_services 
-                (tenant_id, customer_id, access_profile_id, network_device_id, protocol, billing_cycle, status, starts_at, expires_at)
-                VALUES (:tid, :cid, :pid, 1, 'pppoe', 'monthly', 'active', NOW(), :exp)");
-            $insCs->execute([
-                'tid' => $tenantId,
-                'cid' => $customerId,
-                'pid' => $plan['access_profile_id'] ?? 1,
-                'exp' => $newExpiry,
-            ]);
-        }
-
-        // Update customer billing status
-        $upCust = $db->prepare("UPDATE customers SET billing_status = 'Paid', status = 'active', updated_at = NOW() WHERE customer_id = :cid");
-        $upCust->execute(['cid' => $customerId]);
-
-        // Settle pending/overdue invoices
-        $db->prepare("UPDATE invoices SET paid_amount = total_amount, balance_due = 0, status = 'paid', updated_at = NOW() WHERE customer_id = :cid AND status IN ('pending', 'partially_paid', 'overdue')")
-           ->execute(['cid' => $customerId]);
-
-        // Synchronize and unblock on MikroTik
-        try {
-            require_once __DIR__ . '/../lib/MikrotikSyncService.php';
-            MikrotikSyncService::renewCustomer($db, (int)$customerId);
-        } catch (\Throwable $ignored) {}
-
-        Response::json([
-            'success' => true,
-            'message' => "Package successfully renewed until {$newExpiry}",
-            'data' => [
-                'new_expire_date' => $newExpiry,
-                'bill_amount' => (float)($plan['price'] ?? 500) * $months,
-            ],
-        ]);
+        self::getCustomerId();
+        Response::error('Verified online payment is required to renew your subscription. Please use the Pay & Renew checkout.', 402);
     }
 
     /**
@@ -802,8 +688,8 @@ class CustomerPortalController {
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
         $newPassword = trim($input['new_password'] ?? '');
 
-        if (strlen($newPassword) < 4) {
-            Response::error('Password must be at least 4 characters long', 400);
+        if (strlen($newPassword) < 8) {
+            Response::error('Password must be at least 8 characters long', 400);
         }
 
         // Update PPPoE network password in customer_network_accounts
@@ -1037,9 +923,9 @@ class CustomerPortalController {
         // Auto-detect priority based on issue subject
         $priority = 'medium';
         $lowerTitle = strtolower($title);
-        if (str_contains($lowerTitle, 'red') || str_contains($lowerTitle, 'los') || str_contains($lowerTitle, 'fiber') || str_contains($lowerTitle, 'লাল') || str_contains($lowerTitle, 'কাটা')) {
+        if (str_contains($lowerTitle, 'red') || str_contains($lowerTitle, 'los') || str_contains($lowerTitle, 'fiber')) {
             $priority = 'critical';
-        } elseif (str_contains($lowerTitle, 'slow') || str_contains($lowerTitle, 'ping') || str_contains($lowerTitle, 'পিং') || str_contains($lowerTitle, 'বাফারিং') || str_contains($lowerTitle, 'drop')) {
+        } elseif (str_contains($lowerTitle, 'slow') || str_contains($lowerTitle, 'ping') || str_contains($lowerTitle, 'buffering') || str_contains($lowerTitle, 'drop')) {
             $priority = 'high';
         }
 

@@ -70,6 +70,8 @@ export default function TenantDashboard() {
     expiredCustomers: 0,
     suspendedCustomers: 0,
     leftCustomers: 0,
+    dueCustomers: 0,
+    totalDueAmount: 0,
     todayCollection: 0,
     thisMonthCollection: 0,
     lastMonthCollection: 0,
@@ -434,7 +436,7 @@ export default function TenantDashboard() {
       />
 
       {/* 2. Executive Highlights / KPI Hero Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Total Customers */}
         <div
           onClick={() => navigate('/dashboard/customers/all')}
@@ -487,6 +489,34 @@ export default function TenantDashboard() {
             </span>
             <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold group-hover:underline">
               Payments <ArrowUpRight className="w-3.5 h-3.5" />
+            </span>
+          </div>
+        </div>
+
+        {/* Total Credit Due */}
+        <div
+          onClick={() => navigate('/dashboard/customers/due')}
+          className="group cursor-pointer relative overflow-hidden bg-gradient-to-br from-amber-500/10 via-rose-500/5 to-transparent bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-amber-900/50 rounded-2xl p-5 shadow-sm hover:shadow-md hover:border-amber-400 dark:hover:border-amber-600 transition-all"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                Total Credit Due
+              </p>
+              <h3 className="text-2xl sm:text-3xl font-extrabold text-amber-600 dark:text-amber-400 mt-1 tabular-nums">
+                {isLoading ? '...' : fmtMoney(stats.totalDueAmount ?? 0)}
+              </h3>
+            </div>
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-rose-500 text-white flex items-center justify-center shadow-lg shadow-amber-500/30 group-hover:scale-105 transition-transform">
+              <CreditCard className="w-6 h-6" />
+            </div>
+          </div>
+          <div className="mt-4 flex items-center justify-between text-xs border-t border-slate-100 dark:border-slate-800/80 pt-3">
+            <span className="text-slate-500 dark:text-slate-400">
+              Due Customers: <strong className="text-amber-700 dark:text-amber-300">{(stats.dueCustomers ?? 0).toLocaleString()}</strong>
+            </span>
+            <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold group-hover:underline">
+              View Dues <ArrowUpRight className="w-3.5 h-3.5" />
             </span>
           </div>
         </div>
@@ -643,6 +673,15 @@ export default function TenantDashboard() {
               </div>
             </div>
             <div className="space-y-2">
+              <div
+                onClick={() => navigate('/dashboard/customers/due')}
+                className="flex items-center justify-between p-2 rounded-lg bg-amber-50/60 dark:bg-amber-900/20 hover:bg-amber-100/70 dark:hover:bg-amber-900/30 cursor-pointer transition-colors"
+              >
+                <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">Credit Due</span>
+                <span className="text-xs font-bold text-amber-700 dark:text-amber-300 tabular-nums">
+                  {(stats.dueCustomers ?? 0).toLocaleString()}
+                </span>
+              </div>
               <div
                 onClick={() => navigate('/dashboard/billing/expired')}
                 className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition-colors"

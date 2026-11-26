@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { escapeHtml } from '@/lib/swal';
 import {
   History,
   ShieldCheck,
@@ -267,12 +268,12 @@ export default function ActivityLogsPage() {
       const rowsHtml = logs.map((l, i) => `
         <tr>
           <td style="border:1px solid #ddd;padding:6px;font-size:11px;">${i + 1}</td>
-          <td style="border:1px solid #ddd;padding:6px;font-size:11px;">${l.createdAt}</td>
-          <td style="border:1px solid #ddd;padding:6px;font-size:11px;">${l.user.name} (${l.user.role})</td>
-          <td style="border:1px solid #ddd;padding:6px;font-size:11px;">${l.logType}</td>
-          <td style="border:1px solid #ddd;padding:6px;font-size:11px;">${l.action}</td>
-          <td style="border:1px solid #ddd;padding:6px;font-size:11px;">${l.description}</td>
-          <td style="border:1px solid #ddd;padding:6px;font-size:11px;">${l.ipAddress || '—'}</td>
+          <td style="border:1px solid #ddd;padding:6px;font-size:11px;">${escapeHtml(l.createdAt)}</td>
+          <td style="border:1px solid #ddd;padding:6px;font-size:11px;">${escapeHtml(l.user?.name)} (${escapeHtml(l.user?.role)})</td>
+          <td style="border:1px solid #ddd;padding:6px;font-size:11px;">${escapeHtml(l.logType)}</td>
+          <td style="border:1px solid #ddd;padding:6px;font-size:11px;">${escapeHtml(l.action)}</td>
+          <td style="border:1px solid #ddd;padding:6px;font-size:11px;">${escapeHtml(l.description)}</td>
+          <td style="border:1px solid #ddd;padding:6px;font-size:11px;">${escapeHtml(l.ipAddress || '—')}</td>
         </tr>
       `).join('');
 

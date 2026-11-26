@@ -7,12 +7,12 @@ import {
   CreateOltDevicePayload,
   UpdateNetworkDevicePayload,
 } from '@/types/network.types';
-import { showDeleteConfirm, showSuccess, showError, showConfirm, showLoading, closeAlert, Swal } from '@/lib/swal';
+import { showDeleteConfirm, showSuccess, showError, showConfirm, showLoading, closeAlert, Swal, escapeHtml } from '@/lib/swal';
 import { ActionDropdown } from '@/components/ui/ActionDropdown';
 import { usePingStatus } from '@/hooks/usePingStatus';
 import { usePingStatusStore } from '@/stores/pingStatusStore';
 import { PageHeader } from '@/components/common';
-import { Lock, Zap, Radio, Key, RefreshCw, X, CheckCircle2, AlertTriangle, Globe, Terminal, Building2 } from 'lucide-react';
+import { Lock, Zap, Radio, Key, RefreshCw, X, CheckCircle2, AlertTriangle, Globe, Terminal, Building2, Search } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useTenantStore } from '@/stores/tenantStore';
 import { tenantsService } from '@/services/tenants.service';
@@ -114,6 +114,7 @@ export default function OltPage() {
   const [devices, setDevices] = useState<NetworkDevice[]>(initialCached);
   const [isLoading, setIsLoading] = useState(initialCached.length === 0);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -257,6 +258,26 @@ export default function OltPage() {
   useEffect(() => {
     loadDevices(selectedTenantFilter);
   }, [selectedTenantFilter]);
+
+  const filteredDevices = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return devices;
+    return devices.filter((d) => {
+      const haystack = [
+        d.deviceName,
+        d.deviceCode,
+        d.managementIp,
+        d.vendor,
+        d.ponType,
+        d.status,
+        isSaas ? d.tenantName : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [devices, searchQuery, isSaas]);
 
   const deviceIds = useMemo(() => devices.map((d) => d.networkDeviceId), [devices]);
   const minInterval = useMemo(() => {
@@ -471,7 +492,7 @@ export default function OltPage() {
     setOpenPingMenuId(null);
     const { value: interval } = await Swal.fire({
       title: 'Set Ping Interval',
-      html: `<p class="text-left text-slate-600 dark:text-slate-400">Enter ping interval in seconds for <strong>${device.deviceName}</strong> (5-300).</p>`,
+      html: `<p class="text-left text-slate-600 dark:text-slate-400">Enter ping interval in seconds for <strong>${escapeHtml(device.deviceName)}</strong> (5-300).</p>`,
       input: 'number',
       inputValue: device.customPingInterval?.toString() || '10',
       inputAttributes: { min: '5', max: '300' },
@@ -679,10 +700,10 @@ export default function OltPage() {
               }}
               className="px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all cursor-pointer shadow-sm"
             >
-              <option value="all">🌐 All ISPs (Global List)</option>
+              <option value="all">All ISPs (Global List)</option>
               {tenantsList.map((t) => (
                 <option key={t.tenantId} value={String(t.tenantId)}>
-                  🏢 {t.tenantName} ({t.tenantCode || `ID: ${t.tenantId}`})
+                  {t.tenantName} ({t.tenantCode || `ID: ${t.tenantId}`})
                 </option>
               ))}
             </select>
@@ -1482,9 +1503,56 @@ export default function OltPage() {
           </div>
         )}
 
+        {/* Search Bar */}
+        {!isLoading && !error && devices.length > 0 && (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="relative flex-1 max-w-md">
+              <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                <Search className="w-4 h-4" />
+              </span>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search OLT by name, code, IP, or brand..."
+                className="w-full pl-10 pr-9 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  title="Clear search"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              Showing <span className="font-bold text-slate-800 dark:text-slate-200">{filteredDevices.length}</span> of{' '}
+              <span className="font-bold text-slate-800 dark:text-slate-200">{devices.length}</span> OLTs
+            </div>
+          </div>
+        )}
+
         {/* Devices Table - same structure as MikroTik */}
         {!isLoading && !error && devices.length > 0 && (
           <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-lg rounded-2xl border border-slate-200/50 dark:border-slate-700/50 shadow-xl overflow-hidden">
+            {filteredDevices.length === 0 ? (
+              <div className="p-10 text-center space-y-3">
+                <Search className="w-8 h-8 text-slate-400 mx-auto" />
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  No OLT matches &quot;{searchQuery}&quot;
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 transition-colors"
+                >
+                  Clear Search
+                </button>
+              </div>
+            ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[900px]" style={{ tableLayout: 'fixed' }}>
                 <thead className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-700/50 dark:to-slate-800/50 border-b border-slate-200 dark:border-slate-700">
@@ -1500,7 +1568,7 @@ export default function OltPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-slate-800 divide-y divide-slate-200 dark:divide-slate-700">
-                  {devices.map((device) => {
+                  {filteredDevices.map((device) => {
                     const vendorLabel = device.vendor === 'cdata' ? 'C-DATA / IT-LINK' : (device.vendor || 'olt').toUpperCase();
                     const ponInfo = `${(device.ponType || 'gpon').toUpperCase()} (${device.totalPonPorts || 8} Ports)`;
 
@@ -1517,7 +1585,7 @@ export default function OltPage() {
                           >
                             {device.deviceName}
                           </button>
-                          {device.tenantName && (
+                          {isSaas && device.tenantName && (
                             <div className="mt-1">
                               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-50 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300 border border-teal-200 dark:border-teal-800" title={`ISP: ${device.tenantName} (${device.tenantCode || device.tenantId})`}>
                                 <Building2 className="w-2.5 h-2.5 flex-shrink-0" />
@@ -1582,7 +1650,7 @@ export default function OltPage() {
                                   }}
                                   className="w-full px-3 py-1.5 text-left text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center gap-2 font-medium"
                                 >
-                                  <Zap className="w-4 h-4" /> View ONUs & Telemetry
+                                  <Zap className="w-4 h-4" /> View ONUs & Details
                                 </button>
                                 <div className="border-t border-slate-200 dark:border-slate-700 my-1" />
                                 <div className="px-2 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Health Check</div>
@@ -1615,6 +1683,7 @@ export default function OltPage() {
                 </tbody>
               </table>
             </div>
+            )}
           </div>
         )}
 

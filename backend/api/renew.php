@@ -232,7 +232,8 @@ try {
     ]);
 } catch (\Throwable $e) {
     $db->rollBack();
+    error_log('API renew error: ' . $e->getMessage());
     http_response_code(500);
-    echo json_encode(['success' => false, 'message' => 'Failed to renew: ' . $e->getMessage()]);
+    echo json_encode(['success' => false, 'message' => 'Failed to process renewal.']);
 }
 

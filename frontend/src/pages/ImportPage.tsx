@@ -24,7 +24,7 @@ import {
   ChevronRight,
   Filter,
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { readSpreadsheetFile } from '@/lib/excel';
 import Swal from 'sweetalert2';
 import { useToastContext } from '@/contexts/ToastContext';
 import { useAuthStore } from '@/stores/authStore';
@@ -366,135 +366,119 @@ export default function ImportPage() {
     setCsvFileName(file.name);
   };
 
-  const handlePreviewCsv = () => {
+  const handlePreviewCsv = async () => {
     if (!csvFile) {
       toast.warning('Please select a CSV or XLSX file first');
       return;
     }
 
     setCsvLoadingPreview(true);
-    const reader = new FileReader();
+    try {
+      const rawJson = await readSpreadsheetFile(csvFile);
 
-    reader.onload = (e) => {
-      try {
-        const data = e.target?.result;
-        const wb = XLSX.read(data, { type: 'binary', cellDates: true });
-        const sheetName = wb.SheetNames[0];
-        const sheet = wb.Sheets[sheetName];
-        const rawJson = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: '' });
+      if (rawJson.length === 0) {
+        toast.warning('The uploaded file is empty');
+        setCsvRows([]);
+        return;
+      }
 
-        if (rawJson.length === 0) {
-          toast.warning('The uploaded file is empty');
-          setCsvRows([]);
-          setCsvLoadingPreview(false);
-          return;
-        }
-
-        // Map column synonyms
-        const mappedRows: CsvClientRow[] = rawJson.map((row) => {
-          // Find value using synonym keys
-          const getVal = (...keys: string[]) => {
-            for (const k of keys) {
-              for (const rowKey of Object.keys(row)) {
-                if (rowKey.toLowerCase().trim() === k.toLowerCase()) {
-                  return String(row[rowKey] ?? '').trim();
-                }
+      // Map column synonyms
+      const mappedRows: CsvClientRow[] = rawJson.map((row) => {
+        // Find value using synonym keys
+        const getVal = (...keys: string[]) => {
+          for (const k of keys) {
+            for (const rowKey of Object.keys(row)) {
+              if (rowKey.toLowerCase().trim() === k.toLowerCase()) {
+                return String(row[rowKey] ?? '').trim();
               }
             }
-            return '';
-          };
-
-          const name = getVal('name', 'full_name', 'client_name', 'customer_name', 'নাম');
-          const pppoe_id = getVal('pppoe_id', 'username', 'user_id', 'pppoe_user', 'id', 'user', 'ইউজারনেম');
-          const pkg = getVal('package', 'plan', 'package_name', 'profile', 'স্পিড', 'প্যাকেজ');
-          const pppoe_pass = getVal('pppoe_pass', 'password', 'pass', 'pwd', 'পাসওয়ার্ড');
-          const mobile = getVal('mobile', 'phone', 'mobile_no', 'phone_number', 'contact', 'ফোন', 'মোবাইল');
-          const alternate_mobile = getVal('alternate_mobile', 'alt_phone', 'alt_mobile');
-          const address = getVal('address', 'installation_address', 'location', 'ঠিকানা');
-          const area = getVal('area', 'service_area', 'এলাকা');
-          const zone = getVal('zone', 'zone_name');
-          const status = getVal('status', 'state');
-          const router = getVal('router', 'server', 'mikrotik', 'রাউটার');
-          const join_date = getVal('join_date', 'connection_date', 'date');
-          const expiry_date = getVal('expiry_date', 'expire_date', 'expiry', 'মেয়াদ');
-          const monthly_bill = getVal('monthly_bill', 'bill', 'price', 'amount', 'টাকা', 'বিল');
-          const email = getVal('email', 'mail');
-          const remarks = getVal('remarks', 'note', 'notes');
-          const onu_mac = getVal('onu_mac', 'mac', 'mac_address');
-          const ip_address = getVal('ip_address', 'ip');
-          const client_code = getVal('client_code', 'code', 'customer_code');
-
-          // Validation
-          let isValid = true;
-          let error = '';
-
-          if (!name) {
-            isValid = false;
-            error = 'Missing Name';
-          } else if (!pppoe_id) {
-            isValid = false;
-            error = 'Missing PPPoE ID';
-          } else if (!pkg && !csvDefaultPackage) {
-            isValid = false;
-            error = 'Missing Package';
           }
+          return '';
+        };
 
-          return {
-            name,
-            pppoe_id,
-            package: pkg || 'Default Plan',
-            pppoe_pass: pppoe_pass || 'pass123',
-            mobile: mobile || '',
-            alternate_mobile,
-            address: address || 'Dhaka, Bangladesh',
-            area,
-            zone,
-            status: status || 'active',
-            router: router || '',
-            join_date,
-            expiry_date,
-            monthly_bill,
-            email,
-            remarks,
-            onu_mac,
-            ip_address,
-            client_code,
-            _isValid: isValid,
-            _error: error,
-            _selected: isValid,
-          };
-        });
+        const name = getVal('name', 'full_name', 'client_name', 'customer_name');
+        const pppoe_id = getVal('pppoe_id', 'username', 'user_id', 'pppoe_user', 'id', 'user');
+        const pkg = getVal('package', 'plan', 'package_name', 'profile');
+        const pppoe_pass = getVal('pppoe_pass', 'password', 'pass', 'pwd');
+        const mobile = getVal('mobile', 'phone', 'mobile_no', 'phone_number', 'contact');
+        const alternate_mobile = getVal('alternate_mobile', 'alt_phone', 'alt_mobile');
+        const address = getVal('address', 'installation_address', 'location');
+        const area = getVal('area', 'service_area');
+        const zone = getVal('zone', 'zone_name');
+        const status = getVal('status', 'state');
+        const router = getVal('router', 'server', 'mikrotik');
+        const join_date = getVal('join_date', 'connection_date', 'date');
+        const expiry_date = getVal('expiry_date', 'expire_date', 'expiry');
+        const monthly_bill = getVal('monthly_bill', 'bill', 'price', 'amount');
+        const email = getVal('email', 'mail');
+        const remarks = getVal('remarks', 'note', 'notes');
+        const onu_mac = getVal('onu_mac', 'mac', 'mac_address');
+        const ip_address = getVal('ip_address', 'ip');
+        const client_code = getVal('client_code', 'code', 'customer_code');
 
-        // Check duplicates within the file itself
-        const seenPppoe: Record<string, number> = {};
-        mappedRows.forEach((r, idx) => {
-          if (r.pppoe_id) {
-            const key = r.pppoe_id.toLowerCase();
-            if (seenPppoe[key] !== undefined) {
-              r._isValid = false;
-              r._error = `Duplicate username in file (row #${seenPppoe[key] + 1})`;
-              r._selected = false;
-            } else {
-              seenPppoe[key] = idx;
-            }
+        // Validation
+        let isValid = true;
+        let error = '';
+
+        if (!name) {
+          isValid = false;
+          error = 'Missing Name';
+        } else if (!pppoe_id) {
+          isValid = false;
+          error = 'Missing PPPoE ID';
+        } else if (!pkg && !csvDefaultPackage) {
+          isValid = false;
+          error = 'Missing Package';
+        }
+
+        return {
+          name,
+          pppoe_id,
+          package: pkg || 'Default Plan',
+          pppoe_pass: pppoe_pass || 'pass123',
+          mobile: mobile || '',
+          alternate_mobile,
+          address: address || 'Dhaka, Bangladesh',
+          area,
+          zone,
+          status: status || 'active',
+          router: router || '',
+          join_date,
+          expiry_date,
+          monthly_bill,
+          email,
+          remarks,
+          onu_mac,
+          ip_address,
+          client_code,
+          _isValid: isValid,
+          _error: error,
+          _selected: isValid,
+        };
+      });
+
+      // Check duplicates within the file itself
+      const seenPppoe: Record<string, number> = {};
+      mappedRows.forEach((r, idx) => {
+        if (r.pppoe_id) {
+          const key = r.pppoe_id.toLowerCase();
+          if (seenPppoe[key] !== undefined) {
+            r._isValid = false;
+            r._error = `Duplicate username in file (row #${seenPppoe[key] + 1})`;
+            r._selected = false;
+          } else {
+            seenPppoe[key] = idx;
           }
-        });
+        }
+      });
 
-        setCsvRows(mappedRows);
-        toast.success(`Parsed ${mappedRows.length} rows from ${csvFile.name}`);
-      } catch (err: any) {
-        toast.error('Failed to parse file: ' + (err.message || 'Invalid format'));
-      } finally {
-        setCsvLoadingPreview(false);
-      }
-    };
-
-    reader.onerror = () => {
-      toast.error('Could not read file');
+      setCsvRows(mappedRows);
+      toast.success(`Parsed ${mappedRows.length} rows from ${csvFile.name}`);
+    } catch (err: any) {
+      toast.error('Failed to parse file: ' + (err.message || 'Invalid format'));
+    } finally {
       setCsvLoadingPreview(false);
-    };
-
-    reader.readAsBinaryString(csvFile);
+    }
   };
 
   // Filtered CSV Rows
@@ -780,7 +764,7 @@ export default function ImportPage() {
                     />
                   </div>
                   <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1 font-medium">
-                    ⚠️ ফাঁকা রাখলে সকল কাস্টমার "Expired" স্ট্যাটাসে যুক্ত হবে।
+                    If left blank, all imported customers will be added with &quot;Expired&quot; status.
                   </p>
                 </div>
               ) : (
@@ -1250,7 +1234,7 @@ export default function ImportPage() {
                   )}
                 </div>
                 <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-2 leading-relaxed">
-                  Required columns: <span className="font-mono text-slate-600 dark:text-slate-300">name, pppoe_id, package</span>. Use .xlsx or UTF-8 CSV (Bangla names OK). Classic Excel 97–2003 <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded text-rose-500">.xls</code> is not supported — Save As .xlsx. Synonyms: username, plan, phone, নাম, ...
+                  Required columns: <span className="font-mono text-slate-600 dark:text-slate-300">name, pppoe_id, package</span>. Use .xlsx or UTF-8 CSV. Classic Excel 97–2003 <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded text-rose-500">.xls</code> is not supported — Save As .xlsx. Synonyms: username, plan, phone, mobile, address.
                 </p>
               </div>
 

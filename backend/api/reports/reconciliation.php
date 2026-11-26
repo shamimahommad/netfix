@@ -20,7 +20,7 @@ try {
     $tenantId = (int)AuthMiddleware::getTenantId();
     $userRole = (string)($authUser['role'] ?? '');
 
-    $period = trim($_GET['period'] ?? 'this_month'); // 'today', 'this_week', 'this_month', 'this_year', 'custom'
+    $period = trim($_GET['period'] ?? 'this_month'); // 'today', 'this_week', 'this_month', 'last_month', 'this_year', 'custom'
     $startDate = !empty($_GET['start_date']) ? trim($_GET['start_date']) : null;
     $endDate = !empty($_GET['end_date']) ? trim($_GET['end_date']) : null;
     $filterPackageId = isset($_GET['package_id']) && is_numeric($_GET['package_id']) ? (int)$_GET['package_id'] : 0;
@@ -39,6 +39,10 @@ try {
     } elseif ($period === 'this_month') {
         $startDate = $now->format('Y-m-01');
         $endDate = $now->format('Y-m-t');
+    } elseif ($period === 'last_month') {
+        $firstThisMonth = new DateTime($now->format('Y-m-01'));
+        $startDate = (clone $firstThisMonth)->modify('-1 month')->format('Y-m-01');
+        $endDate = (clone $firstThisMonth)->modify('-1 day')->format('Y-m-d');
     } elseif ($period === 'this_year') {
         $startDate = $now->format('Y-01-01');
         $endDate = $now->format('Y-12-31');
@@ -198,9 +202,10 @@ try {
     ]);
 } catch (Throwable $e) {
     http_response_code(500);
+    error_log('Reconciliation report error: ' . $e->getMessage());
     echo json_encode([
         'success' => false,
-        'message' => 'Failed to generate reconciliation report: ' . $e->getMessage(),
+        'message' => 'Failed to generate reconciliation report.',
     ]);
 }
 

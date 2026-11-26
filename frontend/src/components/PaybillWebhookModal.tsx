@@ -203,7 +203,7 @@ Features:
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <span>1. Bill Inquiry URL (বিল যাচাই API)</span>
+                    <span>1. Bill Inquiry URL (Inquiry API)</span>
                     <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 font-mono font-bold">GET / POST</span>
                   </label>
                 </div>
@@ -231,7 +231,7 @@ Features:
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <span>2. Bill Payment URL (পেমেন্ট গ্রহণ API)</span>
+                    <span>2. Bill Payment URL (Payment API)</span>
                     <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 font-mono font-bold">POST</span>
                   </label>
                 </div>

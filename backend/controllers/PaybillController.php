@@ -12,6 +12,7 @@
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
+require_once __DIR__ . '/../lib/RateLimiter.php';
 require_once __DIR__ . '/../lib/MikrotikSyncService.php';
 require_once __DIR__ . '/../lib/PaymentSplitService.php';
 
@@ -73,6 +74,7 @@ class PaybillController {
      * Called by bKash, Nagad, Rocket, Upay when customer enters their ID in MFS App.
      */
     public static function inquiry(): void {
+        RateLimiter::enforce('paybill_inquiry', RateLimiter::getClientIp(), 30, 60);
         $rawInput = file_get_contents('php://input');
         $data = json_decode($rawInput, true) ?: [];
         if (empty($data)) {
@@ -195,10 +197,28 @@ class PaybillController {
      * Called by bKash, Nagad, Rocket, Upay upon customer PIN confirmation.
      */
     public static function payment(): void {
+        RateLimiter::enforce('paybill_payment', RateLimiter::getClientIp(), 20, 60);
         $rawInput = file_get_contents('php://input');
+
+        // Security Gate: Require shared secret HMAC signature or API key (fail closed)
+        $paybillSecret = trim((string)(getenv('PAYBILL_WEBHOOK_SECRET') ?: ($_ENV['PAYBILL_WEBHOOK_SECRET'] ?? '')));
+        $providedSig = trim((string)($_SERVER['HTTP_X_PAYBILL_SIGNATURE'] ?? ($_SERVER['HTTP_X_WEBHOOK_SIGNATURE'] ?? '')));
+        $providedKey = trim((string)($_SERVER['HTTP_X_API_KEY'] ?? ''));
+
+        $sigValid = ($paybillSecret !== '' && $providedSig !== '' && hash_equals(hash_hmac('sha256', (string)$rawInput, $paybillSecret), $providedSig));
+        $keyValid = ($paybillSecret !== '' && $providedKey !== '' && hash_equals($paybillSecret, $providedKey));
+        if (!$sigValid && !$keyValid) {
+            http_response_code(401);
+            echo json_encode([
+                'status' => '4001',
+                'message' => 'Unauthorized paybill request: missing or invalid signature.',
+            ]);
+            return;
+        }
+
         $data = json_decode($rawInput, true) ?: [];
         if (empty($data)) {
-            $data = $_REQUEST;
+            $data = $_POST;
         }
 
         $accountNo = trim(
@@ -229,22 +249,7 @@ class PaybillController {
         $finalTrxId = !empty($trxId) ? $trxId : ('TRX-PB-' . strtoupper(bin2hex(random_bytes(5))));
         $db = Database::getConnection();
 
-        // 1. Idempotency Check: Don't double charge if already settled
-        $stmtCheck = $db->prepare("SELECT * FROM transactions WHERE transaction_ref = :ref LIMIT 1");
-        $stmtCheck->execute(['ref' => $finalTrxId]);
-        $existingTx = $stmtCheck->fetch(PDO::FETCH_ASSOC);
-        if ($existingTx) {
-            http_response_code(200);
-            echo json_encode([
-                'status' => '0000',
-                'message' => 'Payment already verified and credited previously.',
-                'trx_id' => $finalTrxId,
-                'amount' => (float)$existingTx['amount'],
-            ]);
-            return;
-        }
-
-        // 2. Resolve Tenant & Customer
+        // 1. Resolve Tenant & Customer
         $tenant = self::resolveTenant($db, $data, $accountNo);
         $tenantClause = $tenant ? "AND c.tenant_id = :tid" : "";
         $params = [
@@ -282,18 +287,36 @@ class PaybillController {
         $customerId = (int)$cust['customer_id'];
         $tenantId = (int)$cust['tenant_id'];
 
-        // 3. Find pending invoice or create invoice record
-        $stmtInv = $db->prepare("SELECT invoice_id FROM invoices 
-            WHERE customer_id = :cid AND tenant_id = :tid AND status IN ('pending', 'partially_paid') 
-            ORDER BY invoice_id ASC LIMIT 1");
-        $stmtInv->execute(['cid' => $customerId, 'tid' => $tenantId]);
-        $invId = (int)$stmtInv->fetchColumn();
-
         $isNested = $db->inTransaction();
         if (!$isNested) {
             $db->beginTransaction();
         }
         try {
+            // 2. Transactional Idempotency Check with Row Lock
+            $stmtCheck = $db->prepare("SELECT transaction_id, amount FROM transactions WHERE transaction_ref = :ref LIMIT 1 FOR UPDATE");
+            $stmtCheck->execute(['ref' => $finalTrxId]);
+            $existingTx = $stmtCheck->fetch(PDO::FETCH_ASSOC);
+            if ($existingTx) {
+                if (!$isNested) {
+                    $db->commit();
+                }
+                http_response_code(200);
+                echo json_encode([
+                    'status' => '0000',
+                    'message' => 'Payment already verified and credited previously.',
+                    'trx_id' => $finalTrxId,
+                    'amount' => (float)$existingTx['amount'],
+                ]);
+                return;
+            }
+
+            // 3. Find pending invoice
+            $stmtInv = $db->prepare("SELECT invoice_id FROM invoices 
+                WHERE customer_id = :cid AND tenant_id = :tid AND status IN ('pending', 'partially_paid') 
+                ORDER BY invoice_id ASC LIMIT 1");
+            $stmtInv->execute(['cid' => $customerId, 'tid' => $tenantId]);
+            $invId = (int)$stmtInv->fetchColumn();
+
             // Settle invoice if exists
             if ($invId > 0) {
                 $db->prepare("UPDATE invoices SET status = 'paid', paid_amount = :amt, balance_due = 0.00, payment_method = :pm, paid_at = NOW(), updated_at = NOW() WHERE invoice_id = :id")
@@ -345,10 +368,11 @@ class PaybillController {
             if (!$isNested && $db->inTransaction()) {
                 $db->rollBack();
             }
+            error_log('Paybill transaction failed: ' . $e->getMessage());
             http_response_code(500);
             echo json_encode([
                 'status' => '5001',
-                'message' => 'Payment transaction failed: ' . $e->getMessage(),
+                'message' => 'Payment transaction failed. Please try again later.',
             ]);
             return;
         }
@@ -361,7 +385,8 @@ class PaybillController {
                 $mtMsg = $mtRes['message'];
             }
         } catch (\Throwable $me) {
-            $mtMsg = 'Mikrotik sync queued: ' . $me->getMessage();
+            error_log('Paybill MikroTik sync error: ' . $me->getMessage());
+            $mtMsg = 'Mikrotik sync queued.';
         }
 
         // Fetch updated expiry date

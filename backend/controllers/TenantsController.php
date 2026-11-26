@@ -8,8 +8,23 @@ require_once __DIR__ . '/../lib/Response.php';
 require_once __DIR__ . '/../lib/AuthMiddleware.php';
 
 class TenantsController {
-    public static function index(): void {
+    private static function requireSaasAdmin(): array {
         $user = AuthMiddleware::requireAuth();
+        $role = strtolower(trim($user['role'] ?? ''));
+        $userType = strtolower(trim($user['user_type'] ?? ''));
+        if ($role !== 'saas_admin' && $userType !== 'saas') {
+            Response::error('Forbidden: SaaS Super Administrator privileges required.', 403);
+            exit;
+        }
+        return $user;
+    }
+
+    private static function maskSecret(?string $val): string {
+        return ($val !== null && $val !== '') ? '********' : '';
+    }
+
+    public static function index(): void {
+        $user = self::requireSaasAdmin();
         $db = Database::getConnection();
 
         $stmt = $db->query("SELECT 
@@ -92,7 +107,7 @@ class TenantsController {
     }
 
     public static function show(string $id): void {
-        $user = AuthMiddleware::requireAuth();
+        $user = self::requireSaasAdmin();
         $db = Database::getConnection();
 
         $stmt = $db->prepare("SELECT 
@@ -165,7 +180,7 @@ class TenantsController {
     }
 
     public static function profile(string $id): void {
-        $user = AuthMiddleware::requireAuth();
+        $user = self::requireSaasAdmin();
         $db = Database::getConnection();
 
         $stmt = $db->prepare("SELECT 
@@ -256,13 +271,13 @@ class TenantsController {
                 'credentials' => [
                     'apiContextRoot' => $pg['api_context_root'] ?? '',
                     'appKey' => $pg['app_key'] ?? '',
-                    'appSecret' => $pg['app_secret'] ?? '',
+                    'appSecret' => self::maskSecret($pg['app_secret'] ?? ''),
                     'username' => $pg['username'] ?? '',
-                    'password' => $pg['password'] ?? '',
+                    'password' => self::maskSecret($pg['password'] ?? ''),
                     'store_id' => $pg['app_key'] ?? '',
-                    'store_passwd' => $pg['app_secret'] ?? '',
+                    'store_passwd' => self::maskSecret($pg['app_secret'] ?? ''),
                     'apiKey' => $pg['username'] ?? '',
-                    'apiSecret' => $pg['password'] ?? '',
+                    'apiSecret' => self::maskSecret($pg['password'] ?? ''),
                     'prefix' => $pg['app_key'] ?? 'NOK',
                     'sandbox' => (bool)$pg['is_sandbox'],
                 ],
@@ -326,7 +341,7 @@ class TenantsController {
                 'providerName' => $sms['provider'],
                 'isEnabled' => (bool)$sms['is_active'],
                 'credentials' => [
-                    'apiKey' => $sms['api_key'] ?? '',
+                    'apiKey' => self::maskSecret($sms['api_key'] ?? ''),
                     'senderId' => $sms['sender_id'] ?? '',
                     'balance' => (float)$sms['balance'],
                 ],
@@ -458,16 +473,28 @@ class TenantsController {
 
     public static function mySettings(): void {
         $user = AuthMiddleware::requireAuth();
+        $role = strtolower(trim($user['role'] ?? ''));
+        if (!in_array($role, ['saas_admin', 'admin', 'isp_admin', 'tenant_admin', 'manager', 'super_admin'], true)) {
+            Response::error('Access denied. Administrator permissions required.', 403);
+            return;
+        }
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
         $stmtPg = $db->prepare("SELECT * FROM payment_gateway_settings WHERE tenant_id = :tid");
         $stmtPg->execute(['tid' => $tenantId]);
-        $pgs = $stmtPg->fetchAll() ?: [];
+        $pgs = array_map(function($pg) {
+            $pg['app_secret'] = self::maskSecret($pg['app_secret'] ?? '');
+            $pg['password'] = self::maskSecret($pg['password'] ?? '');
+            return $pg;
+        }, $stmtPg->fetchAll() ?: []);
 
         $stmtSms = $db->prepare("SELECT * FROM sms_gateway_settings WHERE tenant_id = :tid");
         $stmtSms->execute(['tid' => $tenantId]);
-        $sms = $stmtSms->fetchAll() ?: [];
+        $sms = array_map(function($s) {
+            $s['api_key'] = self::maskSecret($s['api_key'] ?? '');
+            return $s;
+        }, $stmtSms->fetchAll() ?: []);
 
         $tStmt = $db->prepare("SELECT tenant_name, logo_url, business_email, business_phone, support_phone, business_address FROM tenants WHERE tenant_id = :tid LIMIT 1");
         $tStmt->execute(['tid' => $tenantId]);
@@ -551,7 +578,7 @@ class TenantsController {
     }
 
     public static function nextCode(): void {
-        AuthMiddleware::requireAuth();
+        self::requireSaasAdmin();
         $db = Database::getConnection();
         $code = self::generateUniqueTenantCode($db);
         Response::json([
@@ -562,7 +589,7 @@ class TenantsController {
     }
 
     public static function lookup(string $codeOrId): void {
-        AuthMiddleware::requireAuth();
+        self::requireSaasAdmin();
         $db = Database::getConnection();
         $q = trim($codeOrId);
 
@@ -626,7 +653,7 @@ class TenantsController {
     }
 
     public static function create(): void {
-        $user = AuthMiddleware::requireAuth();
+        $user = self::requireSaasAdmin();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
         $name = trim($data['tenantName'] ?? $data['tenant_name'] ?? '');
@@ -729,7 +756,7 @@ class TenantsController {
     }
 
     public static function update(string $id): void {
-        $user = AuthMiddleware::requireAuth();
+        $user = self::requireSaasAdmin();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $db = Database::getConnection();
 
@@ -816,7 +843,7 @@ class TenantsController {
     }
 
     public static function updateLimits(string $id): void {
-        $user = AuthMiddleware::requireAuth();
+        $user = self::requireSaasAdmin();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $db = Database::getConnection();
 
@@ -834,7 +861,7 @@ class TenantsController {
     }
 
     public static function updateFeatures(string $id): void {
-        $user = AuthMiddleware::requireAuth();
+        $user = self::requireSaasAdmin();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $db = Database::getConnection();
 
@@ -853,7 +880,7 @@ class TenantsController {
     }
 
     public static function updatePaymentGateways(string $id): void {
-        $user = AuthMiddleware::requireAuth();
+        $user = self::requireSaasAdmin();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $gateways = $data['gateways'] ?? [];
         $db = Database::getConnection();
@@ -901,11 +928,13 @@ class TenantsController {
                 $password = $creds['password'] ?? '';
             }
 
-            $stmt = $db->prepare("SELECT id FROM payment_gateway_settings WHERE tenant_id = :tid AND gateway = :gw LIMIT 1");
+            $stmt = $db->prepare("SELECT id, app_secret, password FROM payment_gateway_settings WHERE tenant_id = :tid AND gateway = :gw LIMIT 1");
             $stmt->execute(['tid' => $realTenantId, 'gw' => $name]);
             $exists = $stmt->fetch();
 
             if ($exists) {
+                $finalAppSecret = ($appSecret === '' || $appSecret === '********') ? ($exists['app_secret'] ?? '') : $appSecret;
+                $finalPassword = ($password === '' || $password === '********') ? ($exists['password'] ?? '') : $password;
                 $stmtUp = $db->prepare("UPDATE payment_gateway_settings 
                     SET is_active = :act, 
                         app_key = :ak, 
@@ -919,9 +948,9 @@ class TenantsController {
                 $stmtUp->execute([
                     'act' => $enabled,
                     'ak' => $appKey,
-                    'as' => $appSecret,
+                    'as' => $finalAppSecret,
                     'un' => $username,
-                    'pw' => $password,
+                    'pw' => $finalPassword,
                     'acr' => $apiContextRoot,
                     'sb' => $isSandbox,
                     'id' => $exists['id'],
@@ -934,9 +963,9 @@ class TenantsController {
                     'tid' => $realTenantId,
                     'gw' => $name,
                     'ak' => $appKey,
-                    'as' => $appSecret,
+                    'as' => ($appSecret === '********' ? '' : $appSecret),
                     'un' => $username,
-                    'pw' => $password,
+                    'pw' => ($password === '********' ? '' : $password),
                     'acr' => $apiContextRoot,
                     'sb' => $isSandbox,
                     'act' => $enabled,
@@ -960,7 +989,7 @@ class TenantsController {
     }
 
     public static function updateSmsGateway(string $id): void {
-        $user = AuthMiddleware::requireAuth();
+        $user = self::requireSaasAdmin();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $db = Database::getConnection();
 
@@ -979,18 +1008,19 @@ class TenantsController {
         $apiKey = trim($creds['apiKey'] ?? ($creds['apikey'] ?? ($creds['api_key'] ?? '')));
         $senderId = trim($creds['senderId'] ?? ($creds['senderName'] ?? ($creds['sender_id'] ?? '')));
 
-        $stmt = $db->prepare("SELECT id FROM sms_gateway_settings WHERE tenant_id = :tid LIMIT 1");
+        $stmt = $db->prepare("SELECT id, api_key FROM sms_gateway_settings WHERE tenant_id = :tid LIMIT 1");
         $stmt->execute(['tid' => $realTenantId]);
         $exists = $stmt->fetch();
 
         if ($exists) {
+            $finalApiKey = ($apiKey === '' || $apiKey === '********') ? ($exists['api_key'] ?? '') : $apiKey;
             $stmtUp = $db->prepare("UPDATE sms_gateway_settings 
                 SET provider = :p, is_active = :act, api_key = :ak, sender_id = :sid
                 WHERE id = :id");
             $stmtUp->execute([
                 'p' => $provider,
                 'act' => $enabled,
-                'ak' => $apiKey,
+                'ak' => $finalApiKey,
                 'sid' => $senderId,
                 'id' => $exists['id'],
             ]);
@@ -1000,7 +1030,7 @@ class TenantsController {
             $stmtIn->execute([
                 'tid' => $realTenantId,
                 'p' => $provider,
-                'ak' => $apiKey,
+                'ak' => ($apiKey === '********' ? '' : $apiKey),
                 'sid' => $senderId,
                 'act' => $enabled,
             ]);
@@ -1020,7 +1050,7 @@ class TenantsController {
     }
 
     public static function sendSmsTest(string $id): void {
-        $user = AuthMiddleware::requireAuth();
+        $user = self::requireSaasAdmin();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $db = Database::getConnection();
 
@@ -1057,12 +1087,12 @@ class TenantsController {
     }
 
     public static function resetAdminPassword(string $id): void {
-        $user = AuthMiddleware::requireAuth();
+        $user = self::requireSaasAdmin();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $newPassword = trim($data['password'] ?? '');
 
-        if (strlen($newPassword) < 6) {
-            Response::error('Password must be at least 6 characters long', 400);
+        if (strlen($newPassword) < 8) {
+            Response::error('Password must be at least 8 characters long', 400);
         }
 
         $db = Database::getConnection();
@@ -1093,13 +1123,7 @@ class TenantsController {
     }
 
     public static function updateLogPolicy(string $id): void {
-        $user = AuthMiddleware::requireAuth();
-        $callerRole = strtolower($user['role'] ?? '');
-        $userType = $user['user_type'] ?? '';
-        if ($callerRole !== 'saas_admin' && $userType !== 'saas' && $callerRole !== 'admin') {
-            Response::json(['success' => false, 'message' => 'Unauthorized: SaaS Admin permissions required'], 403);
-            return;
-        }
+        $user = self::requireSaasAdmin();
 
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $mode = $data['logStorageMode'] ?? $data['log_storage_mode'] ?? 'short_term_redis';
@@ -1141,7 +1165,7 @@ class TenantsController {
     }
 
     public static function delete(string $id): void {
-        $user = AuthMiddleware::requireAuth();
+        $user = self::requireSaasAdmin();
         $db = Database::getConnection();
 
         $stmt = $db->prepare("UPDATE tenants SET status = 'terminated', terminated_at = NOW() WHERE tenant_id = :id");

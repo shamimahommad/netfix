@@ -42,8 +42,8 @@ class Database {
             $options = [
                 PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES   => true,
-                PDO::MYSQL_ATTR_MULTI_STATEMENTS => true,
+                PDO::ATTR_EMULATE_PREPARES   => false,
+                PDO::MYSQL_ATTR_MULTI_STATEMENTS => false,
             ];
             self::$instance = new PDO($dsn, $user, $pass, $options);
             self::ensureTables(self::$instance);
@@ -93,10 +93,16 @@ class Database {
         }
     }
 
-    public static function ensureTables(PDO $pdo): void {
+    public static function ensureTables(PDO $pdo, bool $force = false): void {
         static $checked = false;
-        if ($checked) return;
+        if ($checked && !$force) return;
         $checked = true;
+
+        $cacheKey = md5((getenv('DB_HOST') ?: '127.0.0.1') . '|' . (getenv('DB_PORT') ?: '3306') . '|' . (getenv('DB_NAME') ?: 'netfix_db') . '|' . (@filemtime(__FILE__) ?: 0));
+        $markerFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'netfix_schema_' . $cacheKey . '.ok';
+        if (!$force && @file_exists($markerFile)) {
+            return;
+        }
 
         try {
             // Always ensure critical auxiliary tables exist even if main schema was already imported
@@ -444,6 +450,7 @@ class Database {
                 } catch (Throwable $t) {
                     error_log('Multi-tier tables ensure notice: ' . $t->getMessage());
                 }
+                @file_put_contents($markerFile, (string)time());
                 return; // Core tables already exist!
             }
 
@@ -480,6 +487,7 @@ class Database {
                         }
                     }
                     $pdo->exec("SET FOREIGN_KEY_CHECKS=1;");
+                    @file_put_contents($markerFile, (string)time());
                 }
             }
         } catch (Throwable $e) {

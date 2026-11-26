@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Swal from 'sweetalert2';
+import { escapeHtml } from '@/lib/swal';
 import { customersService } from '@/services/customers.service';
 import { CustomerDetailResponse } from '@/types/customer.types';
 import { serviceAreaService } from '@/services/service-area.service';
@@ -387,6 +388,7 @@ export default function CustomerDetailPage() {
     send_sms: false,
     renew_as_reseller: false,
     pay_from_customer_balance: false,
+    is_credit_due: false,
   });
   const [isChangePackageModalOpen, setIsChangePackageModalOpen] = useState(false);
   const [changePackageForm, setChangePackageForm] = useState({ plan_id: '', plan_price: 0 });
@@ -497,6 +499,7 @@ export default function CustomerDetailPage() {
           send_sms: false,
           renew_as_reseller: false,
           pay_from_customer_balance: false,
+          is_credit_due: false,
         });
       }
       // Load packages after form initialization
@@ -769,12 +772,14 @@ export default function CustomerDetailPage() {
         send_sms: renewForm.send_sms,
         renew_as_reseller: showRenewAsReseller ? renewForm.renew_as_reseller : false,
         pay_from_customer_balance: hasCustomerBalance ? renewForm.pay_from_customer_balance : false,
+        is_credit_due: renewForm.is_credit_due,
       };
 
       const response = await billingService.renewService(payload);
       
       if (response.success) {
-        toast.success(`Service renewed successfully! New Expiry: ${formattedNewExpiry}, Bill: ৳${Number(billAmount).toLocaleString('en-BD', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`);
+        const creditNote = renewForm.is_credit_due ? ' [Credit Due]' : '';
+        toast.success(`Service renewed successfully!${creditNote} New Expiry: ${formattedNewExpiry}, Bill: ৳${Number(billAmount).toLocaleString('en-BD', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`);
         setIsRenewModalOpen(false);
         // Reload customer data to show updated expiry
         loadCustomerDetail();
@@ -1072,7 +1077,7 @@ export default function CustomerDetailPage() {
       const macAddr = macBindingStatus?.callerId || customerData.network.macAddress || '';
       const result = await Swal.fire({
         title: 'Unbind MAC?',
-        html: `Are you sure you want to unbind the MAC address <strong>${macAddr}</strong>? This will remove the caller-id from the PPPoE secret.`,
+        html: `Are you sure you want to unbind the MAC address <strong>${escapeHtml(macAddr)}</strong>? This will remove the caller-id from the PPPoE secret.`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#0d9488',
@@ -1111,7 +1116,7 @@ export default function CustomerDetailPage() {
 
       const result = await Swal.fire({
         title: 'Bind MAC?',
-        html: `Bind MAC address <strong>${activeMac}</strong> from active PPPoE session to this customer's secret?`,
+        html: `Bind MAC address <strong>${escapeHtml(activeMac)}</strong> from active PPPoE session to this customer's secret?`,
         icon: 'question',
         showCancelButton: true,
         confirmButtonColor: '#0d9488',
@@ -2260,6 +2265,38 @@ export default function CustomerDetailPage() {
                       </div>
                     </label>
                   )}
+                  {/* Credit / Due Renewal Option */}
+                  <div className="space-y-1">
+                    <label className={`flex items-center gap-2.5 cursor-pointer group p-2.5 rounded-xl border transition-all ${
+                      renewForm.is_credit_due
+                        ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700/60 shadow-xs'
+                        : 'border-transparent hover:bg-white/60 dark:hover:bg-slate-800/60'
+                    }`}>
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          checked={renewForm.is_credit_due}
+                          onChange={(e) => setRenewForm((prev) => ({ ...prev, is_credit_due: e.target.checked }))}
+                          className="w-4 h-4 text-amber-600 bg-white border-2 border-slate-300 dark:border-slate-600 rounded focus:ring-2 focus:ring-amber-500 focus:ring-offset-0 checked:bg-amber-600 checked:border-amber-600 dark:bg-slate-800 dark:checked:bg-amber-500 dark:checked:border-amber-500 transition-all duration-200 cursor-pointer"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 flex-1">
+                        <BanknotesIcon className={`w-4 h-4 ${renewForm.is_credit_due ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}`} />
+                        <span className={`text-sm font-semibold ${renewForm.is_credit_due ? 'text-amber-900 dark:text-amber-300' : 'text-slate-700 dark:text-slate-300'}`}>
+                          Credit / Due Renewal
+                        </span>
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                          Due
+                        </span>
+                      </div>
+                    </label>
+                    {renewForm.is_credit_due && (
+                      <p className="text-xs text-amber-700 dark:text-amber-400 pl-8 font-medium leading-relaxed">
+                        The customer will pay this bill later. The due amount (-৳{Number(billAmount).toLocaleString()}) will be added to the customer&apos;s balance, and the package cost will be deducted from your wallet as usual.
+                      </p>
+                    )}
+                  </div>
+
                   <label className="flex items-center gap-2.5 cursor-pointer group p-2 rounded-lg hover:bg-white/50 dark:hover:bg-slate-800/50 transition-all">
                     <div className="relative">
                       <input
@@ -2615,7 +2652,7 @@ export default function CustomerDetailPage() {
                     }}
                     className="px-2.5 py-1 text-xs rounded-lg font-medium bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 hover:bg-sky-100 transition-colors"
                   >
-                    💳 Bill Due
+                    Bill Due
                   </button>
                   <button
                     type="button"
@@ -2626,7 +2663,7 @@ export default function CustomerDetailPage() {
                     }}
                     className="px-2.5 py-1 text-xs rounded-lg font-medium bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 transition-colors"
                   >
-                    ✅ Payment Received
+                    Payment Received
                   </button>
                   <button
                     type="button"
@@ -2636,7 +2673,7 @@ export default function CustomerDetailPage() {
                     }}
                     className="px-2.5 py-1 text-xs rounded-lg font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 transition-colors"
                   >
-                    ⚠️ Maintenance
+                    Maintenance
                   </button>
                   <button
                     type="button"
@@ -2648,7 +2685,7 @@ export default function CustomerDetailPage() {
                     }}
                     className="px-2.5 py-1 text-xs rounded-lg font-medium bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 hover:bg-purple-100 transition-colors"
                   >
-                    🔑 Credentials
+                    Credentials
                   </button>
                 </div>
               </div>

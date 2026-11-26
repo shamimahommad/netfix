@@ -47,22 +47,27 @@ class ActivityLogger {
      * Get client IP address
      */
     public static function getClientIp(): string {
-        $headers = [
-            'HTTP_CF_CONNECTING_IP',
-            'HTTP_X_REAL_IP',
-            'HTTP_X_FORWARDED_FOR',
-            'REMOTE_ADDR'
-        ];
-        foreach ($headers as $h) {
-            if (!empty($_SERVER[$h])) {
-                $ips = explode(',', $_SERVER[$h]);
-                $ip = trim($ips[0]);
-                if (filter_var($ip, FILTER_VALIDATE_IP)) {
-                    return $ip;
+        $remote = trim((string)($_SERVER['REMOTE_ADDR'] ?? '127.0.0.1'));
+        $isTrustedProxy = $remote !== '' && filter_var($remote, FILTER_VALIDATE_IP) !== false
+            && filter_var($remote, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false;
+
+        if ($isTrustedProxy) {
+            $headers = [
+                'HTTP_CF_CONNECTING_IP',
+                'HTTP_X_REAL_IP',
+                'HTTP_X_FORWARDED_FOR',
+            ];
+            foreach ($headers as $h) {
+                if (!empty($_SERVER[$h])) {
+                    $ips = explode(',', (string)$_SERVER[$h]);
+                    $ip = trim($ips[0]);
+                    if (filter_var($ip, FILTER_VALIDATE_IP)) {
+                        return $ip;
+                    }
                 }
             }
         }
-        return $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+        return $remote !== '' ? $remote : '127.0.0.1';
     }
 
     /**

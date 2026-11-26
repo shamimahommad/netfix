@@ -4,15 +4,9 @@
  * POST /api/customers/release-id.php
  */
 
+require_once __DIR__ . '/../../config/cors.php';
+handleCors();
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
-
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(204);
-    exit;
-}
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -21,7 +15,15 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 require_once __DIR__ . '/../../config/database.php';
+require_once __DIR__ . '/../../lib/AuthMiddleware.php';
 require_once __DIR__ . '/../../lib/CustomerIdReservationService.php';
+require_once __DIR__ . '/../../lib/Response.php';
+
+$user = AuthMiddleware::requireAuth();
+if (($user['role'] ?? '') === 'customer' || ($user['user_type'] ?? '') === 'customer') {
+    Response::error('Forbidden', 403);
+}
+$tenantId = (int)(AuthMiddleware::getTenantId() ?: 0);
 
 $raw = file_get_contents('php://input');
 $data = json_decode($raw, true);
@@ -39,6 +41,14 @@ if (empty($code) || empty($token)) {
 }
 
 $db = Database::getConnection();
+if (($user['role'] ?? '') !== 'saas_admin' && $tenantId > 0) {
+    $stmtOwn = $db->prepare("SELECT tenant_id FROM customer_id_reservations WHERE customer_code = :code AND lease_token = :tok LIMIT 1");
+    $stmtOwn->execute(['code' => $code, 'tok' => $token]);
+    $resTid = $stmtOwn->fetchColumn();
+    if ($resTid !== false && (int)$resTid !== $tenantId) {
+        Response::error('Forbidden', 403);
+    }
+}
 $released = CustomerIdReservationService::release($db, $code, $token);
 
 echo json_encode([

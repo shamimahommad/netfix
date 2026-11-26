@@ -530,9 +530,9 @@ export default function SupportPage() {
                   onChange={(e: any) => setAssignmentFilter(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:outline-none font-medium"
                 >
-                  <option value="all">👥 All Staff Tickets</option>
-                  <option value="mine">👤 Assigned to Me ({myTicketsCount})</option>
-                  <option value="unassigned">⚠️ Unassigned Tickets</option>
+                  <option value="all">All Staff Tickets</option>
+                  <option value="mine">Assigned to Me ({myTicketsCount})</option>
+                  <option value="unassigned">Unassigned Tickets</option>
                 </select>
               </div>
 
@@ -543,11 +543,11 @@ export default function SupportPage() {
                   onChange={(e) => setTicketStatusFilter(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:outline-none"
                 >
-                  <option value="all">⚡ All Statuses</option>
-                  <option value="open">🔴 Open</option>
-                  <option value="in_progress">🟡 In Progress</option>
-                  <option value="resolved">🟢 Resolved</option>
-                  <option value="closed">⚪ Closed</option>
+                  <option value="all">All Statuses</option>
+                  <option value="open">Open</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="resolved">Resolved</option>
+                  <option value="closed">Closed</option>
                 </select>
               </div>
 
@@ -558,11 +558,11 @@ export default function SupportPage() {
                   onChange={(e) => setTicketPriorityFilter(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:outline-none"
                 >
-                  <option value="all">🎯 All Priorities</option>
-                  <option value="critical">🔥 Critical</option>
-                  <option value="high">🔺 High</option>
-                  <option value="medium">🔹 Medium</option>
-                  <option value="low">▫️ Low</option>
+                  <option value="all">All Priorities</option>
+                  <option value="critical">Critical</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
                 </select>
               </div>
             </div>

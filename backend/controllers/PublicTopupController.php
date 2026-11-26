@@ -6,6 +6,7 @@
 
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
+require_once __DIR__ . '/../lib/RateLimiter.php';
 require_once __DIR__ . '/../lib/PaymentGatewayService.php';
 require_once __DIR__ . '/PaymentGatewayController.php';
 
@@ -43,6 +44,7 @@ class PublicTopupController {
      * GET /public/topup/lookup?q=...&tenant_id=...
      */
     public static function lookup(): void {
+        RateLimiter::enforce('public_topup_lookup', RateLimiter::getClientIp(), 20, 60);
         $q = trim($_GET['q'] ?? '');
         $tenantId = trim($_GET['tenant_id'] ?? '');
 
@@ -94,15 +96,17 @@ class PublicTopupController {
             }
             $newExpires = date('Y-m-d H:i:s', strtotime('+30 days', $baseTime));
 
+            $rawName = (string)($cust['full_name'] ?? 'Subscriber');
+            $maskedName = mb_substr($rawName, 0, 2) . str_repeat('*', max(3, mb_strlen($rawName) - 2));
+
             Response::json([
                 'type' => 'customer',
                 'tenant_id' => $tid,
                 'tenant_name' => $cust['tenant_name'] ?: 'Broadband Network',
                 'customer_id' => (string)$cid,
-                'name' => $cust['full_name'],
+                'name' => $maskedName,
                 'user_id' => (string)$cust['customer_code'],
                 'username' => $cust['pppoe_username'] ?: $cust['customer_code'],
-                'previous_balance' => (float)($cust['credit_limit'] ?? 0),
                 'bill_amount' => $billAmount,
                 'package_name' => $cust['profile_name'] ?: 'High-Speed Broadband',
                 'payable_amount' => $payable,
@@ -133,16 +137,14 @@ class PublicTopupController {
             $uid = (int)$reseller['user_id'];
             $tid = (string)$reseller['tenant_id'];
 
-            // Query current balance from atomic WalletLedgerService
-            require_once __DIR__ . '/../lib/WalletLedgerService.php';
-            $curBal = WalletLedgerService::getBalance($uid);
+            $rawResName = trim(($reseller['first_name'] ?? '') . ' ' . ($reseller['last_name'] ?? '')) ?: ($reseller['username'] ?? 'Reseller');
+            $maskedResName = mb_substr($rawResName, 0, 2) . str_repeat('*', max(3, mb_strlen($rawResName) - 2));
 
             Response::json([
                 'type' => 'reseller',
                 'tenant_id' => $tid,
                 'user_id' => (string)$uid,
-                'name' => trim(($reseller['first_name'] ?? '') . ' ' . ($reseller['last_name'] ?? '')) ?: ($reseller['username'] ?? 'Reseller'),
-                'previous_balance' => $curBal,
+                'name' => $maskedResName,
             ]);
             return;
         }
@@ -206,21 +208,38 @@ class PublicTopupController {
      * POST /public/topup/initiate
      */
     public static function initiate(): void {
+        RateLimiter::enforce('public_topup_initiate', RateLimiter::getClientIp(), 10, 60);
         $body = json_decode(file_get_contents('php://input'), true) ?: [];
         $tenantId = isset($body['tenant_id']) ? (int)$body['tenant_id'] : null;
-        $amount = (float)($body['amount'] ?? 0);
+        $amount = round((float)($body['amount'] ?? 0), 2);
         $gateway = strtolower(trim($body['gateway'] ?? 'bkash'));
         if ($gateway === 'sslcommerz') $gateway = 'ssl';
 
-        $type = $body['type'] ?? 'customer';
+        $type = ($body['type'] ?? 'customer') === 'reseller' ? 'reseller' : 'customer';
         $customerId = !empty($body['customer_id']) ? (int)$body['customer_id'] : null;
         $userId = !empty($body['user_id']) ? (int)$body['user_id'] : null;
 
-        if (!$tenantId || $amount <= 0) {
-            Response::error('Invalid tenant ID or amount', 400);
+        if (!$tenantId || $amount < 10.0 || $amount > 100000.0) {
+            Response::error('Invalid tenant ID or amount (must be between 10 and 100000)', 400);
         }
 
         $db = Database::getConnection();
+
+        if ($customerId) {
+            $chkC = $db->prepare("SELECT 1 FROM customers WHERE customer_id = :cid AND tenant_id = :tid LIMIT 1");
+            $chkC->execute(['cid' => $customerId, 'tid' => $tenantId]);
+            if (!$chkC->fetchColumn()) {
+                Response::error('Invalid customer target for selected ISP', 400);
+            }
+        } elseif ($userId) {
+            $chkU = $db->prepare("SELECT 1 FROM users WHERE user_id = :uid AND tenant_id = :tid AND status = 'active' LIMIT 1");
+            $chkU->execute(['uid' => $userId, 'tid' => $tenantId]);
+            if (!$chkU->fetchColumn()) {
+                Response::error('Invalid reseller target for selected ISP', 400);
+            }
+        } else {
+            Response::error('Target customer or reseller ID is required', 400);
+        }
 
         $callbackUrl = PaymentGatewayController::getFrontendBaseUrl() . "/public/topup";
 

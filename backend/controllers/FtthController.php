@@ -11,9 +11,21 @@ require_once __DIR__ . '/../lib/FtthService.php';
 class FtthController {
 
     private static function getTenant(): int {
-        AuthMiddleware::requireAuth();
+        $user = AuthMiddleware::requireAuth();
+        if (($user['role'] ?? '') === 'customer' || ($user['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden: Staff access required', 403);
+        }
         $tid = AuthMiddleware::getTenantId();
         return $tid ? (int)$tid : 1;
+    }
+
+    private static function handleError(Throwable $e): void {
+        if ($e instanceof DomainException || $e instanceof InvalidArgumentException) {
+            Response::error($e->getMessage(), 400);
+            return;
+        }
+        error_log('FTTH controller error: ' . $e->getMessage());
+        Response::error('Operation failed. Please try again later.', 500);
     }
 
     /**
@@ -25,7 +37,7 @@ class FtthController {
             $boxes = FtthService::getBoxes($tid, $_GET);
             Response::json(['success' => true, 'data' => $boxes]);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -42,7 +54,7 @@ class FtthController {
             }
             Response::json(['success' => true, 'data' => $box]);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -56,7 +68,7 @@ class FtthController {
             $box = FtthService::createBox($tid, $body);
             Response::json(['success' => true, 'message' => 'FTTH Box created successfully', 'data' => $box], 201);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -71,7 +83,7 @@ class FtthController {
             $box = FtthService::getBoxDetail($tid, (int)$id);
             Response::json(['success' => true, 'message' => 'Box updated successfully', 'data' => $box]);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -84,7 +96,7 @@ class FtthController {
             FtthService::deleteBox($tid, (int)$id);
             Response::json(['success' => true, 'message' => 'Box deleted successfully']);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -109,7 +121,7 @@ class FtthController {
             $box = FtthService::getBoxDetail($tid, (int)$id);
             Response::json(['success' => true, 'message' => 'Customer assigned to port successfully', 'data' => $box]);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -131,7 +143,7 @@ class FtthController {
             $box = FtthService::getBoxDetail($tid, (int)$id);
             Response::json(['success' => true, 'message' => 'Port freed successfully', 'data' => $box]);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -153,7 +165,7 @@ class FtthController {
             $nearest = FtthService::findNearest($tid, $lat, $lng, $maxKm);
             Response::json(['success' => true, 'data' => $nearest]);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -166,7 +178,7 @@ class FtthController {
             $cables = FtthService::getCables($tid);
             Response::json(['success' => true, 'data' => $cables]);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -180,7 +192,7 @@ class FtthController {
             $res = FtthService::saveCable($tid, $body);
             Response::json(['success' => true, 'message' => 'Cable route saved successfully', 'data' => $res], 201);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -193,7 +205,7 @@ class FtthController {
             FtthService::deleteCable($tid, (int)$id);
             Response::json(['success' => true, 'message' => 'Cable route deleted']);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -206,7 +218,7 @@ class FtthController {
             $stats = FtthService::getStats($tid);
             Response::json(['success' => true, 'data' => $stats]);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -219,7 +231,7 @@ class FtthController {
             $nocs = FtthService::getNocStations($tid);
             Response::json(['success' => true, 'data' => $nocs]);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -233,7 +245,7 @@ class FtthController {
             $res = FtthService::saveNocStation($tid, $body);
             Response::json(['success' => true, 'message' => 'Office / NOC station saved successfully', 'data' => $res]);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -246,7 +258,7 @@ class FtthController {
             FtthService::deleteNocStation($tid, (int)$id);
             Response::json(['success' => true, 'message' => 'NOC station deleted']);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -259,7 +271,7 @@ class FtthController {
             $devs = FtthService::getAvailableDevices($tid);
             Response::json(['success' => true, 'data' => $devs]);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -273,7 +285,7 @@ class FtthController {
             $device = FtthService::createDevice($tid, $body);
             Response::json(['success' => true, 'message' => 'Network device added successfully', 'data' => $device], 201);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -295,7 +307,7 @@ class FtthController {
             FtthService::updateNocLocation($tid, (int)$id, $lat, $lng);
             Response::json(['success' => true, 'message' => 'Office location updated']);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -317,7 +329,7 @@ class FtthController {
             FtthService::updateBoxLocation($tid, (int)$id, $lat, $lng);
             Response::json(['success' => true, 'message' => 'Box location updated']);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 
@@ -330,7 +342,7 @@ class FtthController {
             FtthService::deleteDevice($tid, (int)$id);
             Response::json(['success' => true, 'message' => 'Device deleted successfully']);
         } catch (Throwable $e) {
-            Response::error($e->getMessage(), 400);
+            self::handleError($e);
         }
     }
 }

@@ -20,6 +20,29 @@ class NetworkController {
         }
     }
 
+    /**
+     * Block SSRF targeting loopback, link-local/metadata, private networks, or internal service hostnames.
+     */
+    private static function assertSafeTargetHost(string $hostOrIp): void {
+        $host = trim(preg_replace('/:[0-9]+$/', '', $hostOrIp));
+        $lower = strtolower($host);
+        if ($host === '' || in_array($lower, ['localhost', 'localhost.localdomain', 'redis', 'db', 'victorialogs', 'metadata.google.internal'], true)) {
+            Response::error('Target host is not permitted.', 400);
+            exit;
+        }
+        $ips = filter_var($host, FILTER_VALIDATE_IP) ? [$host] : (gethostbynamel($host) ?: []);
+        if (empty($ips)) {
+            Response::error('Unable to resolve target host.', 400);
+            exit;
+        }
+        foreach ($ips as $ip) {
+            if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+                Response::error('Private, loopback, or reserved IP addresses are not permitted.', 400);
+                exit;
+            }
+        }
+    }
+
     public static function index(): void {
         $user = AuthMiddleware::requireAuth();
         self::requireAdminOrCompanyRole($user);
@@ -229,6 +252,7 @@ class NetworkController {
 
     public static function nextCode(): void {
         $user = AuthMiddleware::requireAuth();
+        self::requireAdminOrCompanyRole($user);
         $tenantId = AuthMiddleware::getTenantId();
         if ($user['role'] === 'saas_admin' && !empty($_GET['tenant_id']) && $_GET['tenant_id'] !== 'all') {
             $tenantId = (string)$_GET['tenant_id'];
@@ -241,6 +265,7 @@ class NetworkController {
 
     public static function create(?array $overrideData = null): void {
         $user = AuthMiddleware::requireAuth();
+        self::requireAdminOrCompanyRole($user);
         $tenantId = AuthMiddleware::getTenantId();
         $data = $overrideData ?? (json_decode(file_get_contents('php://input'), true) ?: []);
 
@@ -296,7 +321,7 @@ class NetworkController {
                 'winbox' => $winbox,
                 'web' => $webPort,
                 'user' => $data['apiUsername'] ?? 'admin',
-                'pwd' => $data['apiPassword'] ?? 'admin123',
+                'pwd' => $data['apiPassword'] ?? '',
                 'snmp_comm' => $snmpCommunity,
                 'snmp_port' => $snmpPort,
                 'pon_type' => $ponType,
@@ -318,7 +343,8 @@ class NetworkController {
             if ($e instanceof PDOException && (int)($e->errorInfo[1] ?? 0) === 1062) {
                 Response::error('Duplicate device ID detected. Device code must be globally unique across all networks.', 409);
             }
-            Response::error('Failed to create network device: ' . $e->getMessage(), 500);
+            error_log('Create network device error: ' . $e->getMessage());
+            Response::error('Failed to create network device. Please try again later.', 500);
         }
     }
 
@@ -334,6 +360,7 @@ class NetworkController {
 
     public static function update(string $id): void {
         $user = AuthMiddleware::requireAuth();
+        self::requireAdminOrCompanyRole($user);
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $db = Database::getConnection();
@@ -641,6 +668,7 @@ class NetworkController {
             Response::error('Management IP address is required for testing', 400);
             return;
         }
+        self::assertSafeTargetHost($ip);
 
         $managementPort = !empty($input['managementPort']) ? (int)$input['managementPort'] : null;
         $webPort = !empty($input['webPort']) ? (int)$input['webPort'] : null;
@@ -1038,10 +1066,11 @@ class NetworkController {
                     }
                 }
             } catch (\Throwable $e) {
+                error_log('Router login test error: ' . $e->getMessage());
                 Response::json([
                     'success' => false,
                     'status' => 'error',
-                    'message' => "Login Test Error: " . $e->getMessage(),
+                    'message' => 'Login test failed. Unable to authenticate with device.',
                 ]);
                 return;
             }
@@ -1161,14 +1190,121 @@ class NetworkController {
         }
         $devices = $stmt->fetchAll();
 
+        $stateFile = $cacheDir . '/ping_state_' . ($tenantId ?? 'all') . '.json';
+        $prevStates = [];
+        if (file_exists($stateFile)) {
+            $decodedStates = @json_decode(@file_get_contents($stateFile), true);
+            if (is_array($decodedStates)) {
+                $prevStates = $decodedStates;
+            }
+        }
+
         $items = [];
         $sockets = [];
         $startTimes = [];
 
+        // Helper to resolve secondary non-ambiguous port (avoiding shared gateway port 23/80 fallback on shared NAT IPs)
+        $ipCounts = [];
+        foreach ($devices as $devRow) {
+            $devIp = trim($devRow['management_ip'] ?? '');
+            if ($devIp !== '') {
+                $ipCounts[$devIp] = ($ipCounts[$devIp] ?? 0) + 1;
+            }
+        }
+
+        $probeBatch = function (array $deviceTargets, float $timeoutSec) use ($ipCounts): array {
+            $results = [];
+            $sockets = [];
+            $startTimes = [];
+
+            foreach ($deviceTargets as $entry) {
+                $d = $entry['device'];
+                $did = (string)$d['network_device_id'];
+                $ip = trim($d['management_ip'] ?? '');
+                $port = (int)$entry['port'];
+                if ($ip === '' || $port <= 0) {
+                    $results[$did] = ['online' => false, 'latencyMs' => null, 'port' => $port ?: null];
+                    continue;
+                }
+
+                $startTimes[$did] = microtime(true);
+                $ctx = stream_context_create(['socket' => ['connect_timeout' => $timeoutSec]]);
+                $errno = 0;
+                $errstr = '';
+                $s = @stream_socket_client('tcp://' . $ip . ':' . $port, $errno, $errstr, $timeoutSec, STREAM_CLIENT_ASYNC_CONNECT, $ctx);
+                if ($s) {
+                    stream_set_blocking($s, false);
+                    $sockets[$did] = ['socket' => $s, 'port' => $port, 'device' => $d];
+                } else {
+                    $results[$did] = ['online' => false, 'latencyMs' => null, 'port' => $port];
+                }
+            }
+
+            if (!empty($sockets)) {
+                $deadline = microtime(true) + $timeoutSec;
+                $pending = $sockets;
+
+                while (!empty($pending) && microtime(true) < $deadline) {
+                    $write = [];
+                    $except = [];
+                    foreach ($pending as $info) {
+                        $write[] = $info['socket'];
+                        $except[] = $info['socket'];
+                    }
+                    $read = null;
+                    $timeLeft = max(0.02, $deadline - microtime(true));
+                    $sec = (int)floor($timeLeft);
+                    $usec = (int)(($timeLeft - $sec) * 1000000);
+
+                    $num = @stream_select($read, $write, $except, $sec, $usec);
+                    if ($num === false || $num === 0) {
+                        break;
+                    }
+
+                    foreach ($pending as $did => $info) {
+                        $s = $info['socket'];
+                        if (in_array($s, $write, true) || in_array($s, $except, true)) {
+                            $isOnline = false;
+                            $lat = null;
+                            if (in_array($s, $write, true)) {
+                                $sockName = @stream_socket_get_name($s, true);
+                                if ($sockName !== false) {
+                                    $isOnline = true;
+                                    $lat = round((microtime(true) - $startTimes[$did]) * 1000, 1);
+                                }
+                            }
+                            @fclose($s);
+                            $results[$did] = [
+                                'online' => $isOnline,
+                                'latencyMs' => $lat,
+                                'port' => $info['port'],
+                            ];
+                            unset($pending[$did]);
+                        }
+                    }
+                }
+
+                foreach ($pending as $did => $info) {
+                    @fclose($info['socket']);
+                    $results[$did] = [
+                        'online' => false,
+                        'latencyMs' => null,
+                        'port' => $info['port'],
+                    ];
+                }
+            }
+
+            return $results;
+        };
+
+        // Pass 1: Probe primary port for all devices concurrently (2.5s timeout)
+        $pass1Targets = [];
+        $deviceMap = [];
         foreach ($devices as $d) {
             $did = (string)$d['network_device_id'];
+            $deviceMap[$did] = $d;
             $ip = trim($d['management_ip'] ?? '');
-            if (empty($ip)) {
+            if ($ip === '') {
                 $items[$did] = [
                     'deviceId' => $did,
                     'pingStatus' => 'offline',
@@ -1178,103 +1314,91 @@ class NetworkController {
                 ];
                 continue;
             }
-
             $ports = self::getDeviceTargetPorts($d);
-            $port = (int)($ports[0] ?? 80);
-            $startTimes[$did] = microtime(true);
+            $pass1Targets[$did] = ['device' => $d, 'port' => (int)($ports[0] ?? 80), 'ports' => $ports];
+        }
 
-            $ctx = stream_context_create(['socket' => ['connect_timeout' => 2.0]]);
-            $s = @stream_socket_client('tcp://' . $ip . ':' . $port, $errno, $errstr, 2.0, STREAM_CLIENT_ASYNC_CONNECT, $ctx);
-            if ($s) {
-                stream_set_blocking($s, false);
-                $sockets[$did] = ['socket' => $s, 'port' => $port, 'device' => $d];
+        $pass1Results = !empty($pass1Targets) ? $probeBatch($pass1Targets, 2.5) : [];
+
+        // Pass 2: Immediate retry for failed devices (uses unique secondary port if available, otherwise retries primary port)
+        $retryTargets = [];
+        foreach ($pass1Results as $did => $res) {
+            if (!empty($res['online'])) {
+                continue;
+            }
+            $d = $deviceMap[$did];
+            $ip = trim($d['management_ip'] ?? '');
+            $ports = $pass1Targets[$did]['ports'] ?? [];
+            $isSharedNatIp = (($ipCounts[$ip] ?? 1) > 1);
+            $retryPort = (int)($ports[0] ?? 80);
+            if (!empty($ports[1])) {
+                $secPort = (int)$ports[1];
+                if (!$isSharedNatIp || !in_array($secPort, [23, 80, 443], true)) {
+                    $retryPort = $secPort;
+                }
+            }
+            $retryTargets[$did] = ['device' => $d, 'port' => $retryPort];
+        }
+
+        $pass2Results = !empty($retryTargets) ? $probeBatch($retryTargets, 2.0) : [];
+
+        $newStates = [];
+        $nowTs = time();
+        foreach ($pass1Targets as $did => $targetInfo) {
+            $d = $targetInfo['device'];
+            $res1 = $pass1Results[$did] ?? ['online' => false, 'latencyMs' => null, 'port' => $targetInfo['port']];
+            $res2 = $pass2Results[$did] ?? null;
+
+            $probeOnline = !empty($res1['online']) || (!empty($res2['online']));
+            $lat = !empty($res1['online']) ? $res1['latencyMs'] : ($res2['latencyMs'] ?? null);
+            $portTested = !empty($res1['online']) ? $res1['port'] : ($res2['port'] ?? $res1['port']);
+
+            $prev = $prevStates[$did] ?? null;
+            $prevStatus = $prev['pingStatus'] ?? null;
+            $prevCheckedAt = (int)($prev['checkedAt'] ?? 0);
+            $prevFails = (int)($prev['failCount'] ?? 0);
+
+            if ($probeOnline) {
+                $status = ($d['status'] === 'auth_failed') ? 'auth_failed' : 'online';
+                if ($d['status'] !== 'active' && $d['status'] !== 'auth_failed') {
+                    try {
+                        $u = $db->prepare("UPDATE network_devices SET status = 'active', last_sync_at = NOW() WHERE network_device_id = :did");
+                        $u->execute(['did' => $d['network_device_id']]);
+                    } catch (\Throwable $e) {}
+                }
+                $newStates[$did] = [
+                    'pingStatus' => $status,
+                    'latencyMs' => $lat,
+                    'checkedAt' => $nowTs,
+                    'failCount' => 0,
+                ];
             } else {
-                $items[$did] = [
-                    'deviceId' => $did,
-                    'pingStatus' => 'offline',
-                    'latencyMs' => null,
-                    'portTested' => $port,
-                    'lastCheckedAt' => date('c'),
+                $failCount = $prevFails + 1;
+                // Anti-flap grace: require 2 consecutive failed poll cycles when previously online within 60s
+                if ($prevStatus === 'online' && ($nowTs - $prevCheckedAt) <= 60 && $failCount < 2) {
+                    $status = 'online';
+                    $lat = $prev['latencyMs'] ?? null;
+                } else {
+                    $status = 'offline';
+                }
+                $newStates[$did] = [
+                    'pingStatus' => $status,
+                    'latencyMs' => $lat,
+                    'checkedAt' => $nowTs,
+                    'failCount' => $failCount,
                 ];
             }
+
+            $items[$did] = [
+                'deviceId' => $did,
+                'pingStatus' => $status,
+                'latencyMs' => $lat,
+                'portTested' => $portTested,
+                'lastCheckedAt' => date('c'),
+            ];
         }
 
-        // Multi-socket non-blocking poll loop (resolves all devices asynchronously up to 2.0s deadline)
-        if (!empty($sockets)) {
-            $deadline = microtime(true) + 2.0;
-            $pending = $sockets;
-
-            while (!empty($pending) && microtime(true) < $deadline) {
-                $write = [];
-                $except = [];
-                foreach ($pending as $did => $info) {
-                    $write[] = $info['socket'];
-                    $except[] = $info['socket'];
-                }
-                $read = null;
-                $timeLeft = max(0.02, $deadline - microtime(true));
-                $sec = (int)floor($timeLeft);
-                $usec = (int)(($timeLeft - $sec) * 1000000);
-
-                $num = @stream_select($read, $write, $except, $sec, $usec);
-                if ($num === false || $num === 0) {
-                    break;
-                }
-
-                foreach ($pending as $did => $info) {
-                    $s = $info['socket'];
-                    if (in_array($s, $write, true) || in_array($s, $except, true)) {
-                        $isOnline = false;
-                        $lat = null;
-                        if (in_array($s, $write, true)) {
-                            $sockName = @stream_socket_get_name($s, true);
-                            if ($sockName !== false) {
-                                $isOnline = true;
-                                $lat = round((microtime(true) - $startTimes[$did]) * 1000, 1);
-                            }
-                        }
-                        @fclose($s);
-
-                        $d = $info['device'];
-                        $port = $info['port'];
-                        $status = $isOnline ? 'online' : 'offline';
-                        if ($isOnline && $d['status'] === 'auth_failed') {
-                            $status = 'auth_failed';
-                        }
-
-                        // If device responded online, ensure DB status is active
-                        if ($isOnline && $d['status'] !== 'active') {
-                            try {
-                                $u = $db->prepare("UPDATE network_devices SET status = 'active', last_sync_at = NOW() WHERE network_device_id = :did");
-                                $u->execute(['did' => $d['network_device_id']]);
-                            } catch (\Throwable $e) {}
-                        }
-
-                        $items[$did] = [
-                            'deviceId' => $did,
-                            'pingStatus' => $status,
-                            'latencyMs' => $lat,
-                            'portTested' => $port,
-                            'lastCheckedAt' => date('c'),
-                        ];
-                        unset($pending[$did]);
-                    }
-                }
-            }
-
-            // Any remaining sockets in $pending timed out
-            foreach ($pending as $did => $info) {
-                @fclose($info['socket']);
-                $d = $info['device'];
-                $items[$did] = [
-                    'deviceId' => $did,
-                    'pingStatus' => 'offline',
-                    'latencyMs' => null,
-                    'portTested' => $info['port'],
-                    'lastCheckedAt' => date('c'),
-                ];
-            }
-        }
+        @file_put_contents($stateFile, json_encode($newStates));
 
         $data = array_values($items);
         @file_put_contents($cacheFile, json_encode($data));
@@ -1788,15 +1912,21 @@ class NetworkController {
     public static function deleteOnu(string $onuIdOrMac): void {
         $user = AuthMiddleware::requireAuth();
         self::requireAdminOrCompanyRole($user);
+        $tenantId = AuthMiddleware::getTenantId();
+        $isSaas = (($user['role'] ?? '') === 'saas_admin' && $tenantId === null);
         $db = Database::getConnection();
 
         $stmt = null;
         if (is_numeric($onuIdOrMac)) {
-            $stmt = $db->prepare("SELECT * FROM olt_onus WHERE onu_record_id = :id LIMIT 1");
-            $stmt->execute(['id' => (int)$onuIdOrMac]);
+            $sql = "SELECT * FROM olt_onus WHERE onu_record_id = :id" . ($isSaas ? "" : " AND tenant_id = :tid") . " LIMIT 1";
+            $stmt = $db->prepare($sql);
+            $params = $isSaas ? ['id' => (int)$onuIdOrMac] : ['id' => (int)$onuIdOrMac, 'tid' => $tenantId];
+            $stmt->execute($params);
         } else {
-            $stmt = $db->prepare("SELECT * FROM olt_onus WHERE mac_address = :mac LIMIT 1");
-            $stmt->execute(['mac' => $onuIdOrMac]);
+            $sql = "SELECT * FROM olt_onus WHERE mac_address = :mac" . ($isSaas ? "" : " AND tenant_id = :tid") . " LIMIT 1";
+            $stmt = $db->prepare($sql);
+            $params = $isSaas ? ['mac' => $onuIdOrMac] : ['mac' => $onuIdOrMac, 'tid' => $tenantId];
+            $stmt->execute($params);
         }
         $onu = $stmt ? $stmt->fetch() : null;
 
@@ -1804,13 +1934,20 @@ class NetworkController {
             Response::error('ONU record not found', 404);
         }
 
-        $delStmt = $db->prepare("DELETE FROM olt_onus WHERE onu_record_id = :id");
-        $delStmt->execute(['id' => $onu['onu_record_id']]);
+        $delSql = "DELETE FROM olt_onus WHERE onu_record_id = :id" . ($isSaas ? "" : " AND tenant_id = :tid");
+        $delStmt = $db->prepare($delSql);
+        $delParams = $isSaas ? ['id' => $onu['onu_record_id']] : ['id' => $onu['onu_record_id'], 'tid' => $tenantId];
+        $delStmt->execute($delParams);
 
         // Update device telemetry count
         $devId = (int)$onu['network_device_id'];
-        $remainingTotal = (int)$db->query("SELECT COUNT(*) FROM olt_onus WHERE network_device_id = {$devId}")->fetchColumn();
-        $remainingOnline = (int)$db->query("SELECT COUNT(*) FROM olt_onus WHERE network_device_id = {$devId} AND status = 'online'")->fetchColumn();
+        $cntStmt1 = $db->prepare("SELECT COUNT(*) FROM olt_onus WHERE network_device_id = :did");
+        $cntStmt1->execute(['did' => $devId]);
+        $remainingTotal = (int)$cntStmt1->fetchColumn();
+
+        $cntStmt2 = $db->prepare("SELECT COUNT(*) FROM olt_onus WHERE network_device_id = :did AND status = 'online'");
+        $cntStmt2->execute(['did' => $devId]);
+        $remainingOnline = (int)$cntStmt2->fetchColumn();
 
         Response::json([
             'success' => true,
@@ -1995,13 +2132,14 @@ class NetworkController {
             }
         } catch (\Throwable $e) {
             $execTime = (int)round((microtime(true) - $startTime) * 1000);
+            error_log("Router action '{$action}' failed: " . $e->getMessage());
             Response::json([
                 'success' => false,
                 'action' => $action,
                 'deviceId' => $deviceId,
                 'action_status' => 'failed',
                 'execution_time' => $execTime,
-                'error_message' => $e->getMessage(),
+                'error_message' => 'Router command execution failed.',
             ], 500);
         } finally {
             try {
@@ -2012,12 +2150,17 @@ class NetworkController {
 
     public static function delete(string $id): void {
         $user = AuthMiddleware::requireAuth();
+        self::requireAdminOrCompanyRole($user);
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
         // Unlink or nullify any access profiles tied to this router so deletion succeeds smoothly
         try {
-            $db->prepare("UPDATE access_profiles SET network_device_id = NULL WHERE network_device_id = :id")->execute(['id' => $id]);
+            if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+                $db->prepare("UPDATE access_profiles SET network_device_id = NULL WHERE network_device_id = :id AND tenant_id = :tid")->execute(['id' => $id, 'tid' => $tenantId]);
+            } else {
+                $db->prepare("UPDATE access_profiles SET network_device_id = NULL WHERE network_device_id = :id")->execute(['id' => $id]);
+            }
         } catch (Exception $e) {
             // Ignore if column doesn't allow null
         }
@@ -2141,7 +2284,7 @@ class NetworkController {
 
         // Check if high-throughput Syslog DB has ingested records for this tenant
         $source = strtolower(trim($_GET['source'] ?? ''));
-        $checkSyslog = ($source !== 'api' && $source !== 'live' && $source !== 'router');
+        $checkSyslog = !defined('NETFIX_PPPOE_LOGS_FALLBACK') && ($source !== 'api' && $source !== 'live' && $source !== 'router');
         if ($checkSyslog && ($tenantId !== null || $user['role'] === 'saas_admin')) {
             $syslogCountStmt = ($tenantId !== null)
                 ? $db->prepare("SELECT COUNT(*) FROM pppoe_connection_logs WHERE tenant_id = :tid LIMIT 1")
@@ -2193,7 +2336,7 @@ class NetworkController {
 
         // Check Redis cache first (default in-memory tier, 6s TTL)
         $redis = null;
-        $cacheKey = "netfix:pppoe_logs:t_{$tenantId}:r_" . ($targetRouterId ?: 'default');
+        $cacheKey = "netfix:pppoe_logs_known_v2:t_{$tenantId}:u_{$userId}:r_" . ($targetRouterId ?: 'default');
         try {
             $redis = RedisClient::getInstance();
             if ($redis && $redis->isConnected()) {
@@ -2214,7 +2357,7 @@ class NetworkController {
         if (!is_dir($cacheDir)) {
             @mkdir($cacheDir, 0777, true);
         }
-        $fileCacheKey = $cacheDir . '/pppoe_logs_t' . ($tenantId ?? 0) . '_r' . ($targetRouterId ?: 'all') . '.json';
+        $fileCacheKey = $cacheDir . '/pppoe_logs_known_v2_t' . ($tenantId ?? 0) . '_u' . $userId . '_r' . ($targetRouterId ?: 'all') . '.json';
         if (!$forceReload && file_exists($fileCacheKey) && (time() - filemtime($fileCacheKey) < 60)) {
             $fileCached = @json_decode(file_get_contents($fileCacheKey), true);
             if (!empty($fileCached) && is_array($fileCached) && isset($fileCached['logs'])) {
@@ -2486,7 +2629,7 @@ class NetworkController {
                         if ($isMatch) {
                             $matchedUsername = $parsedLogs[$j]['username'];
                             $parsedLogs[$i]['username'] = $matchedUsername;
-                            $parsedLogs[$i]['customer'] = $parsedLogs[$j]['customer'] ?? ($custMap[strtolower($matchedUsername)] ?? null);
+                            $parsedLogs[$i]['customer'] = $parsedLogs[$j]['customer'];
                             $parsedLogs[$i]['correlated'] = true;
                             break;
                         }
@@ -2494,6 +2637,11 @@ class NetworkController {
                 }
             }
         }
+
+        // Strictly exclude unknown logs: show ONLY logs linked to customers existing in software
+        $parsedLogs = array_values(array_filter($parsedLogs, function ($pl) {
+            return !empty($pl['customer']) && !empty($pl['customer']['customer_id']);
+        }));
 
         $currentRouterData = null;
         if ($queryAllRouters) {
@@ -2743,7 +2891,8 @@ class NetworkController {
                 'data' => $users,
             ]);
         } catch (Throwable $e) {
-            Response::error('Failed to query MikroTik secrets: ' . $e->getMessage(), 500);
+            error_log('Query MikroTik secrets failed: ' . $e->getMessage());
+            Response::error('Failed to query MikroTik secrets. Please check router connectivity.', 500);
         }
     }
 
@@ -3007,7 +3156,8 @@ class NetworkController {
             ]);
         } catch (Throwable $e) {
             $db->rollBack();
-            Response::error('Failed to import MikroTik users: ' . $e->getMessage(), 500);
+            error_log('Import MikroTik users failed: ' . $e->getMessage());
+            Response::error('Failed to import MikroTik users. Please try again later.', 500);
         }
     }
 
@@ -3097,14 +3247,25 @@ class NetworkController {
         }, $rows);
 
         // Platform-wide Metrics
-        $metricWhere = !empty($_GET['tenant_id']) && $_GET['tenant_id'] !== 'all' ? "WHERE tenant_id = " . (int)$_GET['tenant_id'] : "";
-        $mStmt = $db->query("SELECT 
-            COUNT(*) as total_devices,
-            SUM(CASE WHEN device_type = 'router' OR vendor = 'mikrotik' THEN 1 ELSE 0 END) as total_routers,
-            SUM(CASE WHEN device_type = 'olt' THEN 1 ELSE 0 END) as total_olts,
-            SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_devices,
-            SUM(CASE WHEN status = 'offline' OR status = 'inactive' THEN 1 ELSE 0 END) as offline_devices
-            FROM network_devices {$metricWhere}");
+        $filterTid = (!empty($_GET['tenant_id']) && $_GET['tenant_id'] !== 'all') ? (int)$_GET['tenant_id'] : null;
+        if ($filterTid !== null) {
+            $mStmt = $db->prepare("SELECT 
+                COUNT(*) as total_devices,
+                SUM(CASE WHEN device_type = 'router' OR vendor = 'mikrotik' THEN 1 ELSE 0 END) as total_routers,
+                SUM(CASE WHEN device_type = 'olt' THEN 1 ELSE 0 END) as total_olts,
+                SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_devices,
+                SUM(CASE WHEN status = 'offline' OR status = 'inactive' THEN 1 ELSE 0 END) as offline_devices
+                FROM network_devices WHERE tenant_id = :tid");
+            $mStmt->execute(['tid' => $filterTid]);
+        } else {
+            $mStmt = $db->query("SELECT 
+                COUNT(*) as total_devices,
+                SUM(CASE WHEN device_type = 'router' OR vendor = 'mikrotik' THEN 1 ELSE 0 END) as total_routers,
+                SUM(CASE WHEN device_type = 'olt' THEN 1 ELSE 0 END) as total_olts,
+                SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_devices,
+                SUM(CASE WHEN status = 'offline' OR status = 'inactive' THEN 1 ELSE 0 END) as offline_devices
+                FROM network_devices");
+        }
         $m = $mStmt->fetch() ?: [];
 
         // Server Diagnostics Telemetry

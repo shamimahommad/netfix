@@ -10,8 +10,13 @@ require_once __DIR__ . '/../lib/AuthMiddleware.php';
 class TaskLogsController {
     public static function getByCustomerId(string $customerId): void {
         $user = AuthMiddleware::requireAuth();
+        if (($user['role'] ?? '') === 'customer' || ($user['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden', 403);
+        }
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
+
+        HierarchySecurityService::canViewCustomer((int)$user['user_id'], (int)$customerId, $tenantId ? (int)$tenantId : null);
 
         $stmt = $db->prepare("SELECT 
             task_id as logId,
@@ -35,6 +40,7 @@ class TaskLogsController {
     }
 
     public static function check(): void {
+        AuthMiddleware::requireAuth();
         Response::json([
             'success' => true,
             'tableExists' => true,

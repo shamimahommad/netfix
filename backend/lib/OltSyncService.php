@@ -337,7 +337,7 @@ class OltSyncService {
         }
 
         // Auto-reconciliation: Purge any ONUs from the database that were removed/deleted on the physical OLT
-        if (is_array($onus)) {
+        if (is_array($onus) && !empty($onus)) {
             try {
                 $pruneStmt = $db->prepare("DELETE FROM olt_onus 
                     WHERE network_device_id = :did 

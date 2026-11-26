@@ -12,11 +12,17 @@ services:
       - DB_PORT=${DB_PORT:-3306}
       - DB_NAME=${DB_NAME:-netfix_db}
       - DB_USER=${DB_USER:-netfix_user}
-      - DB_PASS=${DB_PASS:-SecretPass2026!}
-      - JWT_SECRET=${JWT_SECRET:-netfix_super_secret_jwt_key_2026_change_in_prod}
+      - DB_PASS=${DB_PASS:?DB_PASS must be set}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set}
+      - CRON_SECRET_KEY=${CRON_SECRET_KEY:?CRON_SECRET_KEY must be set}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+      - PAYBILL_WEBHOOK_SECRET=${PAYBILL_WEBHOOK_SECRET:-}
       - APP_ENV=${APP_ENV:-production}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:4001}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:4001}
       - REDIS_HOST=${REDIS_HOST:-redis}
       - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
       - VICTORIALOGS_URL=${VICTORIALOGS_URL:-http://victorialogs:9428}
     depends_on:
       db:
@@ -34,12 +40,12 @@ services:
     restart: always
 
   redis:
-    image: redis:7-alpine
-    command: redis-server --appendonly no --save "" --maxmemory 256mb --maxmemory-policy allkeys-lru
-    ports:
-      - "6379:6379"
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "no", "--save", "", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set}"]
+    expose:
+      - "6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"${REDIS_PASSWORD:?REDIS_PASSWORD must be set}\" redis-cli ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 3
@@ -52,8 +58,8 @@ services:
       - "-storageDataPath=/vlogs-data"
       - "-retentionPeriod=180d"
       - "-httpListenAddr=:9428"
-    ports:
-      - "9428:9428"
+    expose:
+      - "9428"
     volumes:
       - victorialogs_data:/vlogs-data
     healthcheck:
@@ -65,17 +71,17 @@ services:
     restart: always
 
   db:
-    image: mariadb:10.11
+    image: mariadb:11.4
     environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-RootSecret2026!}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
       - MYSQL_DATABASE=${DB_NAME:-netfix_db}
       - MYSQL_USER=${DB_USER:-netfix_user}
-      - MYSQL_PASSWORD=${DB_PASS:-SecretPass2026!}
+      - MYSQL_PASSWORD=${DB_PASS:?DB_PASS must be set}
     volumes:
       - db_data:/var/lib/mysql
       - ./backend/database/schema.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -u root -p\"$${MYSQL_ROOT_PASSWORD:-RootSecret2026!}\" || mysqladmin ping -h 127.0.0.1 -u root -p\"$${MYSQL_ROOT_PASSWORD:-RootSecret2026!}\" || exit 1"]
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -u root -p\"$${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}\" || mysqladmin ping -h 127.0.0.1 -u root -p\"$${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}\" || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

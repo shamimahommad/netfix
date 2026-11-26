@@ -20,17 +20,18 @@ import {
   Layers,
   Download,
   CheckCircle2,
+  XCircle,
   Zap,
   Settings2,
   Radio,
   CheckCheck,
-  HardDrive,
   ChevronDown,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { PageHeader, MetricCard, ModernCheckbox } from '@/components/common';
 import { Link } from 'react-router-dom';
 import { useToastContext } from '@/contexts/ToastContext';
+import { useAuthStore } from '@/stores/authStore';
 
 interface RouterOption {
   network_device_id: string;
@@ -184,6 +185,8 @@ function formatIspLoginTime(ts: string | undefined): string {
 
 export default function PppoeLogsPage() {
   const toast = useToastContext();
+  const { user } = useAuthStore();
+  const isSaasAdmin = user?.user_type === 'saas' || (user?.role_code ?? '').toLowerCase() === 'saas_admin';
   const [logs, setLogs] = useState<PppoeLogItem[]>([]);
   const [routers, setRouters] = useState<RouterOption[]>([]);
   const [selectedRouterId, setSelectedRouterId] = useState<string>('all');
@@ -193,14 +196,6 @@ export default function PppoeLogsPage() {
   const [viewMode, setViewMode] = useState<'isp_sample' | 'detailed'>('isp_sample');
   const [sortColumn, setSortColumn] = useState<string>('time');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [tierInfo, setTierInfo] = useState<{
-    mode: 'short_term_redis' | 'long_term_victoria' | 'disabled';
-    label: string;
-    badge: string;
-    retention: string;
-    engine: string;
-    max_live_logs?: number;
-  } | null>(null);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -325,7 +320,9 @@ export default function PppoeLogsPage() {
       const response = await api.get<PppoeLogsResponse>('/logs/pppoe', { params });
 
       if (response.data.success) {
-        const rawLogs = response.data.data || response.data.logs || [];
+        const rawLogs = (response.data.data || response.data.logs || []).filter(
+          (l) => Boolean(l.customer && l.customer.customer_id)
+        );
         setLogs(rawLogs);
         setRouters(response.data.routers || []);
 
@@ -334,7 +331,7 @@ export default function PppoeLogsPage() {
           setTotalRecords(pagination.total);
           setTotalPages(pagination.total_pages || Math.ceil(pagination.total / perPage) || 1);
         } else {
-          const tot = response.data.total || rawLogs.length;
+          const tot = response.data.total ?? rawLogs.length;
           setTotalRecords(tot);
           setTotalPages(Math.ceil(tot / perPage) || 1);
         }
@@ -345,10 +342,6 @@ export default function PppoeLogsPage() {
             disconnected: response.data.metrics.disconnected || 0,
             auth_failed: response.data.metrics.auth_failed || 0,
           });
-        }
-
-        if (response.data.tier) {
-          setTierInfo(response.data.tier);
         }
       } else {
         setError(response.data.status_message || 'Failed to fetch PPPoE connection logs');
@@ -361,9 +354,12 @@ export default function PppoeLogsPage() {
           params: { router_id: selectedRouterId, ...(isForce ? { force: 1 } : {}) } 
         });
         if (fallbackRes.data.success) {
-          setLogs(fallbackRes.data.logs || []);
+          const fallbackLogs = (fallbackRes.data.logs || []).filter(
+            (l) => Boolean(l.customer && l.customer.customer_id)
+          );
+          setLogs(fallbackLogs);
           setRouters(fallbackRes.data.routers || []);
-          setTotalRecords(fallbackRes.data.total || (fallbackRes.data.logs || []).length);
+          setTotalRecords(fallbackRes.data.total ?? fallbackLogs.length);
           return;
         }
       } catch {}
@@ -394,9 +390,9 @@ export default function PppoeLogsPage() {
     return () => clearInterval(interval);
   }, [refreshInterval, fetchLogs]);
 
-  // Fetch Syslog Setup Script with Auto-Detected IP & Token
+  // Fetch Syslog Setup Script with Auto-Detected IP & Token (SaaS Admin only)
   const fetchSetupScript = useCallback(async (rId: string, overrideHost?: string) => {
-    if (!rId) return;
+    if (!isSaasAdmin || !rId) return;
     setIsLoadingScript(true);
     setAutoSetupSuccess(null);
     setAutoSetupError(null);
@@ -415,13 +411,13 @@ export default function PppoeLogsPage() {
     } finally {
       setIsLoadingScript(false);
     }
-  }, []);
+  }, [isSaasAdmin]);
 
   useEffect(() => {
-    if (showSetupModal && setupModalRouterId) {
+    if (isSaasAdmin && showSetupModal && setupModalRouterId) {
       fetchSetupScript(setupModalRouterId);
     }
-  }, [showSetupModal, setupModalRouterId, fetchSetupScript]);
+  }, [isSaasAdmin, showSetupModal, setupModalRouterId, fetchSetupScript]);
 
   const copyToClipboard = (text: string, label = 'Copied to clipboard') => {
     navigator.clipboard.writeText(text);
@@ -431,6 +427,7 @@ export default function PppoeLogsPage() {
   };
 
   const handleOpenSetupGuide = () => {
+    if (!isSaasAdmin) return;
     const targetId = (selectedRouterId && selectedRouterId !== 'all') 
       ? selectedRouterId 
       : (routers[0]?.network_device_id || '');
@@ -440,9 +437,9 @@ export default function PppoeLogsPage() {
     setShowSetupModal(true);
   };
 
-  // 1-Click Automatic Router Configuration
+  // 1-Click Automatic Router Configuration (SaaS Admin only)
   const handle1ClickAutoSetup = async () => {
-    if (!setupModalRouterId) return;
+    if (!isSaasAdmin || !setupModalRouterId) return;
     setIsConfiguringRouter(true);
     setAutoSetupSuccess(null);
     setAutoSetupError(null);
@@ -665,43 +662,22 @@ export default function PppoeLogsPage() {
       <PageHeader
         icon={<Activity className="w-5 h-5 text-blue-600 dark:text-blue-400" />}
         title="PPPoE Connection Logs"
-        subtitle="Real-time multi-tenant MikroTik router authentication, live logins, and session disconnection events"
+        subtitle="Monitor MikroTik router authentication, active logins, and disconnection events"
         badge={`${totalRecords.toLocaleString()} Events`}
         actions={
           <div className="flex flex-wrap items-center gap-2.5">
-            {/* Storage Architecture Tier Badge */}
-            {tierInfo?.badge && (
-              <div
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border ${
-                  tierInfo.mode === 'long_term_victoria'
-                    ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800'
-                    : tierInfo.mode === 'disabled'
-                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
-                    : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
-                }`}
-                title={tierInfo.label}
+            {/* Setup Syslog Button (SaaS Admin only) */}
+            {isSaasAdmin && (
+              <button
+                type="button"
+                onClick={handleOpenSetupGuide}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/60 shadow-xs transition-all active:scale-95"
+                title="View MikroTik remote syslog configuration"
               >
-                {tierInfo.mode === 'long_term_victoria' ? (
-                  <HardDrive className="w-3.5 h-3.5 text-purple-500" />
-                ) : tierInfo.mode === 'disabled' ? (
-                  <AlertCircle className="w-3.5 h-3.5 text-slate-400" />
-                ) : (
-                  <Zap className="w-3.5 h-3.5 text-amber-500" />
-                )}
-                <span>{tierInfo.badge}</span>
-              </div>
+                <Zap className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                <span>Syslog Setup</span>
+              </button>
             )}
-
-            {/* Setup Syslog Button */}
-            <button
-              type="button"
-              onClick={handleOpenSetupGuide}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/60 shadow-xs transition-all active:scale-95"
-              title="View MikroTik remote syslog configuration commands and 1-click auto setup"
-            >
-              <Zap className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-              <span>Setup Syslog Stream</span>
-            </button>
 
             {/* Auto Refresh Interval Dropdown */}
             <div className="relative inline-flex items-center">
@@ -725,7 +701,7 @@ export default function PppoeLogsPage() {
               </div>
             </div>
 
-            {/* Refresh Button (Forces fresh pull into Redis) */}
+            {/* Refresh Button */}
             <button
               type="button"
               onClick={() => fetchLogs(false, true)}
@@ -735,6 +711,29 @@ export default function PppoeLogsPage() {
               <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing || isLoading ? 'animate-spin text-blue-600' : ''}`} />
               <span>Refresh</span>
             </button>
+
+            {/* All Routers Dropdown (beside Refresh) */}
+            <div className="relative inline-flex items-center">
+              <select
+                value={selectedRouterId}
+                onChange={(e) => {
+                  setSelectedRouterId(e.target.value);
+                  setPage(1);
+                }}
+                aria-label="Filter by Router"
+                className="appearance-none text-xs font-semibold px-3 py-2 pr-7 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 shadow-xs hover:border-slate-300 dark:hover:border-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 cursor-pointer transition-colors"
+              >
+                <option value="all">
+                  {routers.length > 0 ? `All Routers (${routers.length})` : 'All Routers'}
+                </option>
+                {routers.map((r) => (
+                  <option key={r.network_device_id} value={r.network_device_id}>
+                    {r.device_name} ({r.management_ip})
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none w-3.5 h-3.5 text-slate-400 absolute right-2.5" />
+            </div>
           </div>
         }
       />
@@ -744,7 +743,7 @@ export default function PppoeLogsPage() {
         <MetricCard
           title="Matching Logs"
           value={totalRecords.toLocaleString()}
-          subtext="Indexed database events"
+          subtext="Total matching log entries"
           variant="blue"
           icon={<Database className="w-5 h-5" />}
         />
@@ -769,51 +768,6 @@ export default function PppoeLogsPage() {
           variant="amber"
           icon={<AlertCircle className="w-5 h-5" />}
         />
-      </div>
-
-      {/* Router Selector & Connection Status Banner */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/50">
-            <Server className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Storage Target</span>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                CENTRALIZED SYSLOG ENGINE
-              </span>
-              <span className="text-xs text-slate-400 font-mono hidden sm:inline">Port 514 UDP</span>
-            </div>
-            <p className="text-sm font-bold text-slate-900 dark:text-slate-100 mt-0.5">
-              {selectedRouterId === 'all' 
-                ? `All Configured Routers (${routers.length} Active)` 
-                : (routers.find((r) => r.network_device_id === selectedRouterId)?.device_name || 'Selected Router')}
-            </p>
-          </div>
-        </div>
-
-        {routers.length > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 shrink-0 uppercase tracking-wider">Router:</span>
-            <select
-              value={selectedRouterId}
-              onChange={(e) => {
-                setSelectedRouterId(e.target.value);
-                setPage(1);
-              }}
-              className="text-xs font-medium px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
-            >
-              <option value="all">🌐 All Routers Combined ({routers.length})</option>
-              {routers.map((r) => (
-                <option key={r.network_device_id} value={r.network_device_id}>
-                  {r.device_name} ({r.management_ip})
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
       </div>
 
       {/* Filter & Search Bar */}
@@ -1064,7 +1018,7 @@ export default function PppoeLogsPage() {
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
-              📋 ISP Billing Standard
+              Standard View
             </button>
             <button
               type="button"
@@ -1075,7 +1029,7 @@ export default function PppoeLogsPage() {
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
-              🔍 Telemetry View
+              Detailed View
             </button>
           </div>
 
@@ -1112,7 +1066,7 @@ export default function PppoeLogsPage() {
         {isLoading ? (
           <div className="p-16 text-center text-slate-500 dark:text-slate-400 space-y-3">
             <RefreshCw className="w-8 h-8 animate-spin mx-auto text-blue-600" />
-            <p className="text-sm font-medium">Querying time-series PPPoE connection logs...</p>
+            <p className="text-sm font-medium">Loading PPPoE connection logs...</p>
           </div>
         ) : error && logs.length === 0 ? (
           <div className="p-12 text-center text-rose-500 space-y-3">
@@ -1132,15 +1086,19 @@ export default function PppoeLogsPage() {
             </div>
             <p className="text-base font-bold text-slate-700 dark:text-slate-200">No PPPoE connection logs found</p>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-              Configure your MikroTik router to forward PPPoE events to NetFix UDP Syslog on port 514 using 1-Click Auto Setup or the Setup Guide.
+              {isSaasAdmin
+                ? 'Configure your MikroTik router to forward PPPoE events to NetFix UDP Syslog on port 514 using 1-Click Auto Setup or the Setup Guide.'
+                : 'No PPPoE connection logs found for your registered customers.'}
             </p>
-            <button
-              onClick={handleOpenSetupGuide}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-xs shadow-sm transition-all active:scale-95"
-            >
-              <Zap className="w-3.5 h-3.5" />
-              <span>Open Setup & 1-Click Auto Config</span>
-            </button>
+            {isSaasAdmin && (
+              <button
+                onClick={handleOpenSetupGuide}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-xs shadow-sm transition-all active:scale-95"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>Open Setup & 1-Click Auto Config</span>
+              </button>
+            )}
           </div>
         ) : viewMode === 'isp_sample' ? (
           /* ISP Standard Table View (Matches Sample Screenshot) */
@@ -1320,9 +1278,9 @@ export default function PppoeLogsPage() {
                       <td className="py-2.5 px-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5">
                           {isExpired ? (
-                            <span className="text-red-600 font-bold text-xs" title="Subscription Expired / Inactive">❌</span>
+                            <XCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" aria-label="Subscription Expired / Inactive" />
                           ) : (
-                            <span className="text-emerald-600 font-bold text-xs" title="Active / Verified">✅</span>
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" aria-label="Active / Verified" />
                           )}
                           {item.customer ? (
                             <Link
@@ -1551,7 +1509,7 @@ export default function PppoeLogsPage() {
                                 )
                               )}
                               {item.correlated && (
-                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-mono font-semibold bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800" title="Matched via adjacent connection telemetry">
+                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-mono font-semibold bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800" title="Matched to active dial-in session">
                                   Dialed User
                                 </span>
                               )}
@@ -1749,8 +1707,8 @@ export default function PppoeLogsPage() {
         )}
       </div>
 
-      {/* MikroTik Syslog Setup & 1-Click Auto Configuration Modal */}
-      {showSetupModal && (
+      {/* MikroTik Syslog Setup & 1-Click Auto Configuration Modal (SaaS Admin only) */}
+      {isSaasAdmin && showSetupModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-2xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
             {/* Modal Header */}
@@ -1907,7 +1865,7 @@ export default function PppoeLogsPage() {
                           <p className="font-bold">Automatic Configuration Failed</p>
                           <p className="text-[11px] mt-0.5">{autoSetupError}</p>
                           <p className="text-[11px] text-slate-500 mt-1">
-                            Don't worry! You can copy the ready-to-use script below and paste it directly into MikroTik Winbox Terminal.
+                            You can copy the script below and paste it directly into MikroTik Winbox Terminal.
                           </p>
                         </div>
                       </div>

@@ -30,7 +30,7 @@ import {
 } from '@/services/btrc.service';
 import BtrcSettingsModal from '@/components/reports/BtrcSettingsModal';
 import BtrcBatchCategorizeModal from '@/components/reports/BtrcBatchCategorizeModal';
-import * as XLSX from 'xlsx';
+import { exportObjectsToXlsx } from '@/lib/excel';
 
 export default function BtrcReportPage() {
   const toast = useToastContext();
@@ -170,55 +170,32 @@ export default function BtrcReportPage() {
         selling_price_bdt_excluding_vat: r.selling_price_bdt_excluding_vat,
       }));
 
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(exportRows, {
-        header: [
-          'client_type',
-          'connection_type',
-          'client_username',
-          'bandwidth_distribution_point',
-          'connectivity_type',
-          'activation_date',
-          'bandwidth_allocation',
-          'allocated_ip',
-          'division',
-          'district',
-          'thana',
-          'address',
-          'client_mobile',
-          'client_email',
-          'selling_price_bdt_excluding_vat',
-        ],
-      });
-
-      // Worksheet column widths
-      ws['!cols'] = [
-        { wch: 14 }, // client_type
-        { wch: 16 }, // connection_type
-        { wch: 16 }, // client_username
-        { wch: 28 }, // bandwidth_distribution_point
-        { wch: 18 }, // connectivity_type
-        { wch: 16 }, // activation_date
-        { wch: 22 }, // bandwidth_allocation
-        { wch: 20 }, // allocated_ip
-        { wch: 14 }, // division
-        { wch: 14 }, // district
-        { wch: 16 }, // thana
-        { wch: 32 }, // address
-        { wch: 16 }, // client_mobile
-        { wch: 22 }, // client_email
-        { wch: 30 }, // selling_price_bdt_excluding_vat
+      const btrcHeaders = [
+        'client_type',
+        'connection_type',
+        'client_username',
+        'bandwidth_distribution_point',
+        'connectivity_type',
+        'activation_date',
+        'bandwidth_allocation',
+        'allocated_ip',
+        'division',
+        'district',
+        'thana',
+        'address',
+        'client_mobile',
+        'client_email',
+        'selling_price_bdt_excluding_vat',
       ];
-
-      // Sheet name MUST be 'Worksheet' matching official template
-      XLSX.utils.book_append_sheet(wb, ws, 'Worksheet');
+      const colWidths = [14, 16, 16, 28, 18, 16, 22, 20, 14, 14, 16, 32, 16, 22, 30];
 
       const dateStr = `${String(now.getDate()).padStart(2, '0')}-${String(
         now.getMonth() + 1
       ).padStart(2, '0')}-${now.getFullYear()}`;
       const fileName = `SmartISP_BTRC_Report ${dateStr} (1).xlsx`;
 
-      XLSX.writeFile(wb, fileName);
+      // Sheet name MUST be 'Worksheet' matching official template
+      await exportObjectsToXlsx(exportRows, btrcHeaders, 'Worksheet', fileName, colWidths);
       toast.success(`Exported ${exportRows.length} customers to ${fileName}`);
     } catch (err: any) {
       toast.error('Failed to export BTRC Excel report.');

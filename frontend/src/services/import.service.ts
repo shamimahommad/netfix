@@ -1,5 +1,5 @@
 import api from '@/lib/api';
-import * as XLSX from 'xlsx';
+import { exportAoaToCsv, exportAoaToXlsx } from '@/lib/excel';
 
 export interface MikrotikPreviewUser {
   username: string;
@@ -210,19 +210,10 @@ export const importService = {
       ],
     ];
 
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleRows]);
-    const csvOutput = XLSX.utils.sheet_to_csv(ws);
-    const blob = new Blob([csvOutput], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'clients_import_template.csv');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    exportAoaToCsv(headers, sampleRows, 'clients_import_template.csv');
   },
 
-  downloadXlsxTemplate() {
+  async downloadXlsxTemplate() {
     const headers = [
       'name',
       'pppoe_id',
@@ -283,10 +274,7 @@ export const importService = {
       ],
     ];
 
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleRows]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'ClientsTemplate');
-    XLSX.writeFile(wb, 'clients_import_template.xlsx');
+    await exportAoaToXlsx(headers, sampleRows, 'ClientsTemplate', 'clients_import_template.xlsx');
   },
 };
 

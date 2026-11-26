@@ -212,10 +212,11 @@ try {
 
     echo json_encode($outData);
 } catch (\Throwable $e) {
+    error_log('Router diagnostic error: ' . $e->getMessage());
     echo json_encode([
         'success' => false,
         'status'  => 'offline',
-        'message' => 'Failed to query diagnostic data: ' . $e->getMessage()
+        'message' => 'Failed to query diagnostic data.'
     ]);
 } finally {
     try {

@@ -498,7 +498,8 @@ class AccessProfilesController {
             ]);
         } catch (\Throwable $e) {
             if ($api) $api->disconnect();
-            Response::error('Failed to read profiles from MikroTik: ' . $e->getMessage(), 500);
+            error_log('Failed to read profiles from MikroTik: ' . $e->getMessage());
+            Response::error('Failed to read profiles from MikroTik. Please check router connection.', 500);
         }
     }
 

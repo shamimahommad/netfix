@@ -1556,7 +1556,7 @@ export default function AddClientPage() {
                   <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">
                     <span className="text-slate-500">Category:</span>
                     <span className="capitalize font-semibold">
-                      {form.clientCategory === 'vip' ? '⭐ VIP' : form.clientCategory === 'free' ? '🎁 Free' : form.clientCategory}
+                      {form.clientCategory === 'vip' ? 'VIP' : form.clientCategory === 'free' ? 'Free' : form.clientCategory}
                     </span>
                   </div>
                   <div className="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-700/60">

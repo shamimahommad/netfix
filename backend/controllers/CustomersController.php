@@ -47,7 +47,9 @@ class CustomersController {
                 $where[] = "c.status = 'suspended' AND (c.billing_status != 'Expired' AND (cs.expires_at IS NULL OR cs.expires_at >= NOW()))";
             } elseif ($status === 'active') {
                 $where[] = "c.status = 'active' AND c.billing_status != 'Expired' AND (cs.expires_at IS NULL OR cs.expires_at >= NOW())";
-            } elseif (in_array($status, ['Paid', 'Due', 'Left', 'Suspended', 'Pending'])) {
+            } elseif (strcasecmp($status, 'due') === 0) {
+                $where[] = "(c.billing_status = 'Due' OR EXISTS (SELECT 1 FROM invoices inv_chk WHERE inv_chk.customer_id = c.customer_id AND inv_chk.status = 'pending' AND inv_chk.balance_due > 0))";
+            } elseif (in_array($status, ['Paid', 'Left', 'Suspended', 'Pending'])) {
                 $where[] = "c.billing_status = :bstatus";
                 $params['bstatus'] = $status;
             } else {
@@ -209,11 +211,16 @@ class CustomersController {
             ) last_tx ON last_tx.customer_id = c.customer_id
             WHERE {$whereSql}
             ORDER BY c.customer_id DESC
-            LIMIT {$limit} OFFSET {$offset}";
+            LIMIT :lim OFFSET :off";
 
         try {
             $stmt = $db->prepare($query);
-            $stmt->execute($params);
+            foreach ($params as $k => $v) {
+                $stmt->bindValue(str_starts_with((string)$k, ':') ? $k : (':' . $k), $v);
+            }
+            $stmt->bindValue(':lim', (int)$limit, PDO::PARAM_INT);
+            $stmt->bindValue(':off', (int)$offset, PDO::PARAM_INT);
+            $stmt->execute();
             $rows = $stmt->fetchAll();
         } catch (\PDOException $pe) {
             // Defensive recovery if column na.last_disconnect_reason is missing on remote database
@@ -223,7 +230,12 @@ class CustomersController {
                 } catch (\Throwable $ignored) {}
                 $fallbackQuery = str_replace('na.last_disconnect_reason,', 'NULL as last_disconnect_reason,', $query);
                 $stmt = $db->prepare($fallbackQuery);
-                $stmt->execute($params);
+                foreach ($params as $k => $v) {
+                    $stmt->bindValue(str_starts_with((string)$k, ':') ? $k : (':' . $k), $v);
+                }
+                $stmt->bindValue(':lim', (int)$limit, PDO::PARAM_INT);
+                $stmt->bindValue(':off', (int)$offset, PDO::PARAM_INT);
+                $stmt->execute();
                 $rows = $stmt->fetchAll();
             } else {
                 throw $pe;
@@ -245,8 +257,8 @@ class CustomersController {
             } elseif ($row['status'] === 'suspended') {
                 // Manually suspended while still within validity
                 $billingStatus = 'Suspended';
-            } elseif ($dueAmount > 0) {
-                $billingStatus = 'Pending';
+            } elseif ($dueAmount > 0 || strcasecmp($row['raw_billing_status'] ?? '', 'due') === 0) {
+                $billingStatus = 'Due';
             } else {
                 $billingStatus = 'Paid';
             }
@@ -568,6 +580,11 @@ class CustomersController {
         $isExpired = ($serviceExpiryTs !== null && $serviceExpiryTs < $now) 
                      || strcasecmp($customer['billing_status'] ?? '', 'expired') === 0;
 
+        // Compute total pending due balance
+        $stmtDue = $db->prepare("SELECT COALESCE(SUM(balance_due), 0) FROM invoices WHERE customer_id = :cid AND status = 'pending'");
+        $stmtDue->execute(['cid' => $realCid]);
+        $totalCustomerDue = (float)$stmtDue->fetchColumn();
+
         $detailBillingStatus = 'Paid';
         $detailAccountStatus = 'active';
         if ($customer['status'] === 'cancelled' || $customer['status'] === 'terminated') {
@@ -579,8 +596,8 @@ class CustomersController {
         } elseif ($customer['status'] === 'suspended') {
             $detailBillingStatus = 'Suspended';
             $detailAccountStatus = 'suspended';
-        } elseif ((float)($inv['balance_due'] ?? 0) > 0) {
-            $detailBillingStatus = 'Pending';
+        } elseif ($totalCustomerDue > 0 || (float)($inv['balance_due'] ?? 0) > 0 || strcasecmp($customer['billing_status'] ?? '', 'due') === 0) {
+            $detailBillingStatus = 'Due';
             $detailAccountStatus = 'active';
         }
 
@@ -657,8 +674,9 @@ class CustomersController {
                     'isSuspended' => ($customer['status'] === 'suspended' && !$isExpired),
                 ],
                 'billing' => [
-                    'balance' => (float)($inv['balance_due'] ?? 0),
-                    'currentBalance' => (float)($inv['balance_due'] ?? 0),
+                    'balance' => $totalCustomerDue > 0 ? -$totalCustomerDue : 0.0,
+                    'balanceDue' => $totalCustomerDue,
+                    'currentBalance' => $totalCustomerDue > 0 ? -$totalCustomerDue : 0.0,
                     'planPrice' => (float)($service['price'] ?? 0),
                     'billingStatus' => $detailBillingStatus,
                     'accountStatus' => $detailAccountStatus,
@@ -831,7 +849,8 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             if ($e instanceof PDOException && (int)($e->errorInfo[1] ?? 0) === 1062) {
                 Response::error('Duplicate customer ID detected. Customer ID must be globally unique across the system.', 409);
             }
-            Response::error('Failed to create customer: ' . $e->getMessage(), 500);
+            error_log('Create customer error: ' . $e->getMessage());
+            Response::error('Failed to create customer. Please try again later.', 500);
         }
     }
 
@@ -914,10 +933,17 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                 require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                 $callerLevel = HierarchySecurityService::getHierarchyLevel($user['role'] ?? '');
                 if ($callerLevel > 0) {
-                    $allowedPkg = (int)$db->query("SELECT (
-                        (SELECT COUNT(*) FROM tier_packages WHERE user_id = " . (int)$user['user_id'] . " AND package_id = " . (int)$packageId . " AND is_allowed = 1) +
-                        (SELECT COUNT(*) FROM reseller_plan_permission WHERE user_id = " . (int)$user['user_id'] . " AND access_profile_id = " . (int)$packageId . " AND is_allowed = 1)
-                    )")->fetchColumn();
+                    $stmtAllowPkg = $db->prepare("SELECT (
+                        (SELECT COUNT(*) FROM tier_packages WHERE user_id = :uid1 AND package_id = :pid1 AND is_allowed = 1) +
+                        (SELECT COUNT(*) FROM reseller_plan_permission WHERE user_id = :uid2 AND access_profile_id = :pid2 AND is_allowed = 1)
+                    )");
+                    $stmtAllowPkg->execute([
+                        'uid1' => (int)$user['user_id'],
+                        'pid1' => (int)$packageId,
+                        'uid2' => (int)$user['user_id'],
+                        'pid2' => (int)$packageId,
+                    ]);
+                    $allowedPkg = (int)$stmtAllowPkg->fetchColumn();
                     if ($allowedPkg <= 0) {
                         $db->rollBack();
                         Response::error('Access Denied: The selected package has not been assigned to your account.', 403);
@@ -1095,7 +1121,8 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             if ($e instanceof PDOException && (int)($e->errorInfo[1] ?? 0) === 1062) {
                 Response::error('Duplicate customer ID or PPPoE username detected. Must be unique across the platform.', 409);
             }
-            Response::error('Failed to onboard customer: ' . $e->getMessage(), 500);
+            error_log('Customer onboard error: ' . $e->getMessage());
+            Response::error('Failed to onboard customer. Please try again later.', 500);
         }
     }
 
@@ -1472,7 +1499,8 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             } catch (\Throwable $actErr) {}
         } catch (\Throwable $e) {
             $db->rollBack();
-            Response::error('Failed to permanently delete customer: ' . $e->getMessage(), 500);
+            error_log('Customer delete error: ' . $e->getMessage());
+            Response::error('Failed to permanently delete customer. Please try again later.', 500);
             return;
         }
 
@@ -1836,7 +1864,7 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
         Response::json($result);
     }
 
-    private static function getRealCustomerId(PDO $db, string $id, ?string $tenantId, bool $isSaas): ?string {
+    private static function getRealCustomerId(PDO $db, string $id, ?string $tenantId, bool $isSaas, ?int $callerUserId = null): ?string {
         if ($isSaas || $tenantId === null) {
             $stmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id OR customer_code = :code LIMIT 1");
             $stmt->execute(['id' => $id, 'code' => $id]);
@@ -1845,7 +1873,14 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             $stmt->execute(['id' => $id, 'code' => $id, 'tid' => $tenantId]);
         }
         $val = $stmt->fetchColumn();
-        return $val !== false ? (string)$val : null;
+        if ($val === false) {
+            return null;
+        }
+        $uid = $callerUserId ?? (int)(AuthMiddleware::getUser()['user_id'] ?? 0);
+        if ($uid > 0 && !$isSaas) {
+            HierarchySecurityService::canViewCustomer($uid, (int)$val, $tenantId !== null ? (int)$tenantId : null);
+        }
+        return (string)$val;
     }
 
     public static function macStatus(string $id): void {
@@ -2046,11 +2081,25 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
 
     public static function markLeft(string $id): void {
         $user = AuthMiddleware::requireAuth();
+        if (($user['role'] ?? '') === 'customer' || ($user['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden', 403);
+        }
         $tenantId = AuthMiddleware::getTenantId();
         HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_delete_customer');
         $db = Database::getConnection();
-        $stmt = $db->prepare("UPDATE customers SET status = 'cancelled' WHERE customer_id = :cid");
-        $stmt->execute(['cid' => $id]);
+        $isSaas = (($user['role'] ?? '') === 'saas_admin');
+        $realCid = self::getRealCustomerId($db, $id, $tenantId, $isSaas, (int)$user['user_id']);
+        if (!$realCid) {
+            Response::error('Customer not found', 404);
+            return;
+        }
+        if ($isSaas || $tenantId === null) {
+            $stmt = $db->prepare("UPDATE customers SET status = 'cancelled' WHERE customer_id = :cid");
+            $stmt->execute(['cid' => $realCid]);
+        } else {
+            $stmt = $db->prepare("UPDATE customers SET status = 'cancelled' WHERE customer_id = :cid AND tenant_id = :tid");
+            $stmt->execute(['cid' => $realCid, 'tid' => $tenantId]);
+        }
 
         try {
             require_once __DIR__ . '/../lib/ActivityLogger.php';
@@ -2060,10 +2109,10 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                 'log_type' => 'client_task',
                 'action' => 'customer_left',
                 'module' => 'customers',
-                'target_id' => (string)$id,
+                'target_id' => (string)$realCid,
                 'target_type' => 'customer',
-                'description' => "Marked customer account #{$id} as left/cancelled",
-                'metadata' => ['customer_id' => $id, 'status' => 'cancelled'],
+                'description' => "Marked customer account #{$realCid} as left/cancelled",
+                'metadata' => ['customer_id' => $realCid, 'status' => 'cancelled'],
             ]);
         } catch (\Throwable $actErr) {}
 
@@ -2075,11 +2124,25 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
 
     public static function activateLeft(string $id): void {
         $user = AuthMiddleware::requireAuth();
+        if (($user['role'] ?? '') === 'customer' || ($user['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden', 403);
+        }
         $tenantId = AuthMiddleware::getTenantId();
         HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_edit_customer');
         $db = Database::getConnection();
-        $stmt = $db->prepare("UPDATE customers SET status = 'active' WHERE customer_id = :cid");
-        $stmt->execute(['cid' => $id]);
+        $isSaas = (($user['role'] ?? '') === 'saas_admin');
+        $realCid = self::getRealCustomerId($db, $id, $tenantId, $isSaas, (int)$user['user_id']);
+        if (!$realCid) {
+            Response::error('Customer not found', 404);
+            return;
+        }
+        if ($isSaas || $tenantId === null) {
+            $stmt = $db->prepare("UPDATE customers SET status = 'active' WHERE customer_id = :cid");
+            $stmt->execute(['cid' => $realCid]);
+        } else {
+            $stmt = $db->prepare("UPDATE customers SET status = 'active' WHERE customer_id = :cid AND tenant_id = :tid");
+            $stmt->execute(['cid' => $realCid, 'tid' => $tenantId]);
+        }
 
         try {
             require_once __DIR__ . '/../lib/ActivityLogger.php';
@@ -2089,10 +2152,10 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
                 'log_type' => 'client_task',
                 'action' => 'customer_reactivated',
                 'module' => 'customers',
-                'target_id' => (string)$id,
+                'target_id' => (string)$realCid,
                 'target_type' => 'customer',
-                'description' => "Reactivated previously cancelled customer #{$id}",
-                'metadata' => ['customer_id' => $id, 'status' => 'active'],
+                'description' => "Reactivated previously cancelled customer #{$realCid}",
+                'metadata' => ['customer_id' => $realCid, 'status' => 'active'],
             ]);
         } catch (\Throwable $actErr) {}
 
@@ -2381,7 +2444,8 @@ require_once __DIR__ . '/../lib/HierarchySecurityService.php';
             ]);
         } catch (Throwable $e) {
             $db->rollBack();
-            Response::error('Failed to import clients: ' . $e->getMessage(), 500);
+            error_log('Import clients error: ' . $e->getMessage());
+            Response::error('Failed to import clients. Please try again later.', 500);
         }
     }
 

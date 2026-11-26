@@ -5,10 +5,14 @@
  * Full REST API Implementation matching NestJS and React contracts
  */
 
+require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/cors.php';
 handleCors();
 
-require_once __DIR__ . '/config/database.php';
+$isProductionEnv = in_array(strtolower((string)(getenv('APP_ENV') ?: 'production')), ['production', 'prod', 'live'], true);
+ini_set('display_errors', $isProductionEnv ? '0' : '1');
+ini_set('log_errors', '1');
+
 require_once __DIR__ . '/lib/Response.php';
 require_once __DIR__ . '/lib/JWT.php';
 require_once __DIR__ . '/lib/AuthMiddleware.php';
@@ -75,9 +79,16 @@ if ($method === 'GET' && in_array($uri, ['/saas/telemetry', '/saas/health', '/ap
 }
 
 if ($uri === '/system/init-db') {
+    if ($isProductionEnv) {
+        Response::error('Endpoint disabled in production.', 403);
+    }
+    $user = AuthMiddleware::requireAuth();
+    if (($user['role'] ?? '') !== 'saas_admin') {
+        Response::error('Forbidden: SaaS Admin required.', 403);
+    }
     try {
         $db = Database::getConnection();
-        Database::ensureTables($db);
+        Database::ensureTables($db, true);
         $count = (int)$db->query("SELECT COUNT(*) FROM users")->fetchColumn();
         Response::json([
             'success' => true,
@@ -98,6 +109,12 @@ if ($method === 'POST' && $uri === '/auth/login') {
 }
 if ($method === 'POST' && $uri === '/auth/customer-login') {
     AuthController::customerLogin();
+}
+if ($method === 'POST' && $uri === '/auth/refresh') {
+    AuthController::refresh();
+}
+if ($method === 'POST' && $uri === '/auth/logout') {
+    AuthController::logout();
 }
 if ($method === 'GET' && $uri === '/auth/me') {
     AuthController::me();
@@ -357,6 +374,10 @@ if ($method === 'POST' && ($uri === '/payments/confirm-balance-topup' || $uri ==
     PaymentGatewayController::confirmBalanceTopup();
 }
 if ($method === 'POST' && $uri === '/payments/simulator/confirm') {
+    $appEnv = strtolower(getenv('APP_ENV') ?: ($_ENV['APP_ENV'] ?? 'production'));
+    if ($appEnv === 'production' || $appEnv === 'live') {
+        Response::error('Payment simulator is disabled in production', 403);
+    }
     PaymentGatewayController::simulatorConfirm();
 }
 
@@ -776,17 +797,21 @@ if (($method === 'POST' || $method === 'PUT') && ($uri === '/company/profile' ||
 if ($method === 'GET' && preg_match('#^/(?:api/v1/)?uploads/logos/([a-zA-Z0-9_\-\.]+)$#', $uri, $m)) {
     $filename = basename($m[1]);
     $filePath = __DIR__ . '/uploads/logos/' . $filename;
-    if (file_exists($filePath)) {
+    if (file_exists($filePath) && is_file($filePath)) {
         $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
         $mimes = [
-            'png' => 'image/png',
-            'jpg' => 'image/jpeg',
+            'png'  => 'image/png',
+            'jpg'  => 'image/jpeg',
             'jpeg' => 'image/jpeg',
             'webp' => 'image/webp',
-            'svg' => 'image/svg+xml',
-            'gif' => 'image/gif',
+            'gif'  => 'image/gif',
         ];
-        header('Content-Type: ' . ($mimes[$ext] ?? 'application/octet-stream'));
+        if (!isset($mimes[$ext])) {
+            http_response_code(404);
+            exit;
+        }
+        header('X-Content-Type-Options: nosniff');
+        header('Content-Type: ' . $mimes[$ext]);
         header('Cache-Control: public, max-age=86400');
         readfile($filePath);
         exit;

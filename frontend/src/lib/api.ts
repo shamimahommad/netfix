@@ -65,12 +65,6 @@ api.interceptors.request.use(
       }
     }
 
-    // Add Authorization header if token exists in localStorage
-    const token = localStorage.getItem('access_token');
-    if (token && config.headers) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    
     return config;
   },
   (error) => {
@@ -80,11 +74,12 @@ api.interceptors.request.use(
 
 // Only run logout+redirect once when multiple requests get 401 (e.g. page load)
 let isHandling401 = false;
+let refreshPromise: Promise<void> | null = null;
 
 // Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => {
+  async (error: AxiosError) => {
     if (error.response) {
       const data = error.response.data as any;
       if (data && typeof data === 'object') {
@@ -100,14 +95,37 @@ api.interceptors.response.use(
 
       // Handle 401 Unauthorized
       if (error.response.status === 401) {
-        const url = error.config?.url ?? '';
+        const originalConfig = error.config as (typeof error.config & { _retry?: boolean }) | undefined;
+        const url = originalConfig?.url ?? '';
         const isLoginRequest = url.includes('/auth/login') || url.includes('/auth/customer-login');
-        // For login requests: keep the sanitized server message (e.g. "Account is not active", "Invalid credentials")
+        const isRefreshOrLogout = url.includes('/auth/refresh') || url.includes('/auth/logout');
+
+        // For login requests: keep the sanitized server message
         if (isLoginRequest) {
           const rawMsg = Array.isArray(data?.message) ? data.message[0] : data?.message;
           const msg = sanitizeErrorMessage(rawMsg || 'Invalid credentials');
           return Promise.reject({ message: msg, statusCode: 401 });
         }
+
+        // Attempt silent HttpOnly refresh token rotation once before forcing logout
+        if (originalConfig && !originalConfig._retry && !isRefreshOrLogout) {
+          originalConfig._retry = true;
+          try {
+            if (!refreshPromise) {
+              refreshPromise = api
+                .post('/auth/refresh')
+                .then(() => undefined)
+                .finally(() => {
+                  refreshPromise = null;
+                });
+            }
+            await refreshPromise;
+            return api(originalConfig);
+          } catch {
+            // Refresh failed; fall through to logout/redirect
+          }
+        }
+
         // For other requests: session expired – only logout and redirect once
         if (!isHandling401) {
           isHandling401 = true;

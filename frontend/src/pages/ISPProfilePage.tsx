@@ -1195,7 +1195,7 @@ Domain / Host:       ${window.location.origin}
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
                     <Radio className="w-3.5 h-3.5 text-blue-600" />
-                    1. Bill Inquiry URL (বিল যাচাই API)
+                    1. Bill Inquiry URL (Inquiry API)
                   </span>
                   <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 font-mono font-bold">GET / POST</span>
                 </div>
@@ -1222,7 +1222,7 @@ Domain / Host:       ${window.location.origin}
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
                     <CreditCard className="w-3.5 h-3.5 text-indigo-600" />
-                    2. Bill Payment URL (পেমেন্ট গ্রহণ API)
+                    2. Bill Payment URL (Payment API)
                   </span>
                   <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 font-mono font-bold">POST</span>
                 </div>

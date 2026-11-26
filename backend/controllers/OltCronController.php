@@ -103,11 +103,11 @@ class OltCronController {
         @set_time_limit(600);
         @ini_set('max_execution_time', '600');
 
-        // Optional security key check
-        $providedKey = $_GET['key'] ?? ($_SERVER['HTTP_X_CRON_KEY'] ?? '');
+        // Fail closed: CRON_SECRET_KEY must be configured and matched in constant time
+        $providedKey = (string)($_GET['key'] ?? ($_SERVER['HTTP_X_CRON_KEY'] ?? ''));
         $configuredKey = getenv('CRON_SECRET_KEY');
 
-        if (!empty($configuredKey) && $providedKey !== $configuredKey) {
+        if ($configuredKey === false || $configuredKey === '' || $providedKey === '' || !hash_equals($configuredKey, $providedKey)) {
             Response::error('Invalid or missing cron authentication key', 401);
             return;
         }

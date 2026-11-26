@@ -4,17 +4,17 @@
 # =====================================================================
 
 # Stage 1: Build Frontend
-FROM node:20-alpine AS frontend-builder
+FROM node:24-alpine AS frontend-builder
 WORKDIR /app
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm ci
 COPY frontend/ ./
 ARG VITE_API_BASE_URL=/api/v1
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 
-# Stage 2: Production Latest Patched PHP 8.3 + Nginx Web Server
-FROM php:8.3-fpm-alpine
+# Stage 2: Production Latest Patched PHP 8.5 + Nginx Web Server
+FROM php:8.5-fpm-alpine
 
 # Install Nginx, supervisor, curl, tzdata, and compile required PHP extensions
 RUN apk add --no-cache \
@@ -28,6 +28,19 @@ RUN apk add --no-cache \
         $PHPIZE_DEPS \
     && docker-php-ext-install -j$(nproc) pdo_mysql bcmath sockets \
     && apk del .build-deps
+
+# PHP runtime security hardening
+RUN { \
+        echo "expose_php = Off"; \
+        echo "display_errors = Off"; \
+        echo "display_startup_errors = Off"; \
+        echo "log_errors = On"; \
+        echo "upload_max_filesize = 5M"; \
+        echo "post_max_size = 8M"; \
+        echo "memory_limit = 256M"; \
+        echo "session.cookie_httponly = 1"; \
+        echo "session.cookie_samesite = Lax"; \
+    } > /usr/local/etc/php/conf.d/security.ini
 
 WORKDIR /var/www/html
 

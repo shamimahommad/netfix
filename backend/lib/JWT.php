@@ -6,13 +6,21 @@
 
 class JWT {
     private static function getSecret(): string {
-        return getenv('JWT_SECRET') ?: 'your_jwt_secret_key_change_this_in_production';
+        $secret = getenv('JWT_SECRET');
+        if ($secret === false || $secret === '' || strlen($secret) < 32) {
+            throw new RuntimeException('JWT_SECRET must be configured and at least 32 characters long.');
+        }
+        return $secret;
     }
 
-    public static function encode(array $payload, int $expirySeconds = 86400): string {
+    public static function encode(array $payload, int $expirySeconds = 900): string {
         $header = ['typ' => 'JWT', 'alg' => 'HS256'];
-        $payload['iat'] = time();
-        $payload['exp'] = time() + $expirySeconds;
+        $now = time();
+        $payload['iat'] = $now;
+        $payload['exp'] = $now + $expirySeconds;
+        if (empty($payload['jti'])) {
+            $payload['jti'] = bin2hex(random_bytes(16));
+        }
 
         $base64UrlHeader = self::base64UrlEncode(json_encode($header));
         $base64UrlPayload = self::base64UrlEncode(json_encode($payload));
@@ -31,6 +39,12 @@ class JWT {
 
         [$base64UrlHeader, $base64UrlPayload, $base64UrlSignature] = $parts;
 
+        $headerJson = self::base64UrlDecode($base64UrlHeader);
+        $header = json_decode($headerJson, true);
+        if (!is_array($header) || ($header['alg'] ?? '') !== 'HS256' || ($header['typ'] ?? '') !== 'JWT') {
+            return null;
+        }
+
         $signature = hash_hmac('sha256', $base64UrlHeader . "." . $base64UrlPayload, self::getSecret(), true);
         $expectedSignature = self::base64UrlEncode($signature);
 
@@ -39,10 +53,13 @@ class JWT {
         }
 
         $payload = json_decode(self::base64UrlDecode($base64UrlPayload), true);
+        if (!is_array($payload)) {
+            return null;
+        }
 
-        // Check expiration
-        if (isset($payload['exp']) && $payload['exp'] < time()) {
-            return null; // Expired token
+        // Enforce required integer expiration timestamp
+        if (!isset($payload['exp']) || !is_int($payload['exp']) || $payload['exp'] < time()) {
+            return null; // Missing or expired token
         }
 
         return $payload;
@@ -53,6 +70,11 @@ class JWT {
     }
 
     private static function base64UrlDecode(string $data): string {
-        return base64_decode(strtr($data, '-_', '+/'));
+        $remainder = strlen($data) % 4;
+        if ($remainder) {
+            $data .= str_repeat('=', 4 - $remainder);
+        }
+        $decoded = base64_decode(strtr($data, '-_', '+/'), true);
+        return $decoded !== false ? $decoded : '';
     }
 }

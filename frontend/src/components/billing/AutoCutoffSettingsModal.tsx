@@ -113,7 +113,7 @@ export const AutoCutoffSettingsModal: React.FC<AutoCutoffSettingsModalProps> = (
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                Daily Cutoff Time (দৈনিক কাট-অফ এর নির্দিষ্ট সময়)
+                Daily Cutoff Time
               </label>
               <span className="text-xs font-mono font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/40 px-2.5 py-0.5 rounded-lg border border-blue-200 dark:border-blue-800">
                 {formatTimeDisplay(formData.cutoffTime || '10:00')}
@@ -149,7 +149,7 @@ export const AutoCutoffSettingsModal: React.FC<AutoCutoffSettingsModalProps> = (
               ))}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              গ্রাহকের মেয়াদ শেষ হওয়ার দিন এই নির্দিষ্ট সময়ে লাইন বন্ধ হবে (যেমন: ১০:০০ AM দিলে ২১ তারিখের এক্সপায়ার ২১ তারিখ সকাল ১০:০০ টায় বন্ধ হবে)।
+              Customer lines will be disconnected at this scheduled time on their expiry date (e.g., setting 10:00 AM disconnects accounts expiring on the 21st at 10:00 AM on the 21st).
             </p>
           </div>
 

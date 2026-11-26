@@ -64,6 +64,7 @@ const ROLE_BADGE_CLASS: Record<string, string> = {
 const STATUS_BADGE_CLASS: Record<string, string> = {
   active: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
   suspended: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+  inactive: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300',
 };
 
 const formatCurrency = (n: number) =>
@@ -545,10 +546,10 @@ export default function ResellerPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Soft delete this user? They will be hidden from the list.')) return;
+    if (!window.confirm('Are you sure you want to permanently delete this user account?')) return;
     try {
       await resellerService.delete(id);
-      toast.success('User deleted');
+      toast.success('User deleted successfully');
       setUserPanelUser((u) => (u && u.userId === id ? null : u));
       loadList();
     } catch (e: any) {
@@ -921,7 +922,7 @@ export default function ResellerPage() {
                             STATUS_BADGE_CLASS[r.status] || 'bg-gray-100'
                           }`}
                         >
-                          {r.status === 'active' ? 'Active' : 'Suspended'}
+                          {r.status === 'active' ? 'Active' : r.status === 'inactive' ? 'Inactive' : 'Suspended'}
                         </span>
                       </td>
                       <td className="p-3">

@@ -186,10 +186,10 @@ export default function CustomerReportPage() {
       <div>
         <h1 className="text-xl font-display font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
           <BarChart3 className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-          Bandwidth & Connection Telemetry
+          Bandwidth & Connection Report
         </h1>
         <p className="text-slate-600 dark:text-slate-400 text-sm mt-1">
-          Realtime line monitor and disconnection history for PPPoE account{' '}
+          Live line monitor and disconnection history for PPPoE account{' '}
           <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{username}</span>
         </p>
       </div>
@@ -203,7 +203,7 @@ export default function CustomerReportPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
           <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wide flex items-center gap-2">
             <Activity className="w-4 h-4 text-emerald-500" />
-            Live Bandwidth Telemetry
+            Live Bandwidth Usage
           </h2>
           <span className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />

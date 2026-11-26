@@ -97,7 +97,7 @@ export default function BtrcBatchCategorizeModal({
                     : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
                 }`}
               >
-                🏠 Home
+                Home
               </button>
               <button
                 type="button"
@@ -108,7 +108,7 @@ export default function BtrcBatchCategorizeModal({
                     : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
                 }`}
               >
-                🏢 Corporate
+                Corporate
               </button>
               <button
                 type="button"
@@ -119,7 +119,7 @@ export default function BtrcBatchCategorizeModal({
                     : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
                 }`}
               >
-                🏬 SME
+                SME
               </button>
             </div>
           </div>

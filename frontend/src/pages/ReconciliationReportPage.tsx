@@ -208,6 +208,7 @@ export default function ReconciliationReportPage() {
             { key: 'today', label: 'Today' },
             { key: 'this_week', label: 'This Week' },
             { key: 'this_month', label: 'This Month' },
+            { key: 'last_month', label: 'Last Month' },
             { key: 'this_year', label: 'This Year' },
             { key: 'custom', label: 'Custom' },
           ].map((p) => (

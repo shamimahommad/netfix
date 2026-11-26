@@ -21,7 +21,7 @@ try {
 
     // Auto self-healing: ensure any wallet_transactions exist in wallet_ledger
     try {
-        $db->exec("INSERT INTO wallet_ledger (tenant_id, wallet_id, user_id, txn_group_id, type, amount, opening_balance, closing_balance, purpose, description, created_at)
+        $stmtSync = $db->prepare("INSERT INTO wallet_ledger (tenant_id, wallet_id, user_id, txn_group_id, type, amount, opening_balance, closing_balance, purpose, description, created_at)
             SELECT wt.tenant_id, wt.wallet_id, wt.user_id, 
                    COALESCE(NULLIF(wt.reference_id, ''), CONCAT('TXG-WT-', wt.transaction_id)), 
                    wt.type, wt.amount, wt.balance_before, wt.balance_after,
@@ -33,13 +33,14 @@ try {
                    END,
                    wt.description, wt.created_at
             FROM wallet_transactions wt
-            WHERE wt.tenant_id = {$tenantId}
+            WHERE wt.tenant_id = :tid
               AND NOT EXISTS (
                   SELECT 1 FROM wallet_ledger wl 
                   WHERE wl.tenant_id = wt.tenant_id 
                     AND wl.user_id = wt.user_id 
                     AND wl.txn_group_id = COALESCE(NULLIF(wt.reference_id, ''), CONCAT('TXG-WT-', wt.transaction_id))
               )");
+        $stmtSync->execute(['tid' => $tenantId]);
     } catch (Throwable $syncEx) {
         error_log("wallet_ledger auto-sync: " . $syncEx->getMessage());
     }
@@ -235,10 +236,11 @@ try {
         'data' => $rows,
     ]);
 } catch (Throwable $e) {
+    error_log("Ledger statement error: " . $e->getMessage());
     http_response_code(500);
     echo json_encode([
         'success' => false,
-        'message' => 'Failed to retrieve ledger statement: ' . $e->getMessage()
+        'message' => 'Failed to retrieve ledger statement.'
     ]);
 }
 

@@ -17,7 +17,11 @@ class ResellersController {
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $where = ["u.role IN ('admin', 'isp_admin', 'reseller', 'sub_reseller', 'dealer', 'agent')"];
+        $where = [
+            "u.role IN ('admin', 'isp_admin', 'reseller', 'sub_reseller', 'dealer', 'agent')",
+            "u.deleted_at IS NULL",
+            "u.status != 'inactive'"
+        ];
         $params = [];
 
         if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
@@ -155,6 +159,9 @@ class ResellersController {
 
     public static function show(string $id): void {
         $user = AuthMiddleware::requireAuth();
+        if (($user['role'] ?? '') === 'customer' || ($user['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden', 403);
+        }
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
@@ -168,6 +175,10 @@ class ResellersController {
 
         if (!$row) {
             Response::error('Reseller not found', 404);
+        }
+
+        if (($user['role'] ?? '') !== 'saas_admin' && !HierarchySecurityService::canAccessUser((int)$user['user_id'], (int)$row['user_id'])) {
+            Response::error('Access denied', 403);
         }
 
         $meta = json_decode($row['metadata'] ?? '{}', true) ?: [];
@@ -188,23 +199,42 @@ class ResellersController {
 
     public static function create(): void {
         $currentUser = AuthMiddleware::requireAuth();
+        if (($currentUser['role'] ?? '') === 'customer' || ($currentUser['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden', 403);
+        }
         HierarchySecurityService::requirePermission((int)$currentUser['user_id'], 'can_manage_sub_tier');
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
         $name = trim($data['name'] ?? '');
         $username = trim($data['username'] ?? '');
-        $password = (string)($data['password'] ?? 'password123');
-        $role = $data['role'] ?? 'reseller';
+        $password = trim((string)($data['password'] ?? ''));
 
         if (empty($name) || empty($username) || empty($password)) {
             Response::error('Name, username, and password are required', 400);
         }
+        if (strlen($password) < 8) {
+            Response::error('Password must be at least 8 characters long', 400);
+        }
 
-        $roleLevel = 80;
-        if ($role === 'sub_reseller') $roleLevel = 60;
-        if ($role === 'dealer') $roleLevel = 40;
-        if ($role === 'agent') $roleLevel = 20;
+        $callerRole = strtolower($currentUser['role'] ?? '');
+        $callerLevel = HierarchySecurityService::getHierarchyLevel($callerRole);
+        $isLevel0 = ($callerLevel === 0 || $callerRole === 'saas_admin');
+
+        $allowedRoles = [
+            'reseller' => 80,
+            'sub_reseller' => 60,
+            'dealer' => 40,
+            'agent' => 20,
+        ];
+        $role = strtolower(trim((string)($data['role'] ?? 'reseller')));
+        if (!isset($allowedRoles[$role])) {
+            Response::error('Invalid role specified', 400);
+        }
+        $roleLevel = $allowedRoles[$role];
+        if (!$isLevel0 && $roleLevel >= $callerLevel) {
+            Response::error('Cannot create a user with equal or higher privilege level', 403);
+        }
 
         $db = Database::getConnection();
 
@@ -217,16 +247,18 @@ class ResellersController {
 
         $hash = password_hash($password, PASSWORD_BCRYPT);
         $email = $username . '@ispnetfix.local';
-        $parentId = (int)($data['parentId'] ?? $currentUser['user_id']);
+        $parentId = !empty($data['parentId']) ? (int)$data['parentId'] : (int)$currentUser['user_id'];
+        if (!$isLevel0 && !HierarchySecurityService::canAccessUser((int)$currentUser['user_id'], $parentId)) {
+            Response::error('Forbidden parent user assignment', 403);
+        }
         $parentUser = HierarchySecurityService::getUser($parentId);
+        if (!$parentUser || ($callerRole !== 'saas_admin' && !empty($parentUser['tenant_id']) && (string)$parentUser['tenant_id'] !== (string)$tenantId)) {
+            Response::error('Invalid parent user for this tenant', 400);
+        }
         $parentPath = $parentUser['hierarchy_path'] ?? "/{$parentId}/";
 
         // Strict Server Assignment: Resellers & Agents NEVER select a server.
         // Downlines strictly inherit their parent reseller's assigned server.
-        $callerRole = strtolower($currentUser['role'] ?? '');
-        $callerLevel = HierarchySecurityService::getHierarchyLevel($callerRole);
-        $isLevel0 = ($callerLevel === 0 || $callerRole === 'saas_admin');
-
         $assignedServerId = null;
         if (!$isLevel0) {
             $assignedServerId = HierarchySecurityService::getAssignedServerId((int)$currentUser['user_id']);
@@ -241,6 +273,11 @@ class ResellersController {
                 $assignedServerId = !empty($data['serverId']) ? (string)$data['serverId'] : null;
             }
         }
+
+        $statusVal = in_array(strtolower((string)($data['status'] ?? 'active')), ['active', 'inactive'], true)
+            ? strtolower((string)($data['status'] ?? 'active'))
+            : 'active';
+        $creditLimitVal = $isLevel0 ? max(0.0, (float)($data['credit_limit'] ?? 0)) : 0.0;
 
         $stmt = $db->prepare("INSERT INTO users 
             (tenant_id, email, username, password_hash, first_name, last_name, phone, role, role_level, parent_id, hierarchy_path, status, metadata, created_by)
@@ -257,9 +294,9 @@ class ResellersController {
             'lvl' => $roleLevel,
             'pid' => $parentId,
             'path' => $parentPath,
-            'status' => $data['status'] ?? 'active',
+            'status' => $statusVal,
             'meta' => json_encode([
-                'credit_limit' => $data['credit_limit'] ?? 0,
+                'credit_limit' => $creditLimitVal,
                 'network_device_id' => $assignedServerId,
             ], JSON_UNESCAPED_UNICODE),
             'created_by' => $currentUser['user_id'],
@@ -272,8 +309,8 @@ class ResellersController {
         $db->prepare("UPDATE users SET hierarchy_path = :path WHERE user_id = :uid")
             ->execute(['path' => $userPath, 'uid' => $userId]);
 
-        // Initialize Wallet
-        $openingBalance = !empty($data['opening_balance']) ? (float)$data['opening_balance'] : 0.00;
+        // Initialize Wallet (only Level-0 admins can assign arbitrary opening_balance)
+        $openingBalance = ($isLevel0 && !empty($data['opening_balance'])) ? max(0.0, (float)$data['opening_balance']) : 0.00;
         $db->prepare("INSERT INTO wallets (tenant_id, user_id, balance, currency, status) 
             VALUES (:tid, :uid, :bal, 'BDT', 'active')
             ON DUPLICATE KEY UPDATE updated_at = NOW()")
@@ -427,27 +464,30 @@ class ResellersController {
             $params['pwd'] = password_hash($rawPassword, PASSWORD_BCRYPT);
         }
 
-        // Status
+        // Status (strictly whitelisted)
         if (!empty($data['status'])) {
+            $reqStatus = strtolower(trim((string)$data['status']));
+            if (!in_array($reqStatus, ['active', 'inactive', 'suspended'], true)) {
+                Response::error('Invalid status specified', 400);
+            }
             $fields[] = "status = :status";
-            $params['status'] = $data['status'];
+            $params['status'] = $reqStatus;
         }
 
-        // Role & Role Level
-        $roleLevels = [
-            'admin' => 100,
-            'isp_admin' => 90,
-            'manager' => 85,
-            'reseller' => 80,
-            'sub_reseller' => 60,
-            'dealer' => 40,
-            'agent' => 20
-        ];
-        if (!empty($data['role']) && isset($roleLevels[$data['role']])) {
+        // Role & Role Level (strictly enforce hierarchy dominance; never elevate to admin)
+        $roleLevels = ($isSuperAdmin || $isTenantAdmin)
+            ? ['isp_admin' => 90, 'manager' => 85, 'reseller' => 80, 'sub_reseller' => 60, 'dealer' => 40, 'agent' => 20]
+            : ['sub_reseller' => 60, 'dealer' => 40, 'agent' => 20];
+        if (!empty($data['role'])) {
+            $reqRole = strtolower(trim((string)$data['role']));
+            $callerLvl = HierarchySecurityService::getHierarchyLevel($callerRole);
+            if (!isset($roleLevels[$reqRole]) || (!$isSuperAdmin && !$isTenantAdmin && $roleLevels[$reqRole] >= $callerLvl)) {
+                Response::error('Forbidden role assignment', 403);
+            }
             $fields[] = "role = :role";
             $fields[] = "role_level = :lvl";
-            $params['role'] = $data['role'];
-            $params['lvl'] = $roleLevels[$data['role']];
+            $params['role'] = $reqRole;
+            $params['lvl'] = $roleLevels[$reqRole];
         }
 
         // Metadata: credit_limit, network_device_id
@@ -509,6 +549,9 @@ class ResellersController {
 
     public static function resetPassword(string $id): void {
         $currentUser = AuthMiddleware::requireAuth();
+        if (($currentUser['role'] ?? '') === 'customer' || ($currentUser['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden', 403);
+        }
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $password = trim((string)($data['password'] ?? ''));
@@ -516,12 +559,12 @@ class ResellersController {
         if (empty($password)) {
             Response::error('Password is required', 400);
         }
-        if (strlen($password) < 4) {
-            Response::error('Password must be at least 4 characters', 400);
+        if (strlen($password) < 8) {
+            Response::error('Password must be at least 8 characters', 400);
         }
 
         $db = Database::getConnection();
-        $stmt = $db->prepare("SELECT user_id, tenant_id, username, email, role, hierarchy_path FROM users WHERE user_id = :id LIMIT 1");
+        $stmt = $db->prepare("SELECT user_id, tenant_id, username, email, role, hierarchy_path, parent_id FROM users WHERE user_id = :id LIMIT 1");
         $stmt->execute(['id' => $id]);
         $targetUser = $stmt->fetch();
 
@@ -531,25 +574,8 @@ class ResellersController {
 
         $callerRole = $currentUser['role'] ?? '';
         $isSuperAdmin = ($callerRole === 'saas_admin');
-        $isTenantAdmin = in_array($callerRole, ['admin', 'isp_admin', 'manager'], true);
-
-        if (!$isSuperAdmin) {
-            if ($isTenantAdmin) {
-                if (!empty($targetUser['tenant_id']) && (string)$targetUser['tenant_id'] !== (string)$tenantId) {
-                    Response::error('Access denied for this user', 403);
-                }
-            } else {
-                $callerPath = $currentUser['hierarchy_path'] ?? null;
-                if (empty($callerPath) || $callerPath === '/') {
-                    $hUser = HierarchySecurityService::getUser((int)$currentUser['user_id']);
-                    $callerPath = $hUser['hierarchy_path'] ?? "/{$currentUser['user_id']}/";
-                }
-                $targetPath = $targetUser['hierarchy_path'] ?? '';
-                $isDirectChild = ((int)($targetUser['parent_id'] ?? 0) === (int)$currentUser['user_id']);
-                if (!str_starts_with($targetPath, rtrim($callerPath, '/') . '/') && !$isDirectChild) {
-                    Response::error('Permission denied to reset password for this user', 403);
-                }
-            }
+        if (!$isSuperAdmin && !HierarchySecurityService::canAccessUser((int)$currentUser['user_id'], (int)$targetUser['user_id'])) {
+            Response::error('Permission denied to reset password for this user', 403);
         }
 
         $newHash = password_hash($password, PASSWORD_BCRYPT);
@@ -579,12 +605,15 @@ class ResellersController {
 
     public static function setStatus(string $id): void {
         $currentUser = AuthMiddleware::requireAuth();
+        if (($currentUser['role'] ?? '') === 'customer' || ($currentUser['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden', 403);
+        }
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $status = $data['status'] ?? 'active';
 
         $db = Database::getConnection();
-        $stmt = $db->prepare("SELECT user_id, tenant_id FROM users WHERE user_id = :id LIMIT 1");
+        $stmt = $db->prepare("SELECT user_id, tenant_id, username FROM users WHERE user_id = :id LIMIT 1");
         $stmt->execute(['id' => $id]);
         $targetUser = $stmt->fetch();
 
@@ -593,8 +622,13 @@ class ResellersController {
         }
 
         $callerRole = $currentUser['role'] ?? '';
-        if ($callerRole !== 'saas_admin' && !empty($targetUser['tenant_id']) && (string)$targetUser['tenant_id'] !== (string)$tenantId) {
-            Response::error('Access denied', 403);
+        if ($callerRole !== 'saas_admin') {
+            if (!empty($targetUser['tenant_id']) && (string)$targetUser['tenant_id'] !== (string)$tenantId) {
+                Response::error('Access denied', 403);
+            }
+            if (!HierarchySecurityService::canAccessUser((int)$currentUser['user_id'], (int)$targetUser['user_id'])) {
+                Response::error('Access denied', 403);
+            }
         }
 
         $upd = $db->prepare("UPDATE users SET status = :status, updated_at = NOW() WHERE user_id = :id");
@@ -621,10 +655,13 @@ class ResellersController {
 
     public static function delete(string $id): void {
         $currentUser = AuthMiddleware::requireAuth();
+        if (($currentUser['role'] ?? '') === 'customer' || ($currentUser['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden', 403);
+        }
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
-        $stmt = $db->prepare("SELECT user_id, tenant_id, role FROM users WHERE user_id = :id LIMIT 1");
+        $stmt = $db->prepare("SELECT user_id, tenant_id, role, username, parent_id FROM users WHERE user_id = :id LIMIT 1");
         $stmt->execute(['id' => $id]);
         $targetUser = $stmt->fetch();
 
@@ -639,12 +676,61 @@ class ResellersController {
         }
 
         $callerRole = $currentUser['role'] ?? '';
-        if ($callerRole !== 'saas_admin' && !empty($targetUser['tenant_id']) && (string)$targetUser['tenant_id'] !== (string)$tenantId) {
-            Response::error('Access denied', 403);
+        if ($callerRole !== 'saas_admin') {
+            if (!empty($targetUser['tenant_id']) && (string)$targetUser['tenant_id'] !== (string)$tenantId) {
+                Response::error('Access denied', 403);
+            }
+            if ((int)$currentUser['user_id'] === (int)$targetUser['user_id'] || !HierarchySecurityService::canAccessUser((int)$currentUser['user_id'], (int)$targetUser['user_id'])) {
+                Response::error('Access denied', 403);
+            }
         }
 
-        $upd = $db->prepare("UPDATE users SET status = 'inactive', deleted_at = NOW(), updated_at = NOW() WHERE user_id = :id");
-        $upd->execute(['id' => $id]);
+        $userId = (int)$targetUser['user_id'];
+        $db->beginTransaction();
+        try {
+            require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+
+            // 1. Reassign any customers under this reseller to parent or caller admin
+            $newOwnerId = !empty($targetUser['parent_id']) ? (int)$targetUser['parent_id'] : (int)$currentUser['user_id'];
+            $parentUser = HierarchySecurityService::getUser($newOwnerId) ?: $currentUser;
+            $parentRole = $parentUser['role'] ?? 'isp_admin';
+            $parentPath = $parentUser['hierarchy_path'] ?? "/{$newOwnerId}/";
+
+            $db->prepare("UPDATE customers SET owner_id = :newOwner, owner_role = :newRole, owner_path = :newPath WHERE owner_id = :id")
+               ->execute(['newOwner' => $newOwnerId, 'newRole' => $parentRole, 'newPath' => $parentPath, 'id' => $userId]);
+
+            // 2. Reassign any child sub-resellers to the new parent
+            $db->prepare("UPDATE users SET parent_id = :newOwner WHERE parent_id = :id")
+               ->execute(['newOwner' => $newOwnerId, 'id' => $userId]);
+
+            // 3. Delete user-specific child records
+            $db->prepare("DELETE FROM user_permissions WHERE user_id = :id")->execute(['id' => $userId]);
+            $db->prepare("DELETE FROM tier_packages WHERE user_id = :id")->execute(['id' => $userId]);
+            $db->prepare("DELETE FROM reseller_plan_permission WHERE user_id = :id")->execute(['id' => $userId]);
+            $db->prepare("DELETE FROM wallets WHERE user_id = :id")->execute(['id' => $userId]);
+            $db->prepare("DELETE FROM wallet_ledger WHERE user_id = :id")->execute(['id' => $userId]);
+            $db->prepare("DELETE FROM wallet_transactions WHERE user_id = :id")->execute(['id' => $userId]);
+            $db->prepare("DELETE FROM reseller_ledger WHERE user_id = :id")->execute(['id' => $userId]);
+            $db->prepare("DELETE FROM commission_logs WHERE user_id = :id")->execute(['id' => $userId]);
+            $db->prepare("DELETE FROM login_logs WHERE user_id = :id")->execute(['id' => $userId]);
+
+            // 4. Nullify historical references in invoices and transactions
+            $db->prepare("UPDATE invoices SET charged_user_id = NULL WHERE charged_user_id = :id")->execute(['id' => $userId]);
+            $db->prepare("UPDATE invoices SET collected_by = NULL WHERE collected_by = :id")->execute(['id' => $userId]);
+            $db->prepare("UPDATE transactions SET initiator_user_id = NULL WHERE initiator_user_id = :id")->execute(['id' => $userId]);
+            $db->prepare("UPDATE transactions SET collector_user_id = NULL WHERE collector_user_id = :id")->execute(['id' => $userId]);
+
+            // 5. Permanently delete user from users table
+            $db->prepare("DELETE FROM users WHERE user_id = :id")->execute(['id' => $userId]);
+
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            Response::error('Failed to delete reseller: ' . $e->getMessage(), 500);
+            return;
+        }
 
         try {
             require_once __DIR__ . '/../lib/ActivityLogger.php';
@@ -656,11 +742,11 @@ class ResellersController {
                 'module' => 'reseller',
                 'target_id' => (string)$id,
                 'target_type' => 'reseller',
-                'description' => "Soft deleted reseller #{$id} ({$targetUser['username']})",
+                'description' => "Permanently deleted reseller #{$id} ({$targetUser['username']})",
             ]);
         } catch (Throwable $actErr) {}
 
-        Response::json(['success' => true]);
+        Response::json(['success' => true, 'message' => 'User deleted successfully']);
     }
 
     public static function loginAs(string $id): void {

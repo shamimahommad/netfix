@@ -36,8 +36,6 @@ export default function CustomerLoginPage() {
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [company, setCompany] = useState<{ name: string; logoUrl: string | null } | null>(null);
 
-  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-
   // Load remembered customer login and company branding on mount
   useEffect(() => {
     const savedLogin = localStorage.getItem('netfix_customer_login');
@@ -53,7 +51,7 @@ export default function CustomerLoginPage() {
     }
   }, []);
 
-  if (token && isAuthenticated && user) {
+  if (isAuthenticated && user) {
     const target =
       user.role_code === 'customer' || user.user_type === 'customer'
         ? '/customer/dashboard'

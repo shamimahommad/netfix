@@ -209,7 +209,9 @@ class FtthService {
         // Auto-generate code if empty
         $code = trim($data['box_code'] ?? '');
         if (empty($code)) {
-            $nextSeq = (int)$db->query("SELECT COUNT(*) + 1 FROM ftth_boxes WHERE tenant_id = {$tenantId}")->fetchColumn();
+            $stmtSeq = $db->prepare("SELECT COUNT(*) + 1 FROM ftth_boxes WHERE tenant_id = :tid");
+            $stmtSeq->execute(['tid' => $tenantId]);
+            $nextSeq = (int)$stmtSeq->fetchColumn();
             $code = 'BOX-' . str_pad($nextSeq, 3, '0', STR_PAD_LEFT);
         }
 
@@ -334,17 +336,19 @@ class FtthService {
         $db = Database::getConnection();
 
         // Check if any port is assigned to a customer
-        $occupied = (int)$db->query("
+        $stmtOcc = $db->prepare("
             SELECT COUNT(*) FROM ftth_box_ports 
-            WHERE box_id = {$boxId} AND tenant_id = {$tenantId} AND customer_id IS NOT NULL
-        ")->fetchColumn();
+            WHERE box_id = :bid AND tenant_id = :tid AND customer_id IS NOT NULL
+        ");
+        $stmtOcc->execute(['bid' => $boxId, 'tid' => $tenantId]);
+        $occupied = (int)$stmtOcc->fetchColumn();
 
         if ($occupied > 0) {
-            throw new RuntimeException("Cannot delete box: {$occupied} customer(s) are currently connected to this box. Please disconnect or transfer them first.");
+            throw new DomainException("Cannot delete box: {$occupied} customer(s) are currently connected to this box. Please disconnect or transfer them first.");
         }
 
         $db->prepare("DELETE FROM ftth_box_ports WHERE box_id = :bid AND tenant_id = :tid")->execute(['bid' => $boxId, 'tid' => $tenantId]);
-        $db->prepare("DELETE FROM ftth_cables WHERE (to_box_id = :bid OR (from_type = 'box' AND from_id = :bid)) AND tenant_id = :tid")->execute(['bid' => $boxId, 'tid' => $tenantId]);
+        $db->prepare("DELETE FROM ftth_cables WHERE (to_box_id = :bid1 OR (from_type = 'box' AND from_id = :bid2)) AND tenant_id = :tid")->execute(['bid1' => $boxId, 'bid2' => $boxId, 'tid' => $tenantId]);
         $db->prepare("DELETE FROM ftth_boxes WHERE id = :bid AND tenant_id = :tid")->execute(['bid' => $boxId, 'tid' => $tenantId]);
 
         return true;
@@ -394,10 +398,12 @@ class FtthService {
         ]);
 
         // Check if box is now full
-        $avail = (int)$db->query("
+        $stmtAvail = $db->prepare("
             SELECT COUNT(*) FROM ftth_box_ports 
-            WHERE box_id = {$boxId} AND status = 'available'
-        ")->fetchColumn();
+            WHERE box_id = :bid AND status = 'available'
+        ");
+        $stmtAvail->execute(['bid' => $boxId]);
+        $avail = (int)$stmtAvail->fetchColumn();
 
         if ($avail === 0) {
             $db->prepare("UPDATE ftth_boxes SET status = 'full' WHERE id = :bid")->execute(['bid' => $boxId]);
@@ -630,25 +636,34 @@ class FtthService {
     public static function getStats(int $tenantId): array {
         $db = Database::getConnection();
 
-        $totalBoxes = (int)$db->query("SELECT COUNT(*) FROM ftth_boxes WHERE tenant_id = {$tenantId}")->fetchColumn();
-        $totalPorts = (int)$db->query("SELECT COALESCE(SUM(total_ports), 0) FROM ftth_boxes WHERE tenant_id = {$tenantId}")->fetchColumn();
+        $stmtBoxes = $db->prepare("SELECT COUNT(*) FROM ftth_boxes WHERE tenant_id = :tid");
+        $stmtBoxes->execute(['tid' => $tenantId]);
+        $totalBoxes = (int)$stmtBoxes->fetchColumn();
 
-        $portStats = $db->query("
+        $stmtPorts = $db->prepare("SELECT COALESCE(SUM(total_ports), 0) FROM ftth_boxes WHERE tenant_id = :tid");
+        $stmtPorts->execute(['tid' => $tenantId]);
+        $totalPorts = (int)$stmtPorts->fetchColumn();
+
+        $stmtPortStats = $db->prepare("
             SELECT 
                 COALESCE(SUM(CASE WHEN status = 'occupied' THEN 1 ELSE 0 END), 0) AS occupied,
                 COALESCE(SUM(CASE WHEN status = 'available' THEN 1 ELSE 0 END), 0) AS available,
                 COALESCE(SUM(CASE WHEN status = 'damaged' THEN 1 ELSE 0 END), 0) AS damaged,
                 COALESCE(SUM(CASE WHEN status = 'reserved' THEN 1 ELSE 0 END), 0) AS reserved
             FROM ftth_box_ports 
-            WHERE tenant_id = {$tenantId}
-        ")->fetch(PDO::FETCH_ASSOC);
+            WHERE tenant_id = :tid
+        ");
+        $stmtPortStats->execute(['tid' => $tenantId]);
+        $portStats = $stmtPortStats->fetch(PDO::FETCH_ASSOC);
 
         $occupied = (int)($portStats['occupied'] ?? 0);
         $available = (int)($portStats['available'] ?? 0);
         $damaged = (int)($portStats['damaged'] ?? 0);
         $reserved = (int)($portStats['reserved'] ?? 0);
 
-        $totalCables = (int)$db->query("SELECT COUNT(*) FROM ftth_cables WHERE tenant_id = {$tenantId}")->fetchColumn();
+        $stmtCables = $db->prepare("SELECT COUNT(*) FROM ftth_cables WHERE tenant_id = :tid");
+        $stmtCables->execute(['tid' => $tenantId]);
+        $totalCables = (int)$stmtCables->fetchColumn();
 
         return [
             'totalBoxes'        => $totalBoxes,
@@ -705,7 +720,8 @@ class FtthService {
             $newId = (int)$db->lastInsertId();
 
             // Link existing devices of this tenant to this NOC station if not linked
-            $db->exec("UPDATE network_devices SET noc_station_id = {$newId} WHERE tenant_id = {$tenantId} AND noc_station_id IS NULL");
+            $stmtLink = $db->prepare("UPDATE network_devices SET noc_station_id = :nid WHERE tenant_id = :tid AND noc_station_id IS NULL");
+            $stmtLink->execute(['nid' => $newId, 'tid' => $tenantId]);
 
             // Re-fetch
             $stmt->execute(['tid' => $tenantId]);

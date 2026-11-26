@@ -12,10 +12,9 @@ interface PublicRouteProps {
  */
 export default function PublicRoute({ children }: PublicRouteProps) {
   const { isAuthenticated, user } = useAuthStore();
-  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
 
-  // If user is authenticated and has active token, redirect to their dashboard
-  if (token && isAuthenticated && user) {
+  // If user is authenticated, redirect to their dashboard
+  if (isAuthenticated && user) {
     const target =
       user.user_type === 'saas'
         ? '/saas/dashboard'

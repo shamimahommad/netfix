@@ -5,7 +5,7 @@ import { billingService, InvoiceDto } from '@/services/billing.service';
 import { formatInvoiceIdDisplay } from '@/lib/formatInvoiceId';
 import { resellerService, Reseller } from '@/services/reseller.service';
 import { networkService } from '@/services/network.service';
-import * as XLSX from 'xlsx';
+import { exportAoaToXlsx } from '@/lib/excel';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { PageHeader, MetricCard } from '@/components/common';
@@ -166,7 +166,7 @@ export default function InvoicesReportPage() {
     URL.revokeObjectURL(url);
   }
 
-  function downloadExcel() {
+  async function downloadExcel() {
     const headers = ['Inv ID', 'Inv Time', 'Exp.Date', 'C.Name', 'Username', 'Mobile No', 'Bill Amount', 'Balance', 'Done By'];
     const rows = rowsToExport.map((inv) => [
       inv.invoiceNumber || inv.invoiceId,
@@ -179,10 +179,7 @@ export default function InvoicesReportPage() {
       inv.customerBalance ?? '',
       inv.doneBy ?? '',
     ]);
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Invoices');
-    XLSX.writeFile(wb, `invoices-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    await exportAoaToXlsx(headers, rows, 'Invoices', `invoices-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
   function downloadPDF() {

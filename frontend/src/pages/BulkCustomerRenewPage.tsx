@@ -51,6 +51,7 @@ export default function BulkCustomerRenewPage() {
   const [renewalMonths, setRenewalMonths] = useState<number>(1);
   const [sendSms, setSendSms] = useState<boolean>(true);
   const [renewAsReseller, setRenewAsReseller] = useState<boolean>(false);
+  const [isCreditDue, setIsCreditDue] = useState<boolean>(false);
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -204,6 +205,7 @@ export default function BulkCustomerRenewPage() {
         no_of_month: renewalMonths,
         send_sms: sendSms,
         renew_as_reseller: renewAsReseller,
+        is_credit_due: isCreditDue,
       });
 
       if (res && res.success) {
@@ -392,6 +394,18 @@ export default function BulkCustomerRenewPage() {
                 </span>
               </label>
             )}
+
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-amber-700 dark:text-amber-400">
+              <input
+                type="checkbox"
+                checked={isCreditDue}
+                onChange={(e) => setIsCreditDue(e.target.checked)}
+                className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-amber-300 dark:border-amber-700"
+              />
+              <span className="flex items-center gap-1">
+                Credit Due Renewal
+              </span>
+            </label>
           </div>
         </div>
 

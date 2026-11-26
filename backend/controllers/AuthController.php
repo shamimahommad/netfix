@@ -7,9 +7,133 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../lib/Response.php';
 require_once __DIR__ . '/../lib/JWT.php';
 require_once __DIR__ . '/../lib/AuthMiddleware.php';
+require_once __DIR__ . '/../lib/RateLimiter.php';
+require_once __DIR__ . '/../lib/TokenRevocationService.php';
 
 class AuthController {
+    private const ACCESS_TOKEN_TTL = 900;     // 15 minutes
+    private const REFRESH_TOKEN_TTL = 604800; // 7 days
+
+    private static function isHttpsRequest(): bool {
+        return (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower((string)$_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https')
+            || (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || (!empty($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443);
+    }
+
+    private static function issueSessionCookies(array $payload, bool $isCustomer = false): void {
+        $accessToken = JWT::encode($payload, self::ACCESS_TOKEN_TTL);
+        $refreshToken = bin2hex(random_bytes(32));
+        TokenRevocationService::storeRefreshToken($refreshToken, [
+            'payload' => $payload,
+            'is_customer' => $isCustomer,
+        ], self::REFRESH_TOKEN_TTL);
+
+        $secure = self::isHttpsRequest();
+        setcookie('access_token', $accessToken, [
+            'expires' => time() + self::ACCESS_TOKEN_TTL,
+            'path' => '/',
+            'httponly' => true,
+            'secure' => $secure,
+            'samesite' => 'Lax',
+        ]);
+        setcookie('refresh_token', $refreshToken, [
+            'expires' => time() + self::REFRESH_TOKEN_TTL,
+            'path' => '/',
+            'httponly' => true,
+            'secure' => $secure,
+            'samesite' => 'Lax',
+        ]);
+    }
+
+    private static function clearSessionCookies(): void {
+        $secure = self::isHttpsRequest();
+        setcookie('access_token', '', [
+            'expires' => time() - 3600,
+            'path' => '/',
+            'httponly' => true,
+            'secure' => $secure,
+            'samesite' => 'Lax',
+        ]);
+        setcookie('refresh_token', '', [
+            'expires' => time() - 3600,
+            'path' => '/',
+            'httponly' => true,
+            'secure' => $secure,
+            'samesite' => 'Lax',
+        ]);
+    }
+
+    public static function refresh(): void {
+        RateLimiter::enforce('auth_refresh', RateLimiter::getClientIp(), 30, 300);
+
+        $refreshToken = trim((string)($_COOKIE['refresh_token'] ?? ''));
+        if ($refreshToken === '') {
+            self::clearSessionCookies();
+            Response::error('Refresh token missing', 401);
+        }
+
+        $record = TokenRevocationService::consumeRefreshToken($refreshToken);
+        if (!$record || empty($record['payload']) || empty($record['payload']['user_id'])) {
+            self::clearSessionCookies();
+            Response::error('Invalid or expired refresh token', 401);
+        }
+
+        $payload = $record['payload'];
+        $isCustomer = !empty($record['is_customer']) || (($payload['user_type'] ?? '') === 'customer');
+        $db = Database::getConnection();
+
+        if ($isCustomer) {
+            $cid = $payload['customer_id'] ?? $payload['user_id'];
+            $stmt = $db->prepare("SELECT customer_id FROM customers WHERE customer_id = :id AND status != 'cancelled' LIMIT 1");
+            $stmt->execute(['id' => $cid]);
+            if (!$stmt->fetch()) {
+                self::clearSessionCookies();
+                Response::error('Account inactive', 401);
+            }
+        } else {
+            $stmt = $db->prepare("SELECT user_id FROM users WHERE user_id = :id AND status = 'active' LIMIT 1");
+            $stmt->execute(['id' => $payload['user_id']]);
+            if (!$stmt->fetch()) {
+                self::clearSessionCookies();
+                Response::error('Account inactive', 401);
+            }
+        }
+
+        // Rotate refresh & access tokens cleanly
+        self::issueSessionCookies($payload, $isCustomer);
+
+        Response::json([
+            'success' => true,
+            'authenticated' => true,
+        ]);
+    }
+
+    public static function logout(): void {
+        $accessToken = AuthMiddleware::getRequestToken();
+        if ($accessToken) {
+            $payload = JWT::decode($accessToken);
+            if ($payload && !empty($payload['jti']) && !empty($payload['exp'])) {
+                $ttl = max(1, (int)$payload['exp'] - time());
+                TokenRevocationService::revokeJti((string)$payload['jti'], $ttl);
+            }
+        }
+
+        $refreshToken = trim((string)($_COOKIE['refresh_token'] ?? ''));
+        if ($refreshToken !== '') {
+            TokenRevocationService::revokeRefreshToken($refreshToken);
+        }
+
+        self::clearSessionCookies();
+
+        Response::json([
+            'success' => true,
+            'message' => 'Logged out successfully',
+        ]);
+    }
+
     public static function login(): void {
+        RateLimiter::enforce('auth_login_ip', RateLimiter::getClientIp(), 20, 300);
+
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $login = trim($data['login'] ?? $data['email'] ?? $data['username'] ?? '');
         $password = (string)($data['password'] ?? '');
@@ -18,16 +142,31 @@ class AuthController {
             Response::error('Email/username and password are required', 400);
         }
 
+        RateLimiter::enforce('auth_login_acct', RateLimiter::getClientIp() . ':' . strtolower($login), 10, 300);
+
         try {
             $db = Database::getConnection();
             $stmt = $db->prepare("SELECT * FROM users WHERE (LOWER(email) = LOWER(:login1) OR LOWER(username) = LOWER(:login2)) LIMIT 1");
             $stmt->execute(['login1' => $login, 'login2' => $login]);
             $user = $stmt->fetch();
         } catch (Throwable $e) {
-            Response::error('Database error: ' . $e->getMessage(), 500);
+            error_log("AuthController error: " . $e->getMessage());
+            Response::error('Service temporarily unavailable. Please try again later.', 500);
         }
 
         if (!$user) {
+            try {
+                require_once __DIR__ . '/../lib/ActivityLogger.php';
+                ActivityLogger::log([
+                    'tenant_id' => 1,
+                    'user_id' => null,
+                    'log_type' => 'security',
+                    'action' => 'failed_login',
+                    'module' => 'auth',
+                    'description' => "Failed login attempt for unknown identifier '{$login}'",
+                    'metadata' => ['portal' => 'web', 'login' => $login],
+                ]);
+            } catch (Throwable $ignored) {}
             Response::error('Invalid login credentials', 401);
         }
 
@@ -36,31 +175,20 @@ class AuthController {
             Response::error('This account is ' . htmlspecialchars($user['status']) . '. Please contact your administrator.', 403);
         }
 
-        // Verify password hash or plain match fallback
-        $trimmedPassword = trim($password);
-        $passwordMatches = password_verify($password, $user['password_hash']) 
-            || ($password === $user['password_hash'])
-            || password_verify($trimmedPassword, $user['password_hash'])
-            || ($trimmedPassword === $user['password_hash']);
-
-        // Auto-upgrade plain text passwords to bcrypt
-        if ($passwordMatches && ($password === $user['password_hash'] || $trimmedPassword === $user['password_hash'])) {
+        // Verify password strictly against bcrypt/argon2 hash (no plaintext or demo fallbacks)
+        if (empty($user['password_hash']) || !password_verify($password, (string)$user['password_hash'])) {
             try {
-                $newHash = password_hash($password, PASSWORD_BCRYPT);
-                $db->prepare("UPDATE users SET password_hash = :h, password_changed_at = NOW() WHERE user_id = :id")->execute(['h' => $newHash, 'id' => $user['user_id']]);
-            } catch (Throwable $e) {}
-        }
-
-        // Support for unmigrated seed dummy hash ONLY IF user has never changed password yet
-        if (!$passwordMatches && empty($user['password_changed_at']) && $user['password_hash'] === '$2y$10$Kq.9QjFqT6B8WJgWl1Nf8u9c2vK3Wl7Zf6kHqN2uM3dYwG6vJ5eO.' && ($password === 'password123' || $trimmedPassword === 'password123')) {
-            $passwordMatches = true;
-            try {
-                $newHash = password_hash('password123', PASSWORD_BCRYPT);
-                $db->prepare("UPDATE users SET password_hash = :h, password_changed_at = NOW() WHERE user_id = :id")->execute(['h' => $newHash, 'id' => $user['user_id']]);
-            } catch (Throwable $e) {}
-        }
-
-        if (!$passwordMatches) {
+                require_once __DIR__ . '/../lib/ActivityLogger.php';
+                ActivityLogger::log([
+                    'tenant_id' => $user['tenant_id'] ? (int)$user['tenant_id'] : 1,
+                    'user_id' => (int)$user['user_id'],
+                    'log_type' => 'security',
+                    'action' => 'failed_login',
+                    'module' => 'auth',
+                    'description' => "Failed login attempt (wrong password) for user {$user['username']}",
+                    'metadata' => ['portal' => 'web', 'login' => $login],
+                ]);
+            } catch (Throwable $ignored) {}
             Response::error('Invalid login credentials', 401);
         }
 
@@ -78,7 +206,7 @@ class AuthController {
             'user_type' => $userType,
         ];
 
-        $token = JWT::encode($payload, 86400 * 7);
+        self::issueSessionCookies($payload, false);
 
         // Update last login
         try {
@@ -140,7 +268,7 @@ class AuthController {
         }
 
         Response::json([
-            'access_token' => $token,
+            'authenticated' => true,
             'user' => [
                 'user_id' => (string)$user['user_id'],
                 'email' => $user['email'],
@@ -158,6 +286,8 @@ class AuthController {
     }
 
     public static function customerLogin(): void {
+        RateLimiter::enforce('cust_login_ip', RateLimiter::getClientIp(), 20, 300);
+
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $login = trim($data['login'] ?? '');
         $phone = trim($data['phone'] ?? $data['password'] ?? '');
@@ -165,6 +295,8 @@ class AuthController {
         if (empty($login) || empty($phone)) {
             Response::error('Customer ID/email and mobile number or password are required', 400);
         }
+
+        RateLimiter::enforce('cust_login_acct', RateLimiter::getClientIp() . ':' . strtolower($login), 10, 300);
 
         $db = Database::getConnection();
         // Support login by customer_code, email, phone, OR PPPoE username
@@ -185,20 +317,45 @@ class AuthController {
         $customer = $stmt->fetch();
 
         if (!$customer) {
+            try {
+                require_once __DIR__ . '/../lib/ActivityLogger.php';
+                ActivityLogger::log([
+                    'tenant_id' => 1,
+                    'user_id' => null,
+                    'log_type' => 'security',
+                    'action' => 'failed_login',
+                    'module' => 'auth',
+                    'description' => "Failed customer portal login for unknown identifier '{$login}'",
+                    'metadata' => ['portal' => 'customer', 'login' => $login],
+                ]);
+            } catch (Throwable $ignored) {}
             Response::error('Customer not found with provided credentials', 401);
         }
 
         // Credentials check:
         // 1. Phone number (last 10 digits match)
-        // 2. PPPoE network password match
-        // 3. Fallback demo password 'password123'
+        // 2. PPPoE network password match (constant-time comparison)
         $cleanInputPhone = preg_replace('/[^\d]/', '', $phone);
         $cleanDbPhone = preg_replace('/[^\d]/', '', $customer['phone'] ?? '');
-        $isPhoneMatch = !empty($cleanInputPhone) && !empty($cleanDbPhone) && str_ends_with($cleanDbPhone, substr($cleanInputPhone, -10));
-        $isPppoePasswordMatch = !empty($customer['pppoe_password']) && ($phone === $customer['pppoe_password']);
-        $isDemoMatch = ($phone === 'password123');
+        $isPhoneMatch = strlen($cleanInputPhone) >= 10 && strlen($cleanDbPhone) >= 10 && hash_equals(substr($cleanDbPhone, -10), substr($cleanInputPhone, -10));
+        $pppoePass = (string)($customer['pppoe_password'] ?? '');
+        $isPppoePasswordMatch = $pppoePass !== '' && hash_equals($pppoePass, $phone);
 
-        if (!$isPhoneMatch && !$isPppoePasswordMatch && !$isDemoMatch) {
+        if (!$isPhoneMatch && !$isPppoePasswordMatch) {
+            try {
+                require_once __DIR__ . '/../lib/ActivityLogger.php';
+                ActivityLogger::log([
+                    'tenant_id' => (int)($customer['tenant_id'] ?? 1),
+                    'user_id' => null,
+                    'log_type' => 'security',
+                    'action' => 'failed_login',
+                    'module' => 'auth',
+                    'target_id' => (string)$customer['customer_id'],
+                    'target_type' => 'customer',
+                    'description' => "Failed customer portal login (wrong credential) for {$customer['customer_code']}",
+                    'metadata' => ['portal' => 'customer', 'login' => $login],
+                ]);
+            } catch (Throwable $ignored) {}
             Response::error('Invalid mobile number or password', 401);
         }
 
@@ -211,7 +368,7 @@ class AuthController {
             'user_type' => 'customer',
         ];
 
-        $token = JWT::encode($payload, 86400 * 7);
+        self::issueSessionCookies($payload, true);
 
         // Fetch company / tenant profile for customer branding
         $tenantId = (int)$customer['tenant_id'];
@@ -228,7 +385,7 @@ class AuthController {
         ];
 
         Response::json([
-            'access_token' => $token,
+            'authenticated' => true,
             'user' => [
                 'user_id' => (string)$customer['customer_id'],
                 'email' => $customer['email'] ?? ($customer['customer_code'] . '@customer.local'),
@@ -440,16 +597,17 @@ class AuthController {
 
     public static function changePassword(): void {
         $user = AuthMiddleware::requireAuth();
+        RateLimiter::enforce('auth_change_pw', (string)$user['user_id'], 5, 300);
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $currentPassword = (string)($data['current_password'] ?? '');
         $newPassword = (string)($data['new_password'] ?? '');
 
-        if (empty($newPassword) || strlen($newPassword) < 6) {
-            Response::error('New password must be at least 6 characters long', 400);
+        if (empty($newPassword) || strlen($newPassword) < 8) {
+            Response::error('New password must be at least 8 characters long', 400);
         }
 
         $db = Database::getConnection();
-        $stmt = $db->prepare("SELECT password_hash, password_changed_at FROM users WHERE user_id = :id LIMIT 1");
+        $stmt = $db->prepare("SELECT password_hash FROM users WHERE user_id = :id LIMIT 1");
         $stmt->execute(['id' => $user['user_id']]);
         $row = $stmt->fetch();
 
@@ -457,15 +615,7 @@ class AuthController {
             Response::error('User not found', 404);
         }
 
-        $isCurrentValid = password_verify($currentPassword, $row['password_hash'])
-            || ($currentPassword === $row['password_hash']);
-
-        // Allow 'password123' only on initial unmigrated seed dummy hash
-        if (!$isCurrentValid && empty($row['password_changed_at']) && $row['password_hash'] === '$2y$10$Kq.9QjFqT6B8WJgWl1Nf8u9c2vK3Wl7Zf6kHqN2uM3dYwG6vJ5eO.' && $currentPassword === 'password123') {
-            $isCurrentValid = true;
-        }
-
-        if (!$isCurrentValid) {
+        if (empty($row['password_hash']) || !password_verify($currentPassword, (string)$row['password_hash'])) {
             Response::error('Current password is incorrect', 400);
         }
 
@@ -544,10 +694,10 @@ class AuthController {
             'impersonated_by_email' => $currentUser['email'],
         ];
 
-        $token = JWT::encode($payload, 86400);
+        self::issueSessionCookies($payload, false);
 
         Response::json([
-            'access_token' => $token,
+            'authenticated' => true,
             'redirect_url' => '/dashboard',
         ]);
     }
@@ -576,10 +726,10 @@ class AuthController {
             'user_type' => $userType,
         ];
 
-        $token = JWT::encode($payload, 86400 * 7);
+        self::issueSessionCookies($payload, false);
 
         Response::json([
-            'access_token' => $token,
+            'authenticated' => true,
             'redirect_url' => $userType === 'saas' ? '/saas/dashboard' : '/dashboard',
         ]);
     }

@@ -212,7 +212,7 @@ export default function GlobalCustomersPage() {
               }}
               className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
             >
-              <option value="all">🏢 All ISP Tenants</option>
+              <option value="all">All ISP Tenants</option>
               {tenants.map((t) => (
                 <option key={t.tenantId} value={t.tenantId}>
                   {t.tenantName} [{t.tenantCode}]

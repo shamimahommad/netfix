@@ -40,8 +40,13 @@ class CustomerLogsController {
 
     public static function getLogs(string $customerId): void {
         $user = AuthMiddleware::requireAuth();
+        if (($user['role'] ?? '') === 'customer' || ($user['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden', 403);
+        }
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
+
+        HierarchySecurityService::canViewCustomer((int)$user['user_id'], (int)$customerId, $tenantId ? (int)$tenantId : null);
 
         $tab = strtolower(trim($_GET['tab'] ?? 'mac'));
         if (!in_array($tab, ['mac', 'sms', 'calls', 'tasks', 'sessions', 'recharge', 'all'], true)) {
@@ -55,6 +60,7 @@ class CustomerLogsController {
                 c.status, c.billing_status, c.credit_limit,
                 na.username as pppoe_username, na.mac_address as current_mac,
                 na.current_ip, na.device_vendor, na.is_online, na.uptime_seconds,
+                na.upload_bytes, na.download_bytes, na.last_online_at, na.last_offline_at,
                 ap.profile_name as package_name, ap.price as package_price
             FROM customers c
             LEFT JOIN customer_network_accounts na ON na.customer_id = c.customer_id
@@ -107,6 +113,17 @@ class CustomerLogsController {
 
         $pppoeUsername = trim($customer['pppoe_username'] ?? '');
         $currentMac = trim($customer['current_mac'] ?? '');
+        $liveAccount = [
+            'username' => $pppoeUsername,
+            'is_online' => !empty($customer['is_online']),
+            'uptime_seconds' => (int)($customer['uptime_seconds'] ?? 0),
+            'upload_bytes' => (float)($customer['upload_bytes'] ?? 0),
+            'download_bytes' => (float)($customer['download_bytes'] ?? 0),
+            'current_ip' => $customer['current_ip'] ?? '',
+            'mac_address' => $customer['current_mac'] ?? '',
+            'last_online_at' => $customer['last_online_at'] ?? null,
+            'last_offline_at' => $customer['last_offline_at'] ?? null,
+        ];
 
         // 3. Tab Data Gathering
         switch ($tab) {
@@ -127,7 +144,7 @@ class CustomerLogsController {
                 break;
 
             case 'sessions':
-                $response['data'] = self::getSessionLogs($db, $tenantId, $pppoeUsername, $currentMac);
+                $response['data'] = self::getSessionLogs($db, $tenantId, $pppoeUsername, $currentMac, $liveAccount);
                 break;
 
             case 'recharge':
@@ -140,7 +157,7 @@ class CustomerLogsController {
                     'sms' => self::getSmsLogs($db, $tenantId, $customer['phone'] ?? '', $customer['alternate_phone'] ?? ''),
                     'calls' => self::getCallLogs($db, $tenantId, $customerId),
                     'tasks' => self::getTaskLogs($db, $tenantId, $customerId),
-                    'sessions' => self::getSessionLogs($db, $tenantId, $pppoeUsername, $currentMac),
+                    'sessions' => self::getSessionLogs($db, $tenantId, $pppoeUsername, $currentMac, $liveAccount),
                     'recharge' => self::getRechargeLogs($db, $tenantId, $customerId, $currentBalance),
                 ];
                 break;
@@ -414,7 +431,7 @@ class CustomerLogsController {
         ];
     }
 
-    private static function getSessionLogs(PDO $db, int $tenantId, string $username, string $currentMac): array {
+    private static function getSessionLogs(PDO $db, int $tenantId, string $username, string $currentMac, array $liveAccount = []): array {
         if (empty($username) && empty($currentMac)) {
             return [
                 'stats' => [
@@ -487,27 +504,7 @@ class CustomerLogsController {
                 break;
         }
 
-        $whereClause = "tenant_id = :tid AND (:uname != '' AND username = :uname2 OR :cmac != '' AND caller_mac = :cmac2)";
-        $queryParams = [
-            'tid' => $tenantId,
-            'uname' => $username,
-            'uname2' => $username,
-            'cmac' => $currentMac,
-            'cmac2' => $currentMac,
-        ];
-
-        if ($rangeStart !== null && $rangeEnd !== null) {
-            $whereClause .= " AND logged_at >= :rstart AND logged_at <= :rend";
-            $queryParams['rstart'] = $rangeStart;
-            $queryParams['rend'] = $rangeEnd;
-        } elseif ($rangeStart !== null) {
-            $whereClause .= " AND logged_at >= :rstart";
-            $queryParams['rstart'] = $rangeStart;
-        } elseif ($rangeEnd !== null) {
-            $whereClause .= " AND logged_at <= :rend";
-            $queryParams['rend'] = $rangeEnd;
-        }
-
+        // Fetch full recent connection event history so connects & disconnects pair cleanly even across range boundaries
         $stmt = $db->prepare("
             SELECT 
                 id,
@@ -522,12 +519,21 @@ class CustomerLogsController {
                 logged_at,
                 created_at
             FROM pppoe_connection_logs
-            WHERE {$whereClause}
+            WHERE tenant_id = :tid AND (:uname != '' AND username = :uname2 OR :cmac != '' AND caller_mac = :cmac2)
             ORDER BY id DESC
-            LIMIT 200
+            LIMIT 1000
         ");
-        $stmt->execute($queryParams);
+        $stmt->execute([
+            'tid' => $tenantId,
+            'uname' => $username,
+            'uname2' => $username,
+            'cmac' => $currentMac,
+            'cmac2' => $currentMac,
+        ]);
         $rawRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        require_once __DIR__ . '/../lib/SessionLogHelper.php';
+        $allSessions = SessionLogHelper::reconstructSessions($rawRows, $liveAccount);
 
         // Stats tracking
         $now = time();
@@ -537,36 +543,53 @@ class CustomerLogsController {
         $lastMonthStart = strtotime('first day of last month midnight');
         $lastMonthEnd = strtotime('last day of last month 23:59:59');
 
-        $bytesToday = 0;
-        $bytesWeek = 0;
-        $bytesMonth = 0;
-        $bytesLastMonth = 0;
+        $rangeStartTs = $rangeStart !== null ? strtotime($rangeStart) : null;
+        $rangeEndTs = $rangeEnd !== null ? strtotime($rangeEnd) : null;
 
-        $rangeDown = 0;
-        $rangeUp = 0;
+        $bytesToday = 0.0;
+        $bytesWeek = 0.0;
+        $bytesMonth = 0.0;
+        $bytesLastMonth = 0.0;
+
+        $rangeDown = 0.0;
+        $rangeUp = 0.0;
         $rangeSeconds = 0;
         $distinctIps = [];
         $dailyMap = [];
-
         $rows = [];
-        foreach ($rawRows as $r) {
-            $up = (float)($r['bytes_uploaded'] ?? 0);
-            $down = (float)($r['bytes_downloaded'] ?? 0);
+
+        foreach ($allSessions as $s) {
+            $up = (float)$s['uploadBytes'];
+            $down = (float)$s['downloadBytes'];
             $tot = $up + $down;
-            $durationSec = (int)($r['session_time_seconds'] ?? 0);
-            $ip = trim($r['assigned_ip'] ?? '');
-            $logTimeStr = $r['logged_at'] ?: $r['created_at'];
-            $logTime = strtotime($logTimeStr);
+            $durationSec = (int)$s['durationSeconds'];
+            $ip = trim((string)$s['ip']);
+            $refTs = $s['isOngoing'] ? $now : ((int)($s['endTs'] ?: $s['startTs']));
+
+            // Overall historical KPI buckets (unaffected by range filter)
+            if ($refTs >= $todayStart) $bytesToday += $tot;
+            if ($refTs >= $weekStart) $bytesWeek += $tot;
+            if ($refTs >= $monthStart) $bytesMonth += $tot;
+            if ($refTs >= $lastMonthStart && $refTs <= $lastMonthEnd) $bytesLastMonth += $tot;
+
+            // Apply date range filter against session window
+            $sessionEndCheck = $s['isOngoing'] ? $now : ((int)($s['endTs'] ?: $s['startTs']));
+            if ($rangeStartTs !== null && $sessionEndCheck < $rangeStartTs) {
+                continue;
+            }
+            if ($rangeEndTs !== null && (int)$s['startTs'] > $rangeEndTs) {
+                continue;
+            }
 
             $rangeDown += $down;
             $rangeUp += $up;
             $rangeSeconds += $durationSec;
-            if ($ip && !in_array($ip, $distinctIps, true)) {
+            if ($ip !== '' && !in_array($ip, $distinctIps, true)) {
                 $distinctIps[] = $ip;
             }
 
-            // Daily tracking
-            $dayKey = date('Y-m-d', $logTime);
+            // Daily tracking (attributed to session end date or today if ongoing)
+            $dayKey = date('Y-m-d', $refTs);
             if (!isset($dailyMap[$dayKey])) {
                 $dailyMap[$dayKey] = [
                     'date' => $dayKey,
@@ -584,35 +607,30 @@ class CustomerLogsController {
             $dailyMap[$dayKey]['totalBytes'] += $tot;
             $dailyMap[$dayKey]['uptimeSeconds'] += $durationSec;
             $dailyMap[$dayKey]['sessionCount'] += 1;
-            if ($r['event_type'] === 'disconnected') {
+            if (!$s['isOngoing']) {
                 $dailyMap[$dayKey]['disconnectCount'] += 1;
             }
-            if ($ip && !in_array($ip, $dailyMap[$dayKey]['assignedIps'], true)) {
+            if ($ip !== '' && !in_array($ip, $dailyMap[$dayKey]['assignedIps'], true)) {
                 $dailyMap[$dayKey]['assignedIps'][] = $ip;
             }
 
-            if ($logTime >= $todayStart) $bytesToday += $tot;
-            if ($logTime >= $weekStart) $bytesWeek += $tot;
-            if ($logTime >= $monthStart) $bytesMonth += $tot;
-            if ($logTime >= $lastMonthStart && $logTime <= $lastMonthEnd) $bytesLastMonth += $tot;
-
-            $isOngoing = ($r['event_type'] === 'connected');
-
-            $rows[] = [
-                'id' => (string)$r['id'],
-                'start' => $r['logged_at'] ?: '—',
-                'end' => $isOngoing ? 'Ongoing' : ($r['logged_at'] ?: '—'),
-                'duration' => self::formatDuration($durationSec),
-                'durationSeconds' => $durationSec,
-                'upload' => self::formatBytes($up),
-                'download' => self::formatBytes($down),
-                'total' => self::formatBytes($tot),
-                'totalBytes' => $tot,
-                'ip' => $ip ?: '—',
-                'mac' => $r['caller_mac'] ?: '—',
-                'reason' => $r['disconnect_reason'] ?: ($isOngoing ? 'Active Session' : 'Session Ended'),
-                'isOngoing' => $isOngoing,
-            ];
+            if (count($rows) < 200) {
+                $rows[] = [
+                    'id' => (string)$s['id'],
+                    'start' => $s['start'] ?: '—',
+                    'end' => $s['isOngoing'] ? 'Ongoing' : ($s['end'] ?: '—'),
+                    'duration' => self::formatDuration($durationSec),
+                    'durationSeconds' => $durationSec,
+                    'upload' => self::formatBytes($up),
+                    'download' => self::formatBytes($down),
+                    'total' => self::formatBytes($tot),
+                    'totalBytes' => $tot,
+                    'ip' => $ip !== '' ? $ip : '—',
+                    'mac' => $s['mac'] !== '' ? $s['mac'] : '—',
+                    'reason' => $s['reason'] ?: ($s['isOngoing'] ? 'Active Session' : 'Session Ended'),
+                    'isOngoing' => (bool)$s['isOngoing'],
+                ];
+            }
         }
 
         // Format daily breakdown

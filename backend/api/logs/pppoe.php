@@ -16,8 +16,64 @@ require_once __DIR__ . '/../../controllers/NetworkController.php';
 
 try {
     $user = AuthMiddleware::requireAuth();
+    require_once __DIR__ . '/../../lib/HierarchySecurityService.php';
+    HierarchySecurityService::requirePermission((int)$user['user_id'], 'pppoe_manage');
     $tenantId = AuthMiddleware::getTenantId();
     $db = Database::getConnection();
+
+    $userId = (int)$user['user_id'];
+    $callerRole = strtolower($user['role'] ?? '');
+    $isLevel0 = in_array($callerRole, ['admin', 'isp_admin', 'manager', 'tenant_admin', 'saas_admin', 'super_admin'], true);
+    $hierarchyUser = HierarchySecurityService::getUser($userId);
+    $userHierarchyPath = $hierarchyUser['hierarchy_path'] ?? "/{$userId}/";
+
+    // Build known customer map for this tenant & caller scope (strictly excludes unknown/unregistered router logs)
+    $custSql = "SELECT na.tenant_id as acct_tenant_id, na.username, na.mac_address as registered_mac, na.network_device_id,
+                       c.customer_id, c.customer_code, c.full_name, c.phone, c.status as customer_status,
+                       c.billing_status, c.metadata,
+                       cs.expires_at, cs.status as service_status,
+                       cs.profile_name as package_name, cs.price as package_price,
+                       cs.download_speed_kbps, cs.upload_speed_kbps,
+                       sa.name as area_name, sub.name as sub_area_name,
+                       nd.device_name as allowed_mik,
+                       c.owner_id, c.owner_role,
+                       u.username as owner_username, u.first_name as owner_first_name, u.last_name as owner_last_name
+                FROM customer_network_accounts na
+                JOIN customers c ON c.customer_id = na.customer_id
+                LEFT JOIN network_devices nd ON nd.network_device_id = na.network_device_id
+                LEFT JOIN (
+                    SELECT cs1.customer_id, cs1.expires_at, cs1.status,
+                           ap.profile_name, ap.price, ap.download_speed_kbps, ap.upload_speed_kbps
+                    FROM customer_services cs1
+                    JOIN access_profiles ap ON ap.access_profile_id = cs1.access_profile_id
+                    WHERE cs1.customer_service_id = (
+                        SELECT MAX(cs2.customer_service_id) FROM customer_services cs2 WHERE cs2.customer_id = cs1.customer_id
+                    )
+                ) cs ON cs.customer_id = c.customer_id
+                LEFT JOIN service_areas sa ON sa.service_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) AS UNSIGNED)
+                LEFT JOIN sub_areas sub ON sub.sub_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.sub_area_id')) AS UNSIGNED)
+                LEFT JOIN users u ON u.user_id = c.owner_id
+                WHERE na.username IS NOT NULL AND na.username != ''";
+    $custParams = [];
+    if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+        $custSql .= " AND na.tenant_id = :tid";
+        $custParams['tid'] = $tenantId;
+    }
+    if (!$isLevel0) {
+        $custSql .= " AND (c.owner_id = :user_owner_id OR c.owner_path LIKE :user_path_like)";
+        $custParams['user_owner_id'] = $userId;
+        $custParams['user_path_like'] = rtrim($userHierarchyPath, '/') . '/%';
+    }
+
+    $customerMap = [];
+    $cStmt = $db->prepare($custSql);
+    $cStmt->execute($custParams);
+    while ($crow = $cStmt->fetch(PDO::FETCH_ASSOC)) {
+        $unameKey = strtolower(trim($crow['username']));
+        if ($unameKey !== '') {
+            $customerMap[$unameKey] = $crow;
+        }
+    }
 
     // 1. Check Redis for high-throughput live syslog records (Default storage mode)
     $redis = null;
@@ -38,56 +94,93 @@ try {
         }
     } catch (\Throwable $ignored) {}
 
-    // 1.5 If Redis has no logs, query MySQL pppoe_connection_logs table for instant sub-10ms response
+    // 1.5 If Redis has no logs, query MySQL pppoe_connection_logs table joined strictly to registered software customers
+    $hasDbRows = false;
+    $force = !empty($_GET['force']);
     if (empty($redisLogs)) {
         try {
-            $force = !empty($_GET['force']);
             if (!$force) {
-                $dbLogsStmt = ($tenantId !== null)
-                    ? $db->prepare("SELECT * FROM pppoe_connection_logs WHERE tenant_id = :tid ORDER BY logged_at DESC LIMIT 500")
-                    : $db->query("SELECT * FROM pppoe_connection_logs ORDER BY logged_at DESC LIMIT 500");
-                if ($tenantId !== null) {
-                    $dbLogsStmt->execute(['tid' => $tenantId]);
+                $cntStmt = ($user['role'] !== 'saas_admin' || $tenantId !== null)
+                    ? $db->prepare("SELECT 1 FROM pppoe_connection_logs WHERE tenant_id = :tid LIMIT 1")
+                    : $db->query("SELECT 1 FROM pppoe_connection_logs LIMIT 1");
+                if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+                    $cntStmt->execute(['tid' => $tenantId]);
                 }
-                $dbRows = $dbLogsStmt->fetchAll(PDO::FETCH_ASSOC);
-                if (!empty($dbRows)) {
-                    foreach ($dbRows as $row) {
-                        $redisLogs[] = [
-                            'id' => (string)$row['id'],
-                            'time' => $row['logged_at'],
-                            'logged_at' => $row['logged_at'],
-                            'event_type' => $row['event_type'],
-                            'action' => $row['event_type'] === 'connected' ? 'login' : ($row['event_type'] === 'disconnected' ? 'logout' : 'failed'),
-                            'username' => $row['username'],
-                            'assigned_ip' => $row['assigned_ip'],
-                            'caller_mac' => $row['caller_mac'],
-                            'interface_name' => $row['interface_name'],
-                            'disconnect_reason' => $row['disconnect_reason'],
-                            'raw_message' => $row['raw_message'],
-                            'message' => $row['raw_message'],
-                            'router_id' => (string)$row['router_id'],
-                        ];
+                $hasDbRows = (bool)$cntStmt->fetchColumn();
+
+                if ($hasDbRows) {
+                    $dbSql = "SELECT l.* FROM pppoe_connection_logs l
+                              INNER JOIN customer_network_accounts na
+                                ON na.tenant_id = l.tenant_id AND LOWER(na.username) = LOWER(l.username)
+                              INNER JOIN customers c
+                                ON c.customer_id = na.customer_id
+                              WHERE 1=1";
+                    $dbParams = [];
+                    if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+                        $dbSql .= " AND l.tenant_id = :tid";
+                        $dbParams['tid'] = $tenantId;
+                    }
+                    if (!$isLevel0) {
+                        $dbSql .= " AND (c.owner_id = :user_owner_id OR c.owner_path LIKE :user_path_like)";
+                        $dbParams['user_owner_id'] = $userId;
+                        $dbParams['user_path_like'] = rtrim($userHierarchyPath, '/') . '/%';
+                    }
+                    $dbSql .= " ORDER BY l.logged_at DESC LIMIT 1000";
+
+                    $dbLogsStmt = $db->prepare($dbSql);
+                    $dbLogsStmt->execute($dbParams);
+                    $dbRows = $dbLogsStmt->fetchAll(PDO::FETCH_ASSOC);
+                    if (!empty($dbRows)) {
+                        foreach ($dbRows as $row) {
+                            $redisLogs[] = [
+                                'id' => (string)$row['id'],
+                                'time' => $row['logged_at'],
+                                'logged_at' => $row['logged_at'],
+                                'event_type' => $row['event_type'],
+                                'action' => $row['event_type'] === 'connected' ? 'login' : ($row['event_type'] === 'disconnected' ? 'logout' : 'failed'),
+                                'username' => $row['username'],
+                                'assigned_ip' => $row['assigned_ip'],
+                                'caller_mac' => $row['caller_mac'],
+                                'interface_name' => $row['interface_name'],
+                                'disconnect_reason' => $row['disconnect_reason'],
+                                'raw_message' => $row['raw_message'],
+                                'message' => $row['raw_message'],
+                                'router_id' => (string)$row['router_id'],
+                            ];
+                        }
                     }
                 }
             }
         } catch (\Throwable $ignored) {}
     }
 
-    // 2. If Redis or MySQL has ingested logs, serve them instantly with customer enrichments
-    if (!empty($redisLogs)) {
+    // 2. If Redis or MySQL has ingested logs (even if all raw logs were unknown and filtered out), serve known customer logs cleanly
+    if (!empty($redisLogs) || ($hasDbRows && !$force)) {
         // Fetch routers for switcher dropdown
-        $rStmt = $db->prepare("SELECT network_device_id, device_name, management_ip, status FROM network_devices WHERE tenant_id = :tid AND device_type = 'router' ORDER BY network_device_id ASC");
-        $rStmt->execute(['tid' => $tenantId]);
+        if ($user['role'] !== 'saas_admin' || $tenantId !== null) {
+            $rStmt = $db->prepare("SELECT network_device_id, device_name, management_ip, status FROM network_devices WHERE tenant_id = :tid AND device_type = 'router' ORDER BY network_device_id ASC");
+            $rStmt->execute(['tid' => $tenantId]);
+        } else {
+            $rStmt = $db->query("SELECT network_device_id, device_name, management_ip, status FROM network_devices WHERE device_type = 'router' ORDER BY network_device_id ASC");
+        }
         $routers = $rStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-        // Apply filters (search, event type, router, date range)
+        // Apply filters (known customer ownership, search, username, event type, router, date range)
         $search = strtolower(trim($_GET['search'] ?? ''));
+        $usernameFilter = strtolower(trim($_GET['username'] ?? ''));
         $eventType = strtolower(trim($_GET['event_type'] ?? ''));
         $targetRouterId = $_GET['router_id'] ?? null;
         $dateFrom = trim($_GET['date_from'] ?? '');
         $dateTo = trim($_GET['date_to'] ?? '');
 
-        $filtered = array_filter($redisLogs, function ($log) use ($search, $eventType, $targetRouterId, $dateFrom, $dateTo) {
+        $filtered = array_filter($redisLogs, function ($log) use ($customerMap, $search, $usernameFilter, $eventType, $targetRouterId, $dateFrom, $dateTo) {
+            $uname = strtolower(trim($log['username'] ?? ''));
+            if ($uname === '' || !isset($customerMap[$uname])) {
+                return false;
+            }
+            if ($usernameFilter !== '' && $uname !== $usernameFilter) {
+                return false;
+            }
             if ($targetRouterId && $targetRouterId !== 'all') {
                 if ((string)($log['router_id'] ?? '') !== (string)$targetRouterId) {
                     return false;
@@ -111,7 +204,15 @@ try {
                 }
             }
             if (!empty($search)) {
-                $haystack = strtolower(($log['username'] ?? '') . ' ' . ($log['raw_message'] ?? '') . ' ' . ($log['assigned_ip'] ?? '') . ' ' . ($log['caller_mac'] ?? ''));
+                $cRow = $customerMap[$uname];
+                $haystack = strtolower(
+                    ($log['username'] ?? '') . ' ' .
+                    ($cRow['full_name'] ?? '') . ' ' .
+                    ($cRow['customer_code'] ?? '') . ' ' .
+                    ($log['raw_message'] ?? '') . ' ' .
+                    ($log['assigned_ip'] ?? '') . ' ' .
+                    ($log['caller_mac'] ?? '')
+                );
                 if (!str_contains($haystack, $search)) {
                     return false;
                 }
@@ -119,7 +220,7 @@ try {
             return true;
         });
 
-        // Compute metrics
+        // Compute metrics strictly on matched software customers
         $connected = 0;
         $disconnected = 0;
         $authFailed = 0;
@@ -135,58 +236,13 @@ try {
         $total = count($filtered);
         $paginated = array_slice(array_values($filtered), ($page - 1) * $perPage, $perPage);
 
-        // Enrich paginated logs with customer, package_info, zone, allowed_mik, vlan_mik, remarks, is_expired
-        $usernames = [];
-        foreach ($paginated as $item) {
-            $u = strtolower(trim($item['username'] ?? ''));
-            if ($u !== '') {
-                $usernames[$u] = true;
-            }
-        }
-
-        $customerMap = [];
-        if (!empty($usernames)) {
-            $uList = array_keys($usernames);
-            $inPlaceholders = implode(',', array_fill(0, count($uList), '?'));
-            $custSql = "SELECT na.username, na.mac_address as registered_mac, na.network_device_id,
-                               c.customer_id, c.customer_code, c.full_name, c.phone, c.status as customer_status,
-                               c.billing_status, c.metadata,
-                               cs.expires_at, cs.status as service_status,
-                               cs.profile_name as package_name, cs.price as package_price,
-                               cs.download_speed_kbps, cs.upload_speed_kbps,
-                               sa.name as area_name, sub.name as sub_area_name,
-                               nd.device_name as allowed_mik,
-                               c.owner_id, c.owner_role,
-                               u.username as owner_username, u.first_name as owner_first_name, u.last_name as owner_last_name
-                        FROM customer_network_accounts na 
-                        JOIN customers c ON c.customer_id = na.customer_id 
-                        LEFT JOIN network_devices nd ON nd.network_device_id = na.network_device_id
-                        LEFT JOIN (
-                            SELECT cs1.customer_id, cs1.expires_at, cs1.status, 
-                                   ap.profile_name, ap.price, ap.download_speed_kbps, ap.upload_speed_kbps
-                            FROM customer_services cs1
-                            JOIN access_profiles ap ON ap.access_profile_id = cs1.access_profile_id
-                            WHERE cs1.customer_service_id = (
-                                SELECT MAX(cs2.customer_service_id) FROM customer_services cs2 WHERE cs2.customer_id = cs1.customer_id
-                            )
-                        ) cs ON cs.customer_id = c.customer_id
-                        LEFT JOIN service_areas sa ON sa.service_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.service_area_id')) AS UNSIGNED)
-                        LEFT JOIN sub_areas sub ON sub.sub_area_id = CAST(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.sub_area_id')) AS UNSIGNED)
-                        LEFT JOIN users u ON u.user_id = c.owner_id
-                        WHERE na.tenant_id = ? AND LOWER(na.username) IN ($inPlaceholders)";
-            try {
-                $cStmt = $db->prepare($custSql);
-                $cStmt->execute(array_merge([$tenantId], $uList));
-                while ($crow = $cStmt->fetch(PDO::FETCH_ASSOC)) {
-                    $customerMap[strtolower($crow['username'])] = $crow;
-                }
-            } catch (\Throwable $e) {}
-        }
-
         $enrichedPaginated = [];
         foreach ($paginated as $item) {
             $uname = strtolower(trim($item['username'] ?? ''));
             $cRow = $customerMap[$uname] ?? null;
+            if (!$cRow) {
+                continue;
+            }
             $evType = strtolower($item['event_type'] ?? $item['action'] ?? '');
             
             $isExpired = false;
@@ -292,7 +348,11 @@ try {
     }
 
     // 3. Fallback: Delegate seamlessly to NetworkController::pppoeLogs (fetches live & caches in Redis)
+    if (!defined('NETFIX_PPPOE_LOGS_FALLBACK')) {
+        define('NETFIX_PPPOE_LOGS_FALLBACK', true);
+    }
     NetworkController::pppoeLogs();
 } catch (\Throwable $e) {
-    Response::error('Failed to load PPPoE logs: ' . $e->getMessage(), 500);
+    error_log('PPPoE logs error: ' . $e->getMessage());
+    Response::error('Failed to load PPPoE logs.', 500);
 }

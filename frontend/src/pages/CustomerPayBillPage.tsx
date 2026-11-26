@@ -435,7 +435,7 @@ export default function CustomerPayBillPage() {
       {/* ────────────────── 3. SELECT PAYMENT GATEWAY ────────────────── */}
       <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-4 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
         <h2 className="text-xs font-mono uppercase tracking-wider font-semibold text-slate-500 dark:text-slate-400 mb-3 sm:mb-4">
-          Select Payment Gateway (পেমেন্ট গেটওয়ে নির্বাচন করুন)
+          Select Payment Gateway
         </h2>
 
         {error && (

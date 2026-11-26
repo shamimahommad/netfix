@@ -17,7 +17,9 @@ class ActivityLogsController {
     public static function syncInitialLogsIfEmpty(PDO $db, int $tenantId): void {
         ActivityLogger::ensureTable($db);
 
-        $count = (int)$db->query("SELECT COUNT(*) FROM activity_logs WHERE tenant_id = {$tenantId}")->fetchColumn();
+        $stmtCnt = $db->prepare("SELECT COUNT(*) FROM activity_logs WHERE tenant_id = :tid");
+        $stmtCnt->execute(['tid' => $tenantId]);
+        $count = (int)$stmtCnt->fetchColumn();
         if ($count > 5) {
             return;
         }
@@ -27,9 +29,9 @@ class ActivityLogsController {
             $stmt = $db->prepare("SELECT l.*, u.tenant_id 
                 FROM login_logs l 
                 LEFT JOIN users u ON u.user_id = l.user_id 
-                WHERE (u.tenant_id = :tid OR (u.tenant_id IS NULL AND :tid IN (1, 2))) 
+                WHERE (u.tenant_id = :tid1 OR (u.tenant_id IS NULL AND :tid2 IN (1, 2))) 
                 ORDER BY l.id ASC LIMIT 100");
-            $stmt->execute(['tid' => $tenantId]);
+            $stmt->execute(['tid1' => $tenantId, 'tid2' => $tenantId]);
             $loginRows = $stmt->fetchAll();
 
             $insertStmt = $db->prepare("INSERT INTO activity_logs (
@@ -158,8 +160,13 @@ class ActivityLogsController {
         $uStmt->execute($userParams);
         $users = $uStmt->fetchAll();
 
-        $modules = $db->query("SELECT DISTINCT module FROM activity_logs WHERE tenant_id = {$tenantId} AND module IS NOT NULL AND module != '' ORDER BY module ASC")->fetchAll(PDO::FETCH_COLUMN) ?: [];
-        $actions = $db->query("SELECT DISTINCT action FROM activity_logs WHERE tenant_id = {$tenantId} AND action IS NOT NULL AND action != '' ORDER BY action ASC")->fetchAll(PDO::FETCH_COLUMN) ?: [];
+        $stmtMod = $db->prepare("SELECT DISTINCT module FROM activity_logs WHERE tenant_id = :tid AND module IS NOT NULL AND module != '' ORDER BY module ASC");
+        $stmtMod->execute(['tid' => $tenantId]);
+        $modules = $stmtMod->fetchAll(PDO::FETCH_COLUMN) ?: [];
+
+        $stmtAct = $db->prepare("SELECT DISTINCT action FROM activity_logs WHERE tenant_id = :tid AND action IS NOT NULL AND action != '' ORDER BY action ASC");
+        $stmtAct->execute(['tid' => $tenantId]);
+        $actions = $stmtAct->fetchAll(PDO::FETCH_COLUMN) ?: [];
 
         Response::json([
             'success' => true,
@@ -354,6 +361,9 @@ class ActivityLogsController {
      */
     public static function detail(string $id): void {
         $user = AuthMiddleware::requireAuth();
+        if (($user['role'] ?? '') === 'customer' || ($user['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden', 403);
+        }
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
 
@@ -367,6 +377,17 @@ class ActivityLogsController {
         if (!$row) {
             Response::error('Log entry not found', 404);
             return;
+        }
+
+        $role = strtolower((string)($user['role'] ?? ''));
+        $isLevel0 = (HierarchySecurityService::getHierarchyLevel($role) === 0 || $role === 'saas_admin');
+        if (!$isLevel0) {
+            $callerId = (int)$user['user_id'];
+            $logUserId = (int)($row['user_id'] ?? 0);
+            if ($logUserId <= 0 || ($logUserId !== $callerId && !HierarchySecurityService::canAccessUser($callerId, $logUserId))) {
+                Response::error('Access denied', 403);
+                return;
+            }
         }
 
         $fullName = trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? ''));

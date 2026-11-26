@@ -483,7 +483,7 @@ export function CraftedCustomerDashboard({
               to="/customer/report"
               className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
             >
-              <span>Live Speed Telemetry</span>
+              <span>Live Speed Graph</span>
               <ArrowUpRight className="w-3.5 h-3.5" />
             </Link>
           </div>

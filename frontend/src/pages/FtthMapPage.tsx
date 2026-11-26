@@ -556,7 +556,7 @@ export default function FtthMapPage() {
 
                     try {
                       await ftthService.updateNocLocation(station.id, newLat, newLng);
-                      toast.success(`📍 "${station.name}" moved to: ${newLat}, ${newLng}`);
+                      toast.success(`"${station.name}" moved to: ${newLat}, ${newLng}`);
                       loadData();
                     } catch (err) {
                       toast.error('Failed to update office location on server');
@@ -581,7 +581,7 @@ export default function FtthMapPage() {
                     <div className="py-2.5 space-y-1.5 text-xs text-slate-600">
                       {station.address && (
                         <p className="text-[11px] text-slate-500 truncate" title={station.address}>
-                          📍 {station.address}
+                          {station.address}
                         </p>
                       )}
                       <div className="flex justify-between">
@@ -597,7 +597,7 @@ export default function FtthMapPage() {
                         <strong className="text-emerald-600 font-bold">{station.outgoing_cables_count} Lines</strong>
                       </div>
                       <div className="p-1.5 rounded-lg bg-indigo-50/60 dark:bg-indigo-950/40 text-[10px] text-indigo-700 dark:text-indigo-300 font-medium">
-                        💡 Drag & Drop this marker to position your office precisely on the map!
+                        Drag this marker to adjust the station location on the map.
                       </div>
                     </div>
 
@@ -648,7 +648,7 @@ export default function FtthMapPage() {
 
                     try {
                       await ftthService.updateBoxLocation(box.id, newLat, newLng);
-                      toast.success(`📍 Box "${box.box_code}" moved to: ${newLat}, ${newLng}`);
+                      toast.success(`Box "${box.box_code}" moved to: ${newLat}, ${newLng}`);
                       loadData();
                     } catch (err) {
                       toast.error('Failed to update box location on server');

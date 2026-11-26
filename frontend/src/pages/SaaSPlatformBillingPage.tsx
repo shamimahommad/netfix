@@ -407,10 +407,10 @@ export default function SaaSPlatformBillingPage() {
           <div className="flex items-center gap-2 border-t border-slate-100 dark:border-slate-800/80 pt-3 flex-wrap">
             {[
               { id: 'all', label: 'All Tenants', count: subscriptions.length },
-              { id: 'paid', label: '✅ Paid / Active', count: metrics.paidCount },
-              { id: 'due', label: '⚠️ Has Dues', count: metrics.dueCount },
-              { id: 'trial', label: '🎁 Free Trial', count: metrics.trialCount },
-              { id: 'suspended', label: '⛔ Suspended', count: subscriptions.filter((s) => s.tenantStatus === 'suspended').length },
+              { id: 'paid', label: 'Paid / Active', count: metrics.paidCount },
+              { id: 'due', label: 'Has Dues', count: metrics.dueCount },
+              { id: 'trial', label: 'Free Trial', count: metrics.trialCount },
+              { id: 'suspended', label: 'Suspended', count: subscriptions.filter((s) => s.tenantStatus === 'suspended').length },
             ].map((tab) => (
               <button
                 key={tab.id}

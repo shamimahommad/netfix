@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "axios": "^1.6.5",
+    "exceljs": "^4.4.0",
     "framer-motion": "^12.34.3",
     "jspdf": "^4.2.0",
     "jspdf-autotable": "^5.0.7",
@@ -23,7 +24,6 @@
     "react-router-dom": "^6.21.1",
     "recharts": "^3.7.0",
     "sweetalert2": "^11.26.17",
-    "xlsx": "^0.18.5",
     "zustand": "^5.0.10"
   },
   "devDependencies": {

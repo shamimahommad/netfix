@@ -209,12 +209,9 @@ export const resellerService = {
     return res.data;
   },
 
-  async loginAs(id: string): Promise<{ access_token: string; redirect_url?: string }> {
-    const res = await api.post<{ access_token: string; redirect_url?: string }>(`/resellers/${id}/login-as`);
-    if (res.data?.access_token) {
-      localStorage.setItem('access_token', res.data.access_token);
-      localStorage.removeItem('auth_user');
-    }
+  async loginAs(id: string): Promise<{ authenticated?: boolean; redirect_url?: string }> {
+    const res = await api.post<{ authenticated?: boolean; redirect_url?: string }>(`/resellers/${id}/login-as`);
+    localStorage.removeItem('auth_user');
     return res.data;
   },
 

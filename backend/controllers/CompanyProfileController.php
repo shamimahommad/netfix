@@ -59,6 +59,11 @@ class CompanyProfileController {
      */
     public static function update(): void {
         $user = AuthMiddleware::requireAuth();
+        $callerRole = strtolower(trim($user['role'] ?? ''));
+        if (!in_array($callerRole, ['saas_admin', 'admin', 'isp_admin', 'tenant_admin', 'manager', 'super_admin'], true)) {
+            Response::error('Access denied. Only administrators can update company profile.', 403);
+            return;
+        }
         $db = Database::getConnection();
 
         $tenantId = AuthMiddleware::getTenantId();
@@ -93,35 +98,43 @@ class CompanyProfileController {
             @mkdir($uploadDir, 0755, true);
         }
 
+        $allowedMimes = [
+            'image/png'  => 'png',
+            'image/jpeg' => 'jpg',
+            'image/webp' => 'webp',
+            'image/gif'  => 'gif',
+        ];
+        $maxBytes = 300 * 1024; // 300 KB
+
         // 1. Check for standard multipart file upload ($_FILES['logo'])
         if (isset($_FILES['logo']) && $_FILES['logo']['error'] !== UPLOAD_ERR_NO_FILE) {
             if ($_FILES['logo']['error'] !== UPLOAD_ERR_OK) {
-                Response::error('File upload failed (Code: ' . $_FILES['logo']['error'] . ')', 400);
+                Response::error('File upload failed.', 400);
             }
 
             $fileSize = (int)$_FILES['logo']['size'];
-            $maxBytes = 300 * 1024; // 300 KB = 307,200 bytes
-            if ($fileSize > $maxBytes) {
-                Response::error('Logo size exceeds limit! Maximum allowed is 300 KB. (Uploaded: ' . round($fileSize / 1024, 1) . ' KB)', 400);
+            if ($fileSize <= 0 || $fileSize > $maxBytes) {
+                Response::error('Logo size exceeds limit! Maximum allowed is 300 KB.', 400);
             }
 
             $tmpName = $_FILES['logo']['tmp_name'];
-            $origName = $_FILES['logo']['name'];
-            $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
-            $allowedExts = ['png', 'jpg', 'jpeg', 'webp', 'svg', 'gif'];
-            if (!in_array($ext, $allowedExts, true)) {
-                Response::error('Invalid image type. Allowed: PNG, JPG, JPEG, WEBP, SVG.', 400);
+            if (!is_uploaded_file($tmpName)) {
+                Response::error('Invalid uploaded file.', 400);
             }
 
-            // Image mime check if not SVG
-            if ($ext !== 'svg') {
-                $check = @getimagesize($tmpName);
-                if ($check === false) {
-                    Response::error('Uploaded file is not a valid image.', 400);
-                }
+            $rawBytes = @file_get_contents($tmpName);
+            if ($rawBytes === false || strlen($rawBytes) === 0 || strlen($rawBytes) > $maxBytes) {
+                Response::error('Invalid or oversized image file.', 400);
             }
 
-            $filename = 'logo_tenant_' . $tenantId . '_' . time() . '.' . $ext;
+            $finfo = new finfo(FILEINFO_MIME_TYPE);
+            $detectedMime = $finfo->buffer($rawBytes);
+            if (!isset($allowedMimes[$detectedMime]) || @getimagesizefromstring($rawBytes) === false) {
+                Response::error('Invalid image type. Allowed: PNG, JPG, WEBP, GIF.', 400);
+            }
+
+            $ext = $allowedMimes[$detectedMime];
+            $filename = 'logo_tenant_' . (int)$tenantId . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
             $destPath = $uploadDir . '/' . $filename;
 
             if (!move_uploaded_file($tmpName, $destPath)) {
@@ -139,28 +152,38 @@ class CompanyProfileController {
                 }
             }
         } elseif (!empty($input['logo_data']) && str_starts_with($input['logo_data'], 'data:image/')) {
-            // 2. Base64 Upload support
-            if (preg_match('#^data:image/([a-zA-Z0-9\+\-\.]+);base64,(.+)$#', $input['logo_data'], $matches)) {
-                $ext = strtolower($matches[1]);
-                if ($ext === 'jpeg') $ext = 'jpg';
-                if ($ext === 'svg+xml') $ext = 'svg';
-                $decoded = base64_decode($matches[2]);
-                if ($decoded !== false) {
-                    if (strlen($decoded) > 300 * 1024) {
-                        Response::error('Logo size exceeds limit! Maximum allowed is 300 KB.', 400);
-                    }
-                    $filename = 'logo_tenant_' . $tenantId . '_' . time() . '.' . $ext;
-                    file_put_contents($uploadDir . '/' . $filename, $decoded);
-                    $logoUrl = '/api/v1/uploads/logos/' . $filename;
+            // 2. Base64 Upload support (strictly raster images verified by finfo + getimagesizefromstring)
+            if (preg_match('#^data:image/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=\r\n]+)$#i', $input['logo_data'], $matches)) {
+                $decoded = base64_decode($matches[2], true);
+                if ($decoded === false || strlen($decoded) === 0) {
+                    Response::error('Invalid base64 image payload.', 400);
+                }
+                if (strlen($decoded) > $maxBytes) {
+                    Response::error('Logo size exceeds limit! Maximum allowed is 300 KB.', 400);
+                }
 
-                    if (!empty($currTenant['logo_url'])) {
-                        $oldFile = basename($currTenant['logo_url']);
-                        $oldPath = $uploadDir . '/' . $oldFile;
-                        if (file_exists($oldPath) && is_file($oldPath)) {
-                            @unlink($oldPath);
-                        }
+                $finfo = new finfo(FILEINFO_MIME_TYPE);
+                $detectedMime = $finfo->buffer($decoded);
+                if (!isset($allowedMimes[$detectedMime]) || @getimagesizefromstring($decoded) === false) {
+                    Response::error('Invalid image type. Allowed: PNG, JPG, WEBP, GIF.', 400);
+                }
+
+                $ext = $allowedMimes[$detectedMime];
+                $filename = 'logo_tenant_' . (int)$tenantId . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+                if (file_put_contents($uploadDir . '/' . $filename, $decoded, LOCK_EX) === false) {
+                    Response::error('Failed to store uploaded logo.', 500);
+                }
+                $logoUrl = '/api/v1/uploads/logos/' . $filename;
+
+                if (!empty($currTenant['logo_url'])) {
+                    $oldFile = basename($currTenant['logo_url']);
+                    $oldPath = $uploadDir . '/' . $oldFile;
+                    if (file_exists($oldPath) && is_file($oldPath)) {
+                        @unlink($oldPath);
                     }
                 }
+            } else {
+                Response::error('Invalid image format. Allowed: PNG, JPG, WEBP, GIF.', 400);
             }
         }
 

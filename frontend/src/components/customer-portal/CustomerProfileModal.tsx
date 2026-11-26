@@ -176,7 +176,7 @@ export function CustomerProfileModal({ isOpen, onClose }: CustomerProfileModalPr
             {/* Full Name */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                Full Name (পূর্ণ নাম) <span className="text-rose-500">*</span>
+                Full Name <span className="text-rose-500">*</span>
               </label>
               <div className="relative">
                 <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -194,7 +194,7 @@ export function CustomerProfileModal({ isOpen, onClose }: CustomerProfileModalPr
             {/* Mobile Number */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                Mobile Number (মোবাইল নম্বর) <span className="text-rose-500">*</span>
+                Mobile Number <span className="text-rose-500">*</span>
               </label>
               <div className="relative">
                 <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -212,7 +212,7 @@ export function CustomerProfileModal({ isOpen, onClose }: CustomerProfileModalPr
             {/* Installation Address */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                Installation Address (সংযোগের ঠিকানা)
+                Installation Address
               </label>
               <div className="relative">
                 <MapPin className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
@@ -229,7 +229,7 @@ export function CustomerProfileModal({ isOpen, onClose }: CustomerProfileModalPr
             {/* Email (Optional) */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                Email Address (ইমেইল - ঐচ্ছিক)
+                Email Address (Optional)
               </label>
               <div className="relative">
                 <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -266,7 +266,7 @@ export function CustomerProfileModal({ isOpen, onClose }: CustomerProfileModalPr
                 ) : (
                   <>
                     <ShieldCheck className="w-4 h-4" />
-                    <span>Save Changes (সংরক্ষণ করুন)</span>
+                    <span>Save Changes</span>
                   </>
                 )}
               </button>

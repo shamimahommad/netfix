@@ -15,11 +15,12 @@ class RedisClient {
     private float $timeout;
     private bool $isConnected = false;
 
-    public function __construct(?string $host = null, ?int $port = null, ?string $password = null, float $timeout = 1.5) {
+    public function __construct(?string $host = null, ?int $port = null, ?string $password = null, ?float $timeout = null) {
         $this->host = $host ?? getenv('REDIS_HOST') ?: '127.0.0.1';
         $this->port = $port ?? (int)(getenv('REDIS_PORT') ?: 6379);
         $this->password = $password ?? getenv('REDIS_PASSWORD') ?: null;
-        $this->timeout = $timeout;
+        $isLoopback = in_array($this->host, ['127.0.0.1', 'localhost', '::1'], true);
+        $this->timeout = $timeout ?? ($isLoopback ? 0.15 : 1.0);
         $this->connect();
     }
 
@@ -34,8 +35,23 @@ class RedisClient {
         return $this->isConnected;
     }
 
+    private function getDownMarkerPath(): string {
+        return sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'netfix_redis_down_' . md5($this->host . ':' . $this->port) . '.flag';
+    }
+
     private function connect(): bool {
         $this->isConnected = false;
+
+        $enabled = strtolower((string)(getenv('REDIS_ENABLED') ?: ''));
+        if ($enabled === 'false' || $enabled === '0' || $enabled === 'off') {
+            return false;
+        }
+
+        // Fast-fail during short cooldown when Redis was recently unreachable
+        $marker = $this->getDownMarkerPath();
+        if (@file_exists($marker) && (time() - (int)@filemtime($marker)) < 30) {
+            return false;
+        }
 
         // 1. Try phpredis C extension if loaded
         if (class_exists('Redis', false)) {
@@ -47,6 +63,7 @@ class RedisClient {
                     }
                     $this->nativeRedis = $r;
                     $this->isConnected = true;
+                    @unlink($marker);
                     return true;
                 }
             } catch (\Throwable $e) {
@@ -62,6 +79,7 @@ class RedisClient {
 
         if (!$this->socket) {
             $this->isConnected = false;
+            @file_put_contents($marker, (string)time());
             return false;
         }
 
@@ -72,11 +90,13 @@ class RedisClient {
             if ($authRes === false || strpos((string)$authRes, 'ERR') !== false) {
                 @fclose($this->socket);
                 $this->socket = null;
+                @file_put_contents($marker, (string)time());
                 return false;
             }
         }
 
         $this->isConnected = true;
+        @unlink($marker);
         return true;
     }
 
@@ -274,6 +294,18 @@ class RedisClient {
         }
         $res = $this->sendCommand($args);
         return ($res === 'OK' || $res === true);
+    }
+
+    public function incr(string $key): int|false {
+        if ($this->nativeRedis) {
+            try {
+                return (int)$this->nativeRedis->incr($key);
+            } catch (\Throwable $e) {
+                return false;
+            }
+        }
+        $res = $this->sendCommand(['INCR', $key]);
+        return is_numeric($res) ? (int)$res : false;
     }
 
     public function expire(string $key, int $seconds): bool {

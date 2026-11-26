@@ -918,10 +918,10 @@ export default function MikroTikPage() {
               }}
               className="px-3.5 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all cursor-pointer shadow-sm"
             >
-              <option value="all">🌐 All ISPs (Global List)</option>
+              <option value="all">All ISPs (Global List)</option>
               {tenantsList.map((t) => (
                 <option key={t.tenantId} value={String(t.tenantId)}>
-                  🏢 {t.tenantName} ({t.tenantCode || `ID: ${t.tenantId}`})
+                  {t.tenantName} ({t.tenantCode || `ID: ${t.tenantId}`})
                 </option>
               ))}
             </select>
@@ -1974,7 +1974,7 @@ export default function MikroTikPage() {
                           <span>{device.deviceName}</span>
                           <span className="opacity-0 group-hover:opacity-100 text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-normal transition-opacity">Stats</span>
                         </button>
-                        {device.tenantName && (
+                        {isSaas && device.tenantName && (
                           <div className="mt-1">
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800" title={`ISP: ${device.tenantName} (${device.tenantCode || device.tenantId})`}>
                               <Building2 className="w-2.5 h-2.5 flex-shrink-0" />

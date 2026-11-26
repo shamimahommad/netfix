@@ -432,7 +432,7 @@ export const AutoCutoffEnginePage: React.FC = () => {
             </div>
           ) : (
             <div className="p-6 text-center text-slate-400 dark:text-slate-500 text-xs">
-              No previous runs recorded in database. Click "Run Auto-Cutoff Now" to trigger the first run.
+              No previous runs recorded yet. Click "Run Auto-Cutoff Now" to start the first run.
             </div>
           )}
         </div>

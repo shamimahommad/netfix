@@ -23,6 +23,7 @@ import { smsService } from '@/services/sms.service';
 import ModernCheckbox from '@/components/common/ModernCheckbox';
 import { useAuthStore } from '@/stores/authStore';
 import { usePermissions } from '@/hooks/usePermissions';
+import { escapeHtml } from '@/lib/swal';
 // page header and metrics integrated directly
 import { Users, Receipt, CreditCard, AlertCircle } from 'lucide-react';
 
@@ -924,13 +925,13 @@ export default function BillingPage() {
         .map(
           (row) =>
             '<tr>' +
-            row.map((cell) => `<td style="border:1px solid #ccc;padding:6px;">${String(cell).replace(/</g, '&lt;')}</td>`).join('') +
+            row.map((cell) => `<td style="border:1px solid #ccc;padding:6px;">${escapeHtml(cell)}</td>`).join('') +
             '</tr>'
         )
         .join('');
       const headerRow =
         '<tr>' +
-        headers.map((h) => `<th style="border:1px solid #ccc;padding:6px;background:#f0f0f0;">${h}</th>`).join('') +
+        headers.map((h) => `<th style="border:1px solid #ccc;padding:6px;background:#f0f0f0;">${escapeHtml(h)}</th>`).join('') +
         '</tr>';
       const html = `<!DOCTYPE html><html><head><title>Customer List</title></head><body><table style="border-collapse:collapse;width:100%;">${headerRow}${tableRows}</table></body></html>`;
       const win = window.open('', '_blank');

@@ -172,6 +172,7 @@ try {
     ], 201);
 } catch (Throwable $e) {
     $db->rollBack();
-    Response::error("Failed to create downline: " . $e->getMessage(), 500);
+    error_log("create_downline error: " . $e->getMessage());
+    Response::error("Failed to create downline.", 500);
 }
 

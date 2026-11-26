@@ -22,9 +22,9 @@ try {
     $user = AuthMiddleware::requireAuth();
     $tenantId = AuthMiddleware::getTenantId();
     $role = strtolower(trim($user['role'] ?? ''));
-    if (!in_array($role, ['saas_admin', 'admin', 'manager', 'isp_admin', 'tenant_admin', 'super_admin'], true)) {
+    if ($role !== 'saas_admin') {
         http_response_code(403);
-        echo json_encode(['success' => false, 'message' => 'Access denied: Admin permissions required for router setup']);
+        echo json_encode(['success' => false, 'message' => 'Access denied: SaaS Admin permissions required for syslog setup']);
         exit;
     }
 } catch (\Throwable $e) {
@@ -271,9 +271,10 @@ if ($method === 'POST') {
             $api->disconnect();
         }
         http_response_code(500);
+        error_log("Syslog setup script error: " . $e->getMessage());
         echo json_encode([
             'success' => false,
-            'message' => 'Error executing RouterOS configuration: ' . $e->getMessage(),
+            'message' => 'Error executing RouterOS configuration.',
             'script' => $cliScript,
         ]);
         exit;

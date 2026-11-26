@@ -119,6 +119,9 @@ class TicketController {
 
     public static function create(): void {
         $user = AuthMiddleware::requireAuth();
+        if (($user['role'] ?? '') === 'customer' || ($user['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden', 403);
+        }
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
@@ -133,12 +136,15 @@ class TicketController {
             return;
         }
 
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        HierarchySecurityService::canViewCustomer((int)$user['user_id'], (int)$customerId, $tenantId ? (int)$tenantId : null);
+
         $db = Database::getConnection();
 
         // Auto-routing: If no technician is explicitly chosen, auto-route to the customer's owner/reseller
         if (!$assignedTo && $customerId) {
-            $stmtC = $db->prepare("SELECT owner_id, created_by FROM customers WHERE customer_id = :cid LIMIT 1");
-            $stmtC->execute(['cid' => $customerId]);
+            $stmtC = $db->prepare("SELECT owner_id, created_by FROM customers WHERE customer_id = :cid AND tenant_id = :tid LIMIT 1");
+            $stmtC->execute(['cid' => $customerId, 'tid' => $tenantId]);
             $cRow = $stmtC->fetch(PDO::FETCH_ASSOC);
             if ($cRow) {
                 $assignedTo = !empty($cRow['owner_id']) ? (int)$cRow['owner_id'] : (!empty($cRow['created_by']) ? (int)$cRow['created_by'] : null);
@@ -168,6 +174,9 @@ class TicketController {
 
     public static function updateStatus(string $ticketId): void {
         $user = AuthMiddleware::requireAuth();
+        if (($user['role'] ?? '') === 'customer' || ($user['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden', 403);
+        }
         $tenantId = AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
@@ -180,6 +189,19 @@ class TicketController {
         }
 
         $db = Database::getConnection();
+
+        $stmtCheck = $db->prepare("SELECT ticket_id, customer_id FROM customer_tickets WHERE ticket_id = :ticket_id AND tenant_id = :tid LIMIT 1");
+        $stmtCheck->execute(['ticket_id' => $ticketId, 'tid' => $tenantId]);
+        $tRow = $stmtCheck->fetch(PDO::FETCH_ASSOC);
+        if (!$tRow) {
+            Response::error('Ticket not found', 404);
+            return;
+        }
+
+        require_once __DIR__ . '/../lib/HierarchySecurityService.php';
+        if (!empty($tRow['customer_id'])) {
+            HierarchySecurityService::canViewCustomer((int)$user['user_id'], (int)$tRow['customer_id'], $tenantId ? (int)$tenantId : null);
+        }
 
         $updates = [];
         $params = ['tid' => $tenantId, 'ticket_id' => $ticketId];

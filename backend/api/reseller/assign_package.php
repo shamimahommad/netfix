@@ -56,6 +56,7 @@ try {
 } catch (InvalidArgumentException $ie) {
     Response::error($ie->getMessage(), 400);
 } catch (Throwable $e) {
-    Response::error("Internal server error: " . $e->getMessage(), 500);
+    error_log("assign_package error: " . $e->getMessage());
+    Response::error("Internal server error.", 500);
 }
 

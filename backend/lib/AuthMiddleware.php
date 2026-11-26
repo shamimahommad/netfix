@@ -6,6 +6,7 @@
 require_once __DIR__ . '/JWT.php';
 require_once __DIR__ . '/Response.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/TokenRevocationService.php';
 
 class AuthMiddleware {
     private static ?array $currentUser = null;
@@ -22,6 +23,10 @@ class AuthMiddleware {
 
         $payload = JWT::decode($token);
         if (!$payload || empty($payload['user_id'])) {
+            return null;
+        }
+
+        if (!empty($payload['jti']) && TokenRevocationService::isJtiRevoked((string)$payload['jti'])) {
             return null;
         }
 
@@ -129,6 +134,10 @@ class AuthMiddleware {
         return null;
     }
 
+    public static function getRequestToken(): ?string {
+        return self::getBearerToken();
+    }
+
     private static function getBearerToken(): ?string {
         $headers = function_exists('getallheaders') ? getallheaders() : [];
         if (empty($headers) && function_exists('apache_request_headers')) {
@@ -148,10 +157,6 @@ class AuthMiddleware {
 
         if (!empty($_COOKIE['access_token'])) {
             return $_COOKIE['access_token'];
-        }
-
-        if (!empty($_GET['access_token'])) {
-            return $_GET['access_token'];
         }
 
         return null;

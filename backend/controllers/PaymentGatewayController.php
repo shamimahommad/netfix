@@ -24,40 +24,107 @@ class PaymentGatewayController {
      * Resolves the frontend URL (handles localhost port 4000 vs 4001 in dev and matches browser origin)
      */
     public static function getFrontendBaseUrl(): string {
-        // Priority 1: Check Origin header sent by browser in CORS / Axios requests
-        $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-        if (!empty($origin) && filter_var($origin, FILTER_VALIDATE_URL)) {
-            return rtrim($origin, '/');
+        $allowedOriginsRaw = getenv('CORS_ALLOWED_ORIGINS') ?: ($_ENV['CORS_ALLOWED_ORIGINS'] ?? '');
+        $frontendEnv = getenv('FRONTEND_URL') ?: ($_ENV['FRONTEND_URL'] ?? '');
+
+        $allowed = [];
+        foreach (array_merge([$frontendEnv], explode(',', $allowedOriginsRaw)) as $item) {
+            $item = trim($item);
+            if ($item === '') continue;
+            $parsed = parse_url($item);
+            if (!empty($parsed['scheme']) && !empty($parsed['host'])) {
+                $port = !empty($parsed['port']) ? (':' . $parsed['port']) : '';
+                $allowed[] = strtolower($parsed['scheme']) . '://' . strtolower($parsed['host']) . $port;
+            }
+        }
+        $allowed = array_values(array_unique($allowed));
+
+        $appEnv = strtolower(getenv('APP_ENV') ?: ($_ENV['APP_ENV'] ?? 'production'));
+        if ($appEnv !== 'production' && empty($allowed)) {
+            $allowed = ['http://localhost:4001', 'http://127.0.0.1:4001', 'http://localhost:5173'];
         }
 
-        // Priority 2: Check Referer header
-        $referer = $_SERVER['HTTP_REFERER'] ?? '';
-        if (!empty($referer)) {
+        // Priority 1: Check Origin header ONLY if present in allowlist
+        $origin = rtrim(trim($_SERVER['HTTP_ORIGIN'] ?? ''), '/');
+        if ($origin !== '' && in_array(strtolower($origin), $allowed, true)) {
+            return $origin;
+        }
+
+        // Priority 2: Check Referer header ONLY if its origin matches allowlist
+        $referer = trim($_SERVER['HTTP_REFERER'] ?? '');
+        if ($referer !== '') {
             $parsed = parse_url($referer);
             if (!empty($parsed['scheme']) && !empty($parsed['host'])) {
                 $port = !empty($parsed['port']) ? (':' . $parsed['port']) : '';
-                return $parsed['scheme'] . '://' . $parsed['host'] . $port;
+                $refOrigin = strtolower($parsed['scheme']) . '://' . strtolower($parsed['host']) . $port;
+                if (in_array($refOrigin, $allowed, true)) {
+                    return $parsed['scheme'] . '://' . $parsed['host'] . $port;
+                }
             }
         }
 
-        // Priority 3: Check FRONTEND_URL env configuration
-        if (!empty($_ENV['FRONTEND_URL'])) {
-            return rtrim($_ENV['FRONTEND_URL'], '/');
-        }
-        if (!empty(getenv('FRONTEND_URL'))) {
-            return rtrim(getenv('FRONTEND_URL'), '/');
+        // Priority 3: Configured FRONTEND_URL or first allowlisted origin
+        if (!empty($allowed)) {
+            return $allowed[0];
         }
 
-        // Priority 4: Host header with dev port rewrite
-        $isHttps = (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https')
-            || (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-            || (!empty($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443);
-        $protocol = $isHttps ? 'https://' : 'http://';
-        $host = $_SERVER['HTTP_HOST'] ?? 'localhost:4001';
-        if (strpos($host, ':4000') !== false) {
-            $host = str_replace(':4000', ':4001', $host);
+        return 'http://localhost:4001';
+    }
+
+    /**
+     * Server-to-server payment gateway verification. Fails closed unless verified.
+     */
+    private static function verifyGatewayTransaction(
+        PDO $db,
+        int $tenantId,
+        string $gateway,
+        string $paymentId,
+        float $expectedAmount,
+        array $extraParams = []
+    ): array {
+        $gw = strtolower(trim($gateway));
+        if ($gw === 'sslcommerz') $gw = 'ssl';
+
+        $settings = PaymentGatewayService::getGatewaySettings($db, $tenantId, $gw);
+        if (!$settings) {
+            return ['success' => false, 'message' => 'Payment gateway is not configured for verification'];
         }
-        return $protocol . $host;
+
+        $res = ['success' => false, 'message' => 'Unsupported or unverified payment gateway'];
+
+        if ($gw === 'bkash') {
+            if (empty($settings['app_key'])) {
+                return ['success' => false, 'message' => 'bKash credentials are missing'];
+            }
+            $res = PaymentGatewayService::bkashExecutePayment($settings, $paymentId);
+        } elseif ($gw === 'surjopay') {
+            $res = PaymentGatewayService::surjopayVerifyOrder($settings, $paymentId);
+        } elseif ($gw === 'ssl') {
+            $valId = trim((string)($extraParams['val_id'] ?? ($extraParams['valId'] ?? '')));
+            if ($valId === '') {
+                return ['success' => false, 'message' => 'Missing SSLCommerz validation ID'];
+            }
+            $res = PaymentGatewayService::sslValidatePayment($settings, $valId, $paymentId, $expectedAmount);
+        } else {
+            // Other gateways require explicit HMAC webhook signature verification rather than unauthenticated confirmation
+            return ['success' => false, 'message' => "Server-side verification is required for {$gw}"];
+        }
+
+        if (empty($res['success']) || empty($res['trxID'])) {
+            return ['success' => false, 'message' => $res['message'] ?? 'Payment verification failed'];
+        }
+
+        $verifiedAmount = isset($res['amount']) ? (float)$res['amount'] : 0.0;
+        if ($expectedAmount > 0 && $verifiedAmount > 0 && abs($verifiedAmount - $expectedAmount) > 0.01) {
+            return ['success' => false, 'message' => 'Verified payment amount mismatch'];
+        }
+
+        return [
+            'success' => true,
+            'trxID' => (string)$res['trxID'],
+            'amount' => $verifiedAmount > 0 ? $verifiedAmount : $expectedAmount,
+            'data' => $res['data'] ?? [],
+        ];
     }
 
     /**
@@ -114,7 +181,7 @@ class PaymentGatewayController {
             ]);
         } catch (\Throwable $e) {
             error_log('Test payment flow error: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
-            Response::error('Payment test failed: ' . $e->getMessage(), 400);
+            Response::error('Payment test failed. Please verify gateway settings.', 400);
         }
     }
 
@@ -192,18 +259,29 @@ class PaymentGatewayController {
         $tenantId = (int)AuthMiddleware::getTenantId();
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
-        $amount = (float)($data['amount'] ?? 0);
         $invoiceId = !empty($data['invoice_id']) ? (int)$data['invoice_id'] : null;
         $gateway = strtolower(trim($data['gateway'] ?? 'bkash'));
         if ($gateway === 'sslcommerz') $gateway = 'ssl';
 
-        if ($amount <= 0) {
-            Response::error('Invalid payment amount', 400);
+        $db = Database::getConnection();
+        if ($invoiceId) {
+            // Strictly verify invoice belongs to authenticated customer & tenant and use server amount
+            $stmtInv = $db->prepare("SELECT balance_due, total_amount FROM invoices WHERE invoice_id = :iid AND customer_id = :cid AND tenant_id = :tid AND status != 'paid' LIMIT 1");
+            $stmtInv->execute(['iid' => $invoiceId, 'cid' => $customerId, 'tid' => $tenantId]);
+            $inv = $stmtInv->fetch();
+            if (!$inv) {
+                Response::error('Invoice not found or already settled', 404);
+            }
+            $amount = (float)$inv['balance_due'] > 0 ? (float)$inv['balance_due'] : (float)$inv['total_amount'];
+        } else {
+            $amount = round((float)($data['amount'] ?? 0), 2);
+            if ($amount < 10.0 || $amount > 100000.0) {
+                Response::error('Payment amount must be between 10 and 100000', 400);
+            }
         }
 
         $callbackUrl = self::getFrontendBaseUrl() . "/customer/payment-callback";
 
-        $db = Database::getConnection();
         $res = PaymentGatewayService::initiatePayment(
             $db,
             $tenantId,
@@ -332,11 +410,18 @@ class PaymentGatewayController {
 
         if ($intent) {
             $tenantId = (int)$intent['tenant_id'];
+            if (!empty($intent['customer_id']) && ($customerId <= 0 || (int)$intent['customer_id'] !== $customerId)) {
+                Response::error('Forbidden: payment intent does not belong to your account', 403);
+            }
         } else {
-            // Check if already settled
-            $stmtTrx = $db->prepare("SELECT * FROM transactions WHERE transaction_ref = :ref LIMIT 1");
+            // Check if already settled for this customer
+            $stmtTrx = $db->prepare("SELECT customer_id FROM transactions WHERE transaction_ref = :ref LIMIT 1");
             $stmtTrx->execute(['ref' => $paymentId]);
-            if ($stmtTrx->fetch()) {
+            $trxRow = $stmtTrx->fetch();
+            if ($trxRow) {
+                if (!empty($trxRow['customer_id']) && ($customerId <= 0 || (int)$trxRow['customer_id'] !== $customerId)) {
+                    Response::error('Forbidden', 403);
+                }
                 Response::json(['success' => true, 'message' => 'Payment already verified and settled.']);
                 return;
             }
@@ -351,26 +436,23 @@ class PaymentGatewayController {
         }
         $invId = $intent['invoice_id'] ? (int)$intent['invoice_id'] : null;
 
-        $settings = PaymentGatewayService::getGatewaySettings($db, $tenantId, $gateway);
-        $trxId = 'TRX-' . strtoupper($gateway) . '-' . substr(uniqid(), -6) . date('His');
-        $rawRes = [];
-
-        // Verify with Gateway API if credentials exist
-        if ($settings && !empty($settings['app_key'])) {
-            if ($gateway === 'bkash') {
-                $execRes = PaymentGatewayService::bkashExecutePayment($settings, $paymentId);
-                if ($execRes['success']) {
-                    $trxId = $execRes['trxID'];
-                    $rawRes = $execRes['data'] ?? [];
-                }
-            } else if ($gateway === 'surjopay') {
-                $verRes = PaymentGatewayService::surjopayVerifyOrder($settings, $paymentId);
-                if ($verRes['success']) {
-                    $trxId = $verRes['trxID'];
-                    $rawRes = $verRes['data'] ?? [];
-                }
-            }
+        if ($intent['status'] === 'completed') {
+            Response::json([
+                'success' => true,
+                'message' => 'Payment already verified and settled.',
+                'trxID' => $intent['transaction_ref'] ?: $paymentId,
+            ]);
+            return;
         }
+
+        // Strict server-to-server verification before settlement
+        $verifyRes = self::verifyGatewayTransaction($db, $tenantId, (string)$gateway, $paymentId, $amount, $data);
+        if (empty($verifyRes['success'])) {
+            Response::error($verifyRes['message'] ?? 'Payment verification failed', 402);
+        }
+        $trxId = $verifyRes['trxID'];
+        $amount = (float)$verifyRes['amount'];
+        $rawRes = $verifyRes['data'] ?? [];
 
         // Settle payment and unblock on MikroTik
         $settleRes = PaymentGatewayService::processPaymentSuccess(
@@ -502,7 +584,10 @@ class PaymentGatewayController {
         $amount = (float)$intent['amount'];
         $meta = !empty($intent['metadata']) ? json_decode($intent['metadata'], true) : [];
         if (!is_array($meta)) $meta = [];
-        $targetUserId = !empty($meta['user_id']) ? (int)$meta['user_id'] : $userId;
+        $targetUserId = !empty($meta['user_id']) ? (int)$meta['user_id'] : 0;
+        if ($targetUserId <= 0 || $targetUserId !== $userId) {
+            Response::error('Forbidden: balance top-up intent does not belong to your account', 403);
+        }
 
         // If intent was already settled by callback/webhook, fetch balance and return
         if ($intent['status'] === 'completed' || !empty($meta['settled'])) {
@@ -517,32 +602,38 @@ class PaymentGatewayController {
             return;
         }
 
-        $settings = PaymentGatewayService::getGatewaySettings($db, $tenantId, $gateway);
-        $trxId = 'TRX-' . strtoupper($gateway) . '-' . substr(uniqid(), -6) . date('His');
-        $rawRes = [];
-
-        // Verify with Gateway API if credentials exist
-        if ($settings && !empty($settings['app_key'])) {
-            if ($gateway === 'bkash') {
-                $execRes = PaymentGatewayService::bkashExecutePayment($settings, $paymentId);
-                if ($execRes['success']) {
-                    $trxId = $execRes['trxID'];
-                    $rawRes = $execRes['data'] ?? [];
-                }
-            } else if ($gateway === 'surjopay') {
-                $verRes = PaymentGatewayService::surjopayVerifyOrder($settings, $paymentId);
-                if ($verRes['success']) {
-                    $trxId = $verRes['trxID'];
-                    $rawRes = $verRes['data'] ?? [];
-                }
-            }
+        // Strict server-to-server verification before crediting balance
+        $verifyRes = self::verifyGatewayTransaction($db, $tenantId, (string)$gateway, $paymentId, $amount, $data);
+        if (empty($verifyRes['success'])) {
+            Response::error($verifyRes['message'] ?? 'Payment verification failed', 402);
         }
+        $trxId = $verifyRes['trxID'];
+        $amount = (float)$verifyRes['amount'];
+        $rawRes = $verifyRes['data'] ?? [];
 
         $db->beginTransaction();
         try {
+            // Re-check with row lock to prevent double-credit race condition
+            $stmtLock = $db->prepare("SELECT status, metadata FROM payment_intents WHERE id = :id FOR UPDATE");
+            $stmtLock->execute(['id' => $intent['id']]);
+            $lockedRow = $stmtLock->fetch();
+            $lockedMeta = !empty($lockedRow['metadata']) ? (json_decode($lockedRow['metadata'], true) ?: []) : [];
+            if ($lockedRow && ($lockedRow['status'] === 'completed' || !empty($lockedMeta['settled']))) {
+                $db->rollBack();
+                require_once __DIR__ . '/../lib/WalletLedgerService.php';
+                $curBal = WalletLedgerService::getBalance($targetUserId);
+                Response::json([
+                    'success' => true,
+                    'message' => 'Payment already verified and credited.',
+                    'trxID' => $trxId,
+                    'balance' => $curBal,
+                ]);
+                return;
+            }
+
             // Mark intent completed
-            $db->prepare("UPDATE payment_intents SET status = 'completed', metadata = :meta WHERE id = :id")
-               ->execute(['meta' => json_encode(array_merge($meta, ['settled' => true, 'raw' => $rawRes])), 'id' => $intent['id']]);
+            $db->prepare("UPDATE payment_intents SET status = 'completed', transaction_ref = :ref, metadata = :meta WHERE id = :id")
+               ->execute(['ref' => $trxId, 'meta' => json_encode(array_merge($meta, ['settled' => true, 'raw' => $rawRes])), 'id' => $intent['id']]);
 
             // Insert into transactions
             $db->prepare("INSERT INTO transactions 
@@ -572,7 +663,8 @@ class PaymentGatewayController {
             $db->commit();
         } catch (\Throwable $e) {
             $db->rollBack();
-            Response::error('Failed to credit balance: ' . $e->getMessage(), 500);
+            error_log("Balance topup credit failed: " . $e->getMessage());
+            Response::error('Failed to credit balance. Please try again later.', 500);
         }
 
         // Fetch updated balance directly from wallet service
@@ -595,10 +687,10 @@ class PaymentGatewayController {
         $db = Database::getConnection();
         $params = $_GET;
 
-        $paymentId = $params['paymentID'] ?? ($params['payment_id'] ?? ($params['order_id'] ?? ($params['tran_id'] ?? '')));
-        $status = strtolower($params['status'] ?? ($params['sp_massage'] ?? ''));
+        $paymentId = trim((string)($params['paymentID'] ?? ($params['payment_id'] ?? ($params['order_id'] ?? ($params['tran_id'] ?? '')))));
+        $status = strtolower(trim((string)($params['status'] ?? ($params['sp_massage'] ?? ''))));
 
-        if (empty($paymentId)) {
+        if ($paymentId === '') {
             header("Location: " . self::getFrontendBaseUrl() . "/public/topup");
             exit;
         }
@@ -614,45 +706,45 @@ class PaymentGatewayController {
         ]);
         $intent = $stmtIntent->fetch();
 
-        $tenantId = $intent ? (int)$intent['tenant_id'] : 2;
-        $customerId = $intent && $intent['customer_id'] ? (int)$intent['customer_id'] : null;
-        $amount = $intent ? (float)$intent['amount'] : (float)($params['amount'] ?? 0);
-        $gateway = $intent ? $intent['gateway'] : 'bkash';
+        if (!$intent) {
+            header("Location: " . self::getFrontendBaseUrl() . "/public/topup?result=failed&paymentID=" . urlencode($paymentId));
+            exit;
+        }
 
-        $isSuccess = ($status === 'success' || $status === 'completed' || $status === 'valid' || $status === 'validated');
-        $trxId = 'TRX-' . strtoupper($gateway) . '-' . substr(uniqid(), -6) . date('His');
+        $tenantId = (int)$intent['tenant_id'];
+        $customerId = $intent['customer_id'] ? (int)$intent['customer_id'] : null;
+        $amount = (float)$intent['amount'];
+        $gateway = (string)$intent['gateway'];
+        $intentMeta = json_decode($intent['metadata'] ?? '{}', true) ?: [];
 
-        if ($isSuccess) {
-            $settings = PaymentGatewayService::getGatewaySettings($db, $tenantId, $gateway);
-            if ($settings && $gateway === 'bkash') {
-                $execRes = PaymentGatewayService::bkashExecutePayment($settings, $paymentId);
-                if ($execRes['success']) {
-                    $trxId = $execRes['trxID'];
-                    $amount = $execRes['amount'] ?: $amount;
-                }
-            } else if ($settings && $gateway === 'surjopay') {
-                $verRes = PaymentGatewayService::surjopayVerifyOrder($settings, $paymentId);
-                if ($verRes['success']) {
-                    $trxId = $verRes['trxID'];
-                    $amount = $verRes['amount'] ?: $amount;
-                }
+        $isSuccessStatus = ($status === 'success' || $status === 'completed' || $status === 'valid' || $status === 'validated');
+        $verified = false;
+        $trxId = (string)($intent['transaction_ref'] ?: $paymentId);
+
+        if ($intent['status'] === 'completed' || !empty($intentMeta['settled'])) {
+            $verified = true;
+        } elseif ($isSuccessStatus) {
+            $verifyRes = self::verifyGatewayTransaction($db, $tenantId, $gateway, $paymentId, $amount, $params);
+            if (!empty($verifyRes['success'])) {
+                $verified = true;
+                $trxId = $verifyRes['trxID'];
+                $amount = (float)$verifyRes['amount'];
+
+                PaymentGatewayService::processPaymentSuccess(
+                    $db,
+                    $tenantId,
+                    $gateway,
+                    $paymentId,
+                    $trxId,
+                    $amount,
+                    $customerId,
+                    $intent['invoice_id'] ? (int)$intent['invoice_id'] : null,
+                    $verifyRes['data'] ?? $params
+                );
             }
+        }
 
-            // Settle payment in DB and unblock on MikroTik
-            PaymentGatewayService::processPaymentSuccess(
-                $db,
-                $tenantId,
-                $gateway,
-                $paymentId,
-                $trxId,
-                $amount,
-                $customerId,
-                $intent ? $intent['invoice_id'] : null,
-                $params
-            );
-
-            // If balance topup flow, redirect to balance topup page
-            $intentMeta = json_decode($intent['metadata'] ?? '{}', true) ?: [];
+        if ($verified) {
             if (($intentMeta['flow'] ?? '') === 'balance_topup') {
                 $redirectUrl = self::getFrontendBaseUrl() . "/dashboard/topup-balance?status=success&paymentID=" . urlencode($paymentId) . "&trx_id=" . urlencode($trxId);
                 header("Location: {$redirectUrl}");
@@ -664,7 +756,6 @@ class PaymentGatewayController {
             exit;
         }
 
-        $intentMeta = json_decode($intent['metadata'] ?? '{}', true) ?: [];
         if (($intentMeta['flow'] ?? '') === 'balance_topup') {
             $redirectUrl = self::getFrontendBaseUrl() . "/dashboard/topup-balance?status=cancel&paymentID=" . urlencode($paymentId) . "&gateway=" . urlencode($gateway);
             header("Location: {$redirectUrl}");
@@ -696,10 +787,9 @@ class PaymentGatewayController {
 
         $allData = array_merge($params, $postData);
 
-        $status = strtolower($allData['status'] ?? ($allData['sp_massage'] ?? ''));
-        $paymentId = $allData['paymentID'] ?? ($allData['payment_id'] ?? ($allData['order_id'] ?? ($allData['tran_id'] ?? '')));
-        $valId = $allData['val_id'] ?? null;
-        $trxId = $allData['bank_tran_id'] ?? ($allData['trxID'] ?? ('TRX-' . strtoupper($gw) . '-' . substr(uniqid(), -6)));
+        $status = strtolower(trim((string)($allData['status'] ?? ($allData['sp_massage'] ?? ''))));
+        $paymentId = trim((string)($allData['paymentID'] ?? ($allData['payment_id'] ?? ($allData['order_id'] ?? ($allData['tran_id'] ?? '')))));
+        $valId = trim((string)($allData['val_id'] ?? ''));
 
         // Locate intent
         $stmtIntent = $db->prepare("SELECT * FROM payment_intents 
@@ -712,39 +802,57 @@ class PaymentGatewayController {
         ]);
         $intent = $stmtIntent->fetch();
 
-        $tenantId = $intent ? (int)$intent['tenant_id'] : 2;
-        $customerId = $intent && $intent['customer_id'] ? (int)$intent['customer_id'] : null;
-        $invoiceId = $intent && $intent['invoice_id'] ? (int)$intent['invoice_id'] : null;
-        $amount = $intent ? (float)$intent['amount'] : (float)($allData['amount'] ?? 0);
+        $frontBase = self::getFrontendBaseUrl();
+        if (!$intent) {
+            header("Location: {$frontBase}/public/topup?result=failed&paymentID=" . urlencode($paymentId));
+            exit;
+        }
 
-        $isSuccess = ($status === 'success' || $status === 'completed' || $status === 'valid' || $status === 'validated' || !empty($valId));
+        $tenantId = (int)$intent['tenant_id'];
+        $customerId = $intent['customer_id'] ? (int)$intent['customer_id'] : null;
+        $invoiceId = $intent['invoice_id'] ? (int)$intent['invoice_id'] : null;
+        $amount = (float)$intent['amount'];
+        $intentGw = (string)($intent['gateway'] ?: $gw);
 
-        if ($isSuccess) {
-            PaymentGatewayService::processPaymentSuccess(
-                $db,
-                $tenantId,
-                $gw,
-                $paymentId,
-                $trxId,
-                $amount,
-                $customerId,
-                $invoiceId,
-                $allData
-            );
+        $intentMeta = !empty($intent['metadata']) ? json_decode($intent['metadata'], true) : [];
+        $isBalanceTopup = ($intentMeta['flow'] ?? '') === 'balance_topup';
+        $isSuccessStatus = ($status === 'success' || $status === 'completed' || $status === 'valid' || $status === 'validated' || $valId !== '');
+
+        $isSuccess = false;
+        $trxId = (string)($intent['transaction_ref'] ?: $paymentId);
+
+        if ($intent['status'] === 'completed' || !empty($intentMeta['settled'])) {
+            $isSuccess = true;
+        } elseif ($isSuccessStatus && $paymentId !== '') {
+            $verifyRes = self::verifyGatewayTransaction($db, $tenantId, $intentGw, $paymentId, $amount, $allData);
+            if (!empty($verifyRes['success'])) {
+                $isSuccess = true;
+                $trxId = $verifyRes['trxID'];
+                $amount = (float)$verifyRes['amount'];
+
+                PaymentGatewayService::processPaymentSuccess(
+                    $db,
+                    $tenantId,
+                    $intentGw,
+                    $paymentId,
+                    $trxId,
+                    $amount,
+                    $customerId,
+                    $invoiceId,
+                    $verifyRes['data'] ?? $allData
+                );
+            }
         }
 
         // Redirect appropriately
-        $frontBase = self::getFrontendBaseUrl();
         $redirectStatus = $isSuccess ? 'success' : 'failed';
-        $intentMeta = !empty($intent['metadata']) ? json_decode($intent['metadata'], true) : [];
-        $isBalanceTopup = ($intentMeta['flow'] ?? '') === 'balance_topup';
 
         if ($isBalanceTopup) {
             header("Location: {$frontBase}/dashboard/topup-balance?status={$redirectStatus}&paymentID=" . urlencode($paymentId) . "&trx_id=" . urlencode($trxId));
         } else if ($customerId) {
-            header("Location: {$frontBase}/customer/payment-callback?status={$redirectStatus}&paymentID={$paymentId}&trx_id={$trxId}");
+            header("Location: {$frontBase}/customer/payment-callback?status={$redirectStatus}&paymentID=" . urlencode($paymentId) . "&trx_id=" . urlencode($trxId));
         } else {
-            header("Location: {$frontBase}/saas/tenants/{$tenantId}/payment-callback?status={$redirectStatus}&gateway={$gw}&amount={$amount}&trx_id={$trxId}");
+            header("Location: {$frontBase}/saas/tenants/{$tenantId}/payment-callback?status={$redirectStatus}&gateway=" . urlencode($intentGw) . "&amount=" . urlencode((string)$amount) . "&trx_id=" . urlencode($trxId));
         }
         exit;
     }
@@ -754,10 +862,20 @@ class PaymentGatewayController {
      * POST /payments/simulator/confirm
      */
     public static function simulatorConfirm(): void {
+        $appEnv = strtolower(getenv('APP_ENV') ?: ($_ENV['APP_ENV'] ?? 'production'));
+        if ($appEnv === 'production' || $appEnv === 'live') {
+            Response::error('Payment simulator is disabled in production', 403);
+        }
+
+        $user = AuthMiddleware::requireAuth();
+        $role = strtolower((string)($user['role'] ?? ''));
+        $isSaasAdmin = in_array($role, ['saas_admin', 'super_admin'], true);
+        $callerTenantId = (int)AuthMiddleware::getTenantId();
+
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
-        $tenantId = (int)($data['tenant_id'] ?? 2);
+        $tenantId = $isSaasAdmin && !empty($data['tenant_id']) ? (int)$data['tenant_id'] : $callerTenantId;
         $gateway = strtolower($data['gateway'] ?? 'bkash');
-        $paymentId = $data['paymentID'] ?? ('SIM-' . strtoupper($gateway) . '-' . rand(10000, 99999));
+        $paymentId = $data['paymentID'] ?? ('SIM-' . strtoupper($gateway) . '-' . random_int(10000, 99999));
         $trxId = 'TRX-' . strtoupper($gateway) . '-' . strtoupper(substr(uniqid(), -6)) . date('His');
         $amount = (float)($data['amount'] ?? 10);
         $intentId = !empty($data['intent_id']) ? (int)$data['intent_id'] : null;
@@ -769,6 +887,9 @@ class PaymentGatewayController {
             $stmtI = $db->prepare("SELECT * FROM payment_intents WHERE id = :id LIMIT 1");
             $stmtI->execute(['id' => $intentId]);
             $intent = $stmtI->fetch();
+            if ($intent && !$isSaasAdmin && (int)$intent['tenant_id'] !== $callerTenantId) {
+                Response::error('Forbidden', 403);
+            }
         }
 
         $customerId = $intent && $intent['customer_id'] ? (int)$intent['customer_id'] : (!empty($data['customer_id']) ? (int)$data['customer_id'] : null);

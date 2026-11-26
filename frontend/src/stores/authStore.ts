@@ -28,11 +28,10 @@ interface AuthState {
   logout: () => void;
 }
 
-// Initialize from localStorage if available
+// Initialize cached user profile metadata (auth validity enforced via HttpOnly cookie)
 const getInitialUser = (): LoginResponse['user'] | null => {
   try {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    if (!token) {
+    if (typeof window === 'undefined') {
       return null;
     }
     const stored = localStorage.getItem('auth_user');
@@ -50,24 +49,23 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       user: getInitialUser(),
       balance: null,
-      isAuthenticated: !!getInitialUser() && typeof window !== 'undefined' && !!localStorage.getItem('access_token'),
+      isAuthenticated: !!getInitialUser(),
       impersonated: false,
       impersonatedBy: null,
       isSaas: () => {
         const user = getInitialUser();
-        return typeof window !== 'undefined' && !!localStorage.getItem('access_token') && user?.user_type === 'saas';
+        return user?.user_type === 'saas';
       },
       isIsp: () => {
         const user = getInitialUser();
-        return typeof window !== 'undefined' && !!localStorage.getItem('access_token') && user?.user_type === 'isp';
+        return user?.user_type === 'isp';
       },
       isCustomer: () => {
         const user = getInitialUser();
-        return typeof window !== 'undefined' && !!localStorage.getItem('access_token') && user?.user_type === 'customer';
+        return user?.user_type === 'customer';
       },
       setUser: (user) => {
-        const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-        set({ user, isAuthenticated: !!user && !!token });
+        set({ user, isAuthenticated: !!user });
         if (user) {
           localStorage.setItem('auth_user', JSON.stringify(user));
         } else {
@@ -95,11 +93,6 @@ export const useAuthStore = create<AuthState>()(
         });
       },
       refreshMe: async () => {
-        const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-        if (!token) {
-          set({ user: null, balance: null, isAuthenticated: false, impersonated: false, impersonatedBy: null });
-          return;
-        }
         try {
           const me = await authService.getMe();
           const existing = getInitialUser();
@@ -156,15 +149,6 @@ export const useAuthStore = create<AuthState>()(
     {
       name: 'auth-storage',
       partialize: (state) => ({ user: state.user, isAuthenticated: state.isAuthenticated }),
-      onRehydrateStorage: () => (state) => {
-        if (state) {
-          const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-          if (!token) {
-            state.isAuthenticated = false;
-            state.user = null;
-          }
-        }
-      },
     },
   ),
 );

@@ -709,7 +709,7 @@ export default function ModernCustomerView(props: CustomerViewProps) {
               <div>
                 <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                   <Server className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                  MikroTik Telemetry
+                  MikroTik Connection
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   PPPoE secrets, active MAC binding & session

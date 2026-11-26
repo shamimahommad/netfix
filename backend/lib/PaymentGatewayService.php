@@ -46,8 +46,8 @@ class PaymentGatewayService {
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
         curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 
@@ -899,6 +899,43 @@ class PaymentGatewayService {
 
             // 3. If Customer: Settle invoices, extend service, mark active & unblock on MikroTik
             if ($customerId) {
+                // Find settling invoices to check for credit due reimbursement
+                $invQuery = $invoiceId
+                    ? "SELECT * FROM invoices WHERE invoice_id = :inv AND tenant_id = :tid"
+                    : "SELECT * FROM invoices WHERE customer_id = :cid AND tenant_id = :tid AND status IN ('pending', 'partially_paid', 'overdue')";
+                $invParams = $invoiceId ? ['inv' => $invoiceId, 'tid' => $tenantId] : ['cid' => $customerId, 'tid' => $tenantId];
+                $stmtFindInvs = $db->prepare($invQuery);
+                $stmtFindInvs->execute($invParams);
+                $settlingInvoices = $stmtFindInvs->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+                $isCreditDueSettlement = false;
+                require_once __DIR__ . '/WalletLedgerService.php';
+
+                foreach ($settlingInvoices as $sInv) {
+                    $isCred = in_array($sInv['renew_mode'] ?? '', ['CREDIT_DUE', 'RESELLER_CREDIT_DUE'], true) 
+                        || str_contains($sInv['notes'] ?? '', 'Credit Due');
+                    if ($isCred) {
+                        $isCreditDueSettlement = true;
+                        $chargedUid = !empty($sInv['charged_user_id']) ? (int)$sInv['charged_user_id'] : 0;
+                        if ($chargedUid > 0) {
+                            $reimburseAmount = (float)($sInv['base_price'] ?? $sInv['total_amount'] ?? 0);
+                            if ($reimburseAmount > 0) {
+                                try {
+                                    WalletLedgerService::topup(
+                                        $chargedUid,
+                                        $chargedUid,
+                                        $reimburseAmount,
+                                        "Credit due customer #{$customerId} invoice #{$sInv['invoice_number']} settled online via {$gateway} (Ref: {$transRef})",
+                                        $tenantId
+                                    );
+                                } catch (\Throwable $rErr) {
+                                    error_log("Failed to reimburse reseller #{$chargedUid}: " . $rErr->getMessage());
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Clear pending/overdue invoices
                 if ($invoiceId) {
                     $stmtInv = $db->prepare("UPDATE invoices 
@@ -918,17 +955,24 @@ class PaymentGatewayService {
                 $extensionDays = $flowValidityDays * $flowMonths;
 
                 // Check existing service
-                $stmtCheckCs = $db->prepare("SELECT customer_service_id, access_profile_id FROM customer_services WHERE customer_id = :cid ORDER BY customer_service_id DESC LIMIT 1");
+                $stmtCheckCs = $db->prepare("SELECT customer_service_id, access_profile_id, expires_at FROM customer_services WHERE customer_id = :cid ORDER BY customer_service_id DESC LIMIT 1");
                 $stmtCheckCs->execute(['cid' => $customerId]);
-                $existingCs = $stmtCheckCs->fetch();
+                $existingCs = $stmtCheckCs->fetch(PDO::FETCH_ASSOC);
 
                 if ($existingCs) {
-                    $stmtCs = $db->prepare("UPDATE customer_services 
-                        SET expires_at = DATE_ADD(GREATEST(COALESCE(expires_at, NOW()), NOW()), INTERVAL :days DAY),
-                            status = 'active',
-                            updated_at = NOW()
-                        WHERE customer_id = :cid");
-                    $stmtCs->execute(['days' => $extensionDays, 'cid' => $customerId]);
+                    $isServiceValid = (!empty($existingCs['expires_at']) && strtotime($existingCs['expires_at']) > time());
+                    // If paying an active credit-due service that has valid future expiration, do not double-extend days
+                    if (!$isCreditDueSettlement || !$isServiceValid) {
+                        $stmtCs = $db->prepare("UPDATE customer_services 
+                            SET expires_at = DATE_ADD(GREATEST(COALESCE(expires_at, NOW()), NOW()), INTERVAL :days DAY),
+                                status = 'active',
+                                updated_at = NOW()
+                            WHERE customer_id = :cid");
+                        $stmtCs->execute(['days' => $extensionDays, 'cid' => $customerId]);
+                    } else {
+                        $db->prepare("UPDATE customer_services SET status = 'active', updated_at = NOW() WHERE customer_id = :cid")
+                           ->execute(['cid' => $customerId]);
+                    }
                 } else {
                     $stmtDefPlan = $db->prepare("SELECT access_profile_id FROM access_profiles WHERE tenant_id = :tid ORDER BY price ASC LIMIT 1");
                     $stmtDefPlan->execute(['tid' => $tenantId]);
@@ -1041,9 +1085,10 @@ class PaymentGatewayService {
             ];
         } catch (\Throwable $e) {
             $db->rollBack();
+            error_log("Payment settlement failed: " . $e->getMessage());
             return [
                 'success' => false,
-                'message' => 'Payment settlement failed: ' . $e->getMessage(),
+                'message' => 'Payment settlement failed. Please try again later.',
             ];
         }
     }

@@ -262,13 +262,9 @@ export default function CustomerPortalLayout() {
       .catch(() => {});
   }, [setProfile]);
 
-  const handleLogout = () => {
-    authService.logout();
+  const handleLogout = async () => {
+    await authService.logout();
     logout();
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('auth_user');
-    localStorage.removeItem('auth-storage');
-    sessionStorage.clear();
     window.location.replace('/customer/login');
   };
 

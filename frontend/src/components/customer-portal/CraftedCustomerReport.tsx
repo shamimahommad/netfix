@@ -116,7 +116,7 @@ export function CraftedCustomerReport({
         <div>
           <div className="flex items-center gap-2 text-xs mb-1">
             <span className="font-mono text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Network Telemetry Console
+              Connection Monitor
             </span>
             <span className="text-slate-300 dark:text-slate-700">·</span>
             <button
@@ -130,7 +130,7 @@ export function CraftedCustomerReport({
           </div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2">
             <Activity className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            Bandwidth & Session Telemetry
+            Bandwidth & Session Report
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-mono">
             PPPoE Account: <span className="text-slate-800 dark:text-slate-200 font-semibold">{username}</span>

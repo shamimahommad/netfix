@@ -78,8 +78,10 @@ class SmsController {
         }
 
         if (!empty($_GET['search'])) {
-            $where[] = "(to_number LIKE :s OR message LIKE :s)";
-            $params['s'] = '%' . trim($_GET['search']) . '%';
+            $where[] = "(to_number LIKE :s1 OR message LIKE :s2)";
+            $searchPattern = '%' . trim($_GET['search']) . '%';
+            $params['s1'] = $searchPattern;
+            $params['s2'] = $searchPattern;
         }
 
         $whereSql = implode(' AND ', $where);
@@ -88,8 +90,13 @@ class SmsController {
         $countStmt->execute($params);
         $total = (int)$countStmt->fetchColumn();
 
-        $stmt = $db->prepare("SELECT * FROM sms_log WHERE {$whereSql} ORDER BY sms_log_id DESC LIMIT {$limit} OFFSET {$offset}");
-        $stmt->execute($params);
+        $stmt = $db->prepare("SELECT * FROM sms_log WHERE {$whereSql} ORDER BY sms_log_id DESC LIMIT :lim OFFSET :off");
+        foreach ($params as $k => $v) {
+            $stmt->bindValue(':' . $k, $v);
+        }
+        $stmt->bindValue(':lim', (int)$limit, PDO::PARAM_INT);
+        $stmt->bindValue(':off', (int)$offset, PDO::PARAM_INT);
+        $stmt->execute();
         $rows = $stmt->fetchAll();
 
         $data = array_map(function($r) {

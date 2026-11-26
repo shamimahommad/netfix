@@ -327,12 +327,12 @@ export default function OltDetailPage() {
     const displayId = onu.onuId.includes(':') ? onu.onuId.split(':')[1] : onu.onuId;
     const result = await showDeleteConfirm(
       `ONU #${displayId} (${onu.macAddress})`,
-      'Remove this ONU record from the server database? Use this if the ONU has been broken, replaced, or deleted on the physical OLT.'
+      'Remove this ONU record? Use this if the ONU has been broken, replaced, or deleted on the physical OLT.'
     );
     if (!result.isConfirmed) return;
 
     try {
-      showLoading('Removing ONU...', 'Deleting stale ONU record from server database...');
+      showLoading('Removing ONU...', 'Deleting stale ONU record...');
       const targetId = onu.onuRecordId ? String(onu.onuRecordId) : onu.macAddress;
       await networkService.deleteOltOnu(id!, targetId);
       closeAlert();
@@ -479,14 +479,14 @@ export default function OltDetailPage() {
         id: 'routing',
         title: 'Mapping Router MACs & VLAN Routing Table',
         description: 'Resolving subscriber router MACs, VLAN tags & PPPoE customer profiles...',
-        detail: 'Forwarding database resolution and PPPoE account cross-referencing',
+        detail: 'Forwarding table resolution and PPPoE account matching',
         doneAt: is8 ? 40 : 20,
       },
       {
         id: 'reconcile',
-        title: 'Database Ingestion & Hardware Reconciliation',
-        description: 'Upserting live telemetry, refreshing cache & auto-pruning deleted ONUs...',
-        detail: 'Reconciling decommissioned ONUs & committing local records',
+        title: 'Hardware Sync & Reconciliation',
+        description: 'Updating live optical readings, refreshing cache & removing deleted ONUs...',
+        detail: 'Reconciling decommissioned ONUs & saving updated records',
         doneAt: is8 ? 52 : 26,
       },
     ];
@@ -508,8 +508,8 @@ export default function OltDetailPage() {
     if (syncSeconds < 16) return 'Scanning registered ONUs and link status tables...';
     if (syncSeconds < 28) return 'Measuring optical laser Rx/Tx power levels (DDM dBm)...';
     if (syncSeconds < 40) return 'Querying subscriber router MAC tables and VLAN tags...';
-    if (syncSeconds < 55) return 'Ingesting telemetry & matching PPPoE user accounts...';
-    return 'Finalizing database sync & reconciling decommissioned ONUs...';
+    if (syncSeconds < 55) return 'Updating OLT readings & matching PPPoE user accounts...';
+    return 'Finalizing sync & reconciling decommissioned ONUs...';
   }, [bgStepMessage, syncSeconds, totalPonPorts, device?.managementIp]);
 
   // Filtered ONUs
@@ -1536,7 +1536,7 @@ export default function OltDetailPage() {
                   <button
                     onClick={() => setIsSyncMinimized(true)}
                     className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                    title="Minimize to Background (ব্যাকগ্রাউন্ডে চালান)"
+                    title="Minimize to Background"
                   >
                     <Minimize2 className="w-4 h-4" />
                   </button>
@@ -1666,7 +1666,7 @@ export default function OltDetailPage() {
                 className="px-3.5 py-1.5 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl font-bold text-xs transition flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
               >
                 <Minimize2 className="w-3.5 h-3.5" />
-                <span>Run in Background (ব্যাকগ্রাউন্ডে পাঠান)</span>
+                <span>Run in Background</span>
               </button>
             </div>
 

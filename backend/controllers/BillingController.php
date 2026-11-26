@@ -252,8 +252,12 @@ class BillingController {
             throw new DomainException('Partial (day-based) renewal is not permitted for your account. You can only renew full month(s).');
         }
 
-        $months = max(1, (int)($data['billing_cycle_months'] ?? $data['no_of_month'] ?? 1));
-        $days = isset($data['selected_days']) && (int)$data['selected_days'] > 0 ? (int)$data['selected_days'] : ($months * 30);
+        HierarchySecurityService::canViewCustomer($callerUserId, (int)$customerId, $tenantId ? (int)$tenantId : null);
+
+        $months = max(1, min(60, (int)($data['billing_cycle_months'] ?? $data['no_of_month'] ?? 1)));
+        $days = isset($data['selected_days']) && (int)$data['selected_days'] > 0
+            ? max(1, min(365, (int)$data['selected_days']))
+            : ($months * 30);
 
         // Fetch current customer service to get plan if not explicitly supplied
         $stmtCs = $db->prepare("SELECT * FROM customer_services WHERE customer_id = :cid ORDER BY customer_service_id DESC LIMIT 1");
@@ -262,9 +266,9 @@ class BillingController {
 
         $planId = $data['package_id'] ?? $data['plan_id'] ?? ($currentService['access_profile_id'] ?? 1);
 
-        // Fetch plan price
-        $stmtPkg = $db->prepare("SELECT * FROM access_profiles WHERE access_profile_id = :pid");
-        $stmtPkg->execute(['pid' => $planId]);
+        // Fetch plan price strictly from tenant-scoped package configuration
+        $stmtPkg = $db->prepare("SELECT * FROM access_profiles WHERE access_profile_id = :pid AND (tenant_id = :tid OR :tid2 IS NULL)");
+        $stmtPkg->execute(['pid' => $planId, 'tid' => $tenantId, 'tid2' => $tenantId]);
         $package = $stmtPkg->fetch();
         if (!$package) {
             throw new DomainException("Package #{$planId} not found");
@@ -272,25 +276,32 @@ class BillingController {
 
         $callerLevel = HierarchySecurityService::getHierarchyLevel($user['role'] ?? '');
         if ($callerLevel > 0) {
-            $allowedPkg = (int)$db->query("SELECT (
-                (SELECT COUNT(*) FROM tier_packages WHERE user_id = " . (int)$user['user_id'] . " AND package_id = " . (int)$planId . " AND is_allowed = 1) +
-                (SELECT COUNT(*) FROM reseller_plan_permission WHERE user_id = " . (int)$user['user_id'] . " AND access_profile_id = " . (int)$planId . " AND is_allowed = 1)
-            )")->fetchColumn();
+            $stmtAllowPkg = $db->prepare("SELECT (
+                (SELECT COUNT(*) FROM tier_packages WHERE user_id = :uid1 AND package_id = :pid1 AND is_allowed = 1) +
+                (SELECT COUNT(*) FROM reseller_plan_permission WHERE user_id = :uid2 AND access_profile_id = :pid2 AND is_allowed = 1)
+            )");
+            $stmtAllowPkg->execute([
+                'uid1' => (int)$user['user_id'],
+                'pid1' => (int)$planId,
+                'uid2' => (int)$user['user_id'],
+                'pid2' => (int)$planId,
+            ]);
+            $allowedPkg = (int)$stmtAllowPkg->fetchColumn();
             if ($allowedPkg <= 0) {
                 throw new DomainException('Access Denied: The selected package has not been assigned to your account.');
             }
         }
-        $monthlyPrice = (float)($data['plan_price'] ?? $package['price'] ?? 500);
+        // Strictly derive price from server-side package configuration (never trust client plan_price or bill_amount)
+        $monthlyPrice = (float)($package['price'] ?? 0);
+        if ($monthlyPrice <= 0) {
+            throw new DomainException('Selected package has invalid server price configuration');
+        }
 
         if ($isDayBased) {
-            if (isset($data['bill_amount']) && (float)$data['bill_amount'] > 0) {
-                $totalAmount = (float)$data['bill_amount'];
-            } else {
-                $calc = ($monthlyPrice / 30) * $days;
-                $totalAmount = (float)round($calc);
-                if ($totalAmount < 1) {
-                    $totalAmount = round($calc, 2);
-                }
+            $calc = ($monthlyPrice / 30) * $days;
+            $totalAmount = (float)round($calc);
+            if ($totalAmount < 1) {
+                $totalAmount = max(1.0, round($calc, 2));
             }
             $renewDaysParam = $days;
             $renewMonthsParam = 1;
@@ -314,6 +325,8 @@ class BillingController {
         $newExpireTimestamp = strtotime("+{$days} days", $baseTime);
         $newExpireDate = date('Y-m-d H:i:s', $newExpireTimestamp);
 
+        $isCreditDue = !empty($data['is_credit_due']) || !empty($data['credit_due']);
+
         // Update or insert customer service
         if ($currentService) {
             $stmtUpdate = $db->prepare("UPDATE customer_services SET expires_at = :exp, status = 'active', access_profile_id = :pid, billing_cycle = :bc WHERE customer_service_id = :sid");
@@ -325,11 +338,15 @@ class BillingController {
             ]);
         }
 
-        // Update customer status
-        $stmtCust = $db->prepare("UPDATE customers SET status = 'active', billing_status = 'Paid' WHERE customer_id = :cid");
-        $stmtCust->execute(['cid' => $customerId]);
+        // Update customer status (Mark 'Due' if renewed on credit, otherwise 'Paid')
+        $custBillingStatus = $isCreditDue ? 'Due' : 'Paid';
+        $stmtCust = $db->prepare("UPDATE customers SET status = 'active', billing_status = :bstatus WHERE customer_id = :cid");
+        $stmtCust->execute([
+            'bstatus' => $custBillingStatus,
+            'cid' => $customerId,
+        ]);
 
-        // Create paid invoice with pure numeric globally unique sequence starting from 1000
+        // Create invoice with pure numeric globally unique sequence starting from 1000
         $invNumber = TenantSequenceService::generateNextCode($db, (string)$tenantId, 'invoice', 4);
 
         require_once __DIR__ . '/../lib/WalletLedgerService.php';
@@ -407,33 +424,45 @@ class BillingController {
             $resellerLabel = !empty($targetResellerUser['username']) ? $targetResellerUser['username'] : "Reseller #{$targetChargedUserId}";
             $finalNotes .= " (Renewed as Reseller: {$resellerLabel})";
         }
+        if ($isCreditDue) {
+            $finalNotes .= " [Credit Due]";
+        }
+
+        $invStatus = $isCreditDue ? 'pending' : 'paid';
+        $invPaid = $isCreditDue ? 0.00 : $totalAmount;
+        $invDue = $isCreditDue ? $totalAmount : 0.00;
+        $invRenewMode = $isCreditDue
+            ? ($targetResellerUser ? 'RESELLER_CREDIT_DUE' : 'CREDIT_DUE')
+            : $renewMode;
 
         $stmtInv = $db->prepare("INSERT INTO invoices 
             (tenant_id, customer_id, customer_service_id, invoice_number, invoice_no, invoice_date, due_date, status, subtotal, total_amount, paid_amount, balance_due, base_price, sell_price, collected_by, charged_user_id, renew_mode, notes, previous_expire_date, created_by)
-            VALUES (:tid, :cid, :sid, :inv_num, :inv_no, CURDATE(), CURDATE(), 'paid', :sub, :tot, :paid, 0.00, :base, :sell, :coll, :chg, :renew_mode, :notes, :prev_exp, :uid)");
+            VALUES (:tid, :cid, :sid, :inv_num, :inv_no, CURDATE(), CURDATE(), :status, :sub, :tot, :paid, :due, :base, :sell, :coll, :chg, :renew_mode, :notes, :prev_exp, :uid)");
         $stmtInv->execute([
             'tid' => $tenantId,
             'cid' => $customerId,
             'sid' => $currentService['customer_service_id'] ?? null,
             'inv_num' => $invNumber,
             'inv_no' => $invNumber,
+            'status' => $invStatus,
             'sub' => $totalAmount,
             'tot' => $totalAmount,
-            'paid' => $totalAmount,
+            'paid' => $invPaid,
+            'due' => $invDue,
             'base' => $actorDeduction,
             'sell' => $totalAmount,
             'coll' => $user['user_id'],
             'chg' => $targetChargedUserId,
-            'renew_mode' => $renewMode,
+            'renew_mode' => $invRenewMode,
             'notes' => $finalNotes,
             'prev_exp' => $currentService['expires_at'] ?? null,
             'uid' => $user['user_id'],
         ]);
 
         $trxRef = 'TRX-RENEW-' . strtoupper(bin2hex(random_bytes(4)));
-        $trxDescr = ($renewAsReseller && $targetResellerUser && $callerLevel === 0)
+        $trxDescr = ($isCreditDue ? "[Credit Due] " : "") . (($renewAsReseller && $targetResellerUser && $callerLevel === 0)
             ? "Customer renewal debited from reseller {$targetResellerUser['username']} (#{$targetChargedUserId})"
-            : ($isDayBased ? "Customer subscription renewal ({$days} Days)" : "Customer subscription renewal ({$months} Months)");
+            : ($isDayBased ? "Customer subscription renewal ({$days} Days)" : "Customer subscription renewal ({$months} Months)"));
 
         $stmtTrx = $db->prepare("INSERT INTO transactions 
             (tenant_id, customer_id, transaction_ref, transaction_type, amount, method, initiator_user_id, initiator_role, collector_user_id, description)
@@ -458,8 +487,10 @@ class BillingController {
             'renewNotes' => $renewNotes,
             'targetChargedUserId' => $targetChargedUserId,
             'targetResellerUser' => $targetResellerUser,
-            'renewMode' => $renewMode,
+            'renewMode' => $invRenewMode,
             'renewAsReseller' => $renewAsReseller,
+            'isCreditDue' => $isCreditDue,
+            'balanceDue' => $invDue,
         ];
     }
 
@@ -519,9 +550,12 @@ class BillingController {
                 ]);
             } catch (\Throwable $actErr) {}
 
-            $successMsg = 'Service renewed and secret synchronized';
+            $successMsg = !empty($res['isCreditDue'])
+                ? 'Service renewed on credit (Due recorded). Line activated and synchronized.'
+                : 'Service renewed and secret synchronized';
             if ($res['renewAsReseller'] && $res['targetResellerUser']) {
-                $successMsg = "Service renewed successfully. Debited ৳" . number_format($res['actorDeduction'], 2) . " from Reseller '{$res['targetResellerUser']['username']}' account.";
+                $prefix = !empty($res['isCreditDue']) ? '[Credit Due] ' : '';
+                $successMsg = "{$prefix}Service renewed successfully. Debited ৳" . number_format($res['actorDeduction'], 2) . " from Reseller '{$res['targetResellerUser']['username']}' account.";
             }
             $successMsg .= $mtMsg;
 
@@ -533,6 +567,8 @@ class BillingController {
                     'new_expire_date' => $res['newExpireDate'],
                     'expire_at' => $res['newExpireDate'],
                     'bill_amount' => $res['totalAmount'],
+                    'is_credit_due' => !empty($res['isCreditDue']),
+                    'balance_due' => (float)($res['balanceDue'] ?? 0),
                     'charged_user_id' => $res['targetChargedUserId'],
                     'charged_username' => $res['targetResellerUser']['username'] ?? null,
                     'deducted_amount' => $res['actorDeduction'],
@@ -547,7 +583,8 @@ class BillingController {
             if ($db->inTransaction()) {
                 $db->rollBack();
             }
-            Response::error('Failed to renew service: ' . $e->getMessage(), 500);
+            error_log('BillingController renew error: ' . $e->getMessage());
+            Response::error('Failed to renew service. Please try again later.', 500);
         }
     }
 
@@ -623,10 +660,16 @@ class BillingController {
                 if ($db->inTransaction()) {
                     $db->rollBack();
                 }
+                $safeMsg = ($e instanceof DomainException || $e instanceof InvalidArgumentException)
+                    ? $e->getMessage()
+                    : 'Renewal failed for this customer.';
+                if (!($e instanceof DomainException || $e instanceof InvalidArgumentException)) {
+                    error_log("Bulk renew error for customer #{$cId}: " . $e->getMessage());
+                }
                 $results[] = [
                     'customerId' => $cId,
                     'success' => false,
-                    'message' => $e->getMessage(),
+                    'message' => $safeMsg,
                 ];
                 $failCount++;
             }
@@ -823,6 +866,9 @@ class BillingController {
 
     public static function invoiceDetail(string $id): void {
         $user = AuthMiddleware::requireAuth();
+        if (($user['role'] ?? '') === 'customer' || ($user['user_type'] ?? '') === 'customer') {
+            Response::error('Forbidden', 403);
+        }
         HierarchySecurityService::requirePermission((int)$user['user_id'], 'can_view_invoice');
         $tenantId = AuthMiddleware::getTenantId();
         $db = Database::getConnection();
@@ -837,6 +883,10 @@ class BillingController {
 
         if (!$inv) {
             Response::error('Invoice not found', 404);
+        }
+
+        if (!empty($inv['customer_id'])) {
+            HierarchySecurityService::canViewCustomer((int)$user['user_id'], (int)$inv['customer_id'], $tenantId ? (int)$tenantId : null);
         }
 
         Response::json([
@@ -1244,7 +1294,8 @@ class BillingController {
             $db->commit();
         } catch (\Throwable $e) {
             $db->rollBack();
-            Response::error('Failed to process invoice return: ' . $e->getMessage(), 500);
+            error_log('Invoice return error: ' . $e->getMessage());
+            Response::error('Failed to process invoice return. Please try again later.', 500);
         }
 
         $actorNewBal = WalletLedgerService::getBalance($collectedBy);
@@ -1429,7 +1480,8 @@ class BillingController {
             $db->commit();
         } catch (\Throwable $e) {
             $db->rollBack();
-            Response::error('Failed to transfer invoice: ' . $e->getMessage(), 500);
+            error_log('Transfer invoice failed: ' . $e->getMessage());
+            Response::error('Failed to transfer invoice. Please try again later.', 500);
             return;
         }
 
