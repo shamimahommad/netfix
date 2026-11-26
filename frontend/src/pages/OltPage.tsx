@@ -618,6 +618,7 @@ export default function OltPage() {
     <div className="w-full min-w-0 space-y-6">
       {/* Page Header */}
       <PageHeader
+        className="sticky top-14 sm:top-[72px] z-20"
         icon={
           <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
@@ -627,7 +628,11 @@ export default function OltPage() {
         subtitle="Manage Optical Line Terminals, PON ports, and optical network health"
         badge={
           <span className="inline-flex items-center gap-1.5">
-            <span>{devices.length} Devices</span>
+            <span>
+              {searchQuery.trim()
+                ? `${filteredDevices.length} / ${devices.length} Devices`
+                : `${devices.length} Devices`}
+            </span>
             {isRefreshing && (
               <span className="inline-flex items-center gap-1 text-[11px] font-normal text-blue-500 animate-pulse">
                 • Syncing...
@@ -636,7 +641,30 @@ export default function OltPage() {
           </span>
         }
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-full sm:w-56">
+              <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                <Search className="w-3.5 h-3.5" />
+              </span>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search OLT..."
+                aria-label="Search OLT"
+                className="w-full pl-8 pr-7 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  title="Clear search"
+                  className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
             <button
               onClick={handleSyncAllOlts}
               disabled={isSyncingAll}
@@ -1500,38 +1528,6 @@ export default function OltPage() {
         {error && !isLoading && (
           <div className="bg-gradient-to-r from-red-50 to-rose-50 dark:from-red-900/20 dark:to-rose-900/20 border border-red-200 dark:border-red-800 rounded-2xl p-6 shadow-lg">
             <p className="text-sm font-semibold text-red-800 dark:text-red-300">{error}</p>
-          </div>
-        )}
-
-        {/* Search Bar */}
-        {!isLoading && !error && devices.length > 0 && (
-          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="relative flex-1 max-w-md">
-              <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                <Search className="w-4 h-4" />
-              </span>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search OLT by name, code, IP, or brand..."
-                className="w-full pl-10 pr-9 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  title="Clear search"
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              Showing <span className="font-bold text-slate-800 dark:text-slate-200">{filteredDevices.length}</span> of{' '}
-              <span className="font-bold text-slate-800 dark:text-slate-200">{devices.length}</span> OLTs
-            </div>
           </div>
         )}
 
